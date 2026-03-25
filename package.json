@@ -17,6 +17,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "deploy": "bun scripts/deploy.js"
+    "deploy": "bun scripts/deploy.js",
+    "logs": "bun scripts/getLogs.js",
   },
 }
