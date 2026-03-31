@@ -66,10 +66,15 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
     function createTasklet(sessionId: string, buildMsg: MessageState) {
         const planOutputs: PlanOutput[] = []
-        for (const [_, msg] of messages) {
+        
+        const allMessages = Array.from(messages.values())
+        
+        for (const msg of allMessages) {
+            if (msg.role === "user" && msg.mode === "build") continue
+            
             if (msg.role === "user" && msg.mode !== "build") {
-                const assistantMsg = Array.from(messages.values()).find(
-                    (message) => message.role === "assistant" && message.mode === msg.mode 
+                const assistantMsg = allMessages.find(
+                    (m) => m.role === "assistant" && m.mode === msg.mode
                 )
                 planOutputs.push({
                     id: `plan_${planOutputs.length}`,
@@ -78,7 +83,8 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                 })
             }
         }
-        const buildUserMsg = Array.from(messages.values()).find(
+
+        const buildUserMsg = allMessages.find(
             (message) => message.role === "user" && message.mode === "build" 
         )
 
