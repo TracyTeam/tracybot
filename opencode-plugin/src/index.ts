@@ -121,12 +121,13 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             taskletCounter = 0
         },
 
-        "message.updated": async (props: { info: { id: any; role: string; mode: string; finish: any } }) => {
+        "message.updated": async (props: { info: { id: any; role: string; mode: string; finish: any; parentID?: string } }) => {
             const msgId = props.info?.id 
             if (!msgId) return
 
             const role = props.info?.role || ""
             const mode = props.info?.mode || "plan"
+            const parentId = props.info?.parentID
             
             messages.set(msgId, {
                 id: msgId,
@@ -135,12 +136,11 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                 text: "",
             })
 
-            // If this is an assistant message, update the preceding user message's mode
-            if (role === "assistant") {
-                for (const [id, msg] of messages) {
-                    if (msg.role === "user" && msg.mode === "plan") {
-                        msg.mode = mode
-                    }
+            // If this is an assistant message, update the parent user message's mode
+            if (role === "assistant" && parentId) {
+                const parentMsg = messages.get(parentId)
+                if (parentMsg && parentMsg.role === "user") {
+                    parentMsg.mode = mode
                 }
             }
 
