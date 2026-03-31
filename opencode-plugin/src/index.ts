@@ -1,6 +1,17 @@
 import type { Plugin, PluginInput } from "@opencode-ai/plugin"
+import type { Tasklet, PlanOutput, BuildOutput } from "./tasklet"
+import fs from "fs"
+import path from "path"
 
 const PLUGIN_NAME = "tracybot-plugin"
+const TASKLETS_FILE = path.join(__dirname, "../tasklets.json")
+
+interface MessageState {
+    id: string
+    role: string
+    mode: string
+    text: string
+}
 
 export const MyPlugin: Plugin = async (input: PluginInput) => {
     const { client, $, directory } = input
@@ -36,7 +47,105 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
     const EDIT_TOOLS = ["edit", "write"]
 
+    const messages: Map<string, MessageState> = new Map()
+    let currentSessionId = ""
+    let taskletCounter = 0
+    
+    function saveTasklet(tasklet: Tasklet) {
+        let existing: Tasklet[] = []
+        if (fs.existsSync(TASKLETS_FILE)) {
+            try {
+                existing = JSON.parse(fs.readFileSync(TASKLETS_FILE, "utf-8"))
+            } catch {
+                existing = []
+            }
+        } 
+        existing.push(tasklet)
+        fs.writeFileSync(TASKLETS_FILE, JSON.stringify(existing, null, 2))
+    }
+
+    function createTasklet(sessionId: string, buildMsg: MessageState) {
+        const planOutputs: PlanOutput[] = []
+        for (const [_, msg] of messages) {
+            if (msg.role === "user" && msg.mode !== "build") {
+                const assistantMsg = Array.from(messages.values()).find(
+                    (message) => message.role === "assistant" && message.mode === msg.mode 
+                )
+                planOutputs.push({
+                    id: `plan_${planOutputs.length}`,
+                    prompt: msg.text, 
+                    response: assistantMsg?.text || "",
+                })
+            }
+        }
+        const buildUserMsg = Array.from(messages.values()).find(
+            (message) => message.role === "user" && message.mode === "build" 
+        )
+
+        const buildOutput: BuildOutput = {
+            id: `build_${taskletCounter}`,
+            prompt: buildUserMsg?.text || "",
+            response: buildMsg.text, 
+        }
+
+        const tasklet: Tasklet = {
+            id: `tasklet_${sessionId}_${taskletCounter}`,
+            sessionId,
+            planOutputs,
+            buildOutput
+        }
+
+        saveTasklet(tasklet)
+        taskletCounter++
+
+        client.app.log({
+            body: {
+                service: PLUGIN_NAME,
+                level: "info",
+                message: `Created tasklet: ${tasklet.id}`
+            }
+        })
+    }
+
     return {
+
+        "session.created": async (props: { info: { id: string } }) => {
+            currentSessionId = props.info?.id || ""
+            messages.clear()
+            taskletCounter = 0
+        },
+
+        "message.updated": async (props: { info: { id: any; role: string; mode: string; finish: any } }) => {
+            const msgId = props.info?.id 
+            if (!msgId) return
+
+            const role = props.info?.role || ""
+            const mode = props.info?.mode || "plan"
+            
+            messages.set(msgId, {
+                id: msgId,
+                role,
+                mode,
+                text: "",
+            })
+
+            if (role === "assistant" && props.info?.finish && mode === "build") {
+                const buildMsg = messages.get(msgId)
+                if (buildMsg) {
+                    createTasklet(currentSessionId, buildMsg)
+                }
+            }
+        },
+
+        "message.part.updated": async (props: { info: { type: string }; part: { messageID: any; text: string } }) => {
+            if (props.info?.type !== "text") return
+            const msgId = props.part?.messageID
+            const msg = messages.get(msgId)
+            if (msg && props.part?.text) {
+                msg.text += props.part.text
+            }
+        },
+
         "tool.execute.before": async (input, output) => {
             if (!EDIT_TOOLS.includes(input.tool)) return
 
