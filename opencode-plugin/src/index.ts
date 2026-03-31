@@ -135,6 +135,15 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                 text: "",
             })
 
+            // If this is an assistant message, update the preceding user message's mode
+            if (role === "assistant") {
+                for (const [id, msg] of messages) {
+                    if (msg.role === "user" && msg.mode === "plan") {
+                        msg.mode = mode
+                    }
+                }
+            }
+
             if (role === "assistant" && props.info?.finish && mode === "build") {
                 const buildMsg = messages.get(msgId)
                 if (buildMsg) {
