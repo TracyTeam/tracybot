@@ -1,8 +1,10 @@
-import type { Plugin } from "@opencode-ai/plugin"
+import type { Plugin, PluginInput } from "@opencode-ai/plugin"
 
 const PLUGIN_NAME = "tracybot-plugin"
 
-export const MyPlugin: Plugin = async ({ project, client, $, directory }) => {
+export const MyPlugin: Plugin = async (input: PluginInput) => {
+    const { client, $, directory } = input
+
     await client.app.log({
         body: {
             service: PLUGIN_NAME,
@@ -59,7 +61,7 @@ export const MyPlugin: Plugin = async ({ project, client, $, directory }) => {
                     body: {
                         service: PLUGIN_NAME,
                         level: "info",
-                        message: `Created user checkpoint for ${path}`,
+                        message: `checkpoint: ${path}`,
                     },
                 })
             }
@@ -85,7 +87,6 @@ export const MyPlugin: Plugin = async ({ project, client, $, directory }) => {
             }
         },
 
-
         "tool.execute.after": async (input, output) => {
             if (!EDIT_TOOLS.includes(input.tool)) return
 
@@ -105,7 +106,7 @@ export const MyPlugin: Plugin = async ({ project, client, $, directory }) => {
             try {
                 await $`git add ${path}`.cwd(repoRoot).quiet()
 
-                const commitMsg = "opencode"
+                const commitMsg = `opencode: update ${path}`
                 await $`git -c "user.name=opencode" -c "user.email=opencode@oc.ai" commit -m ${commitMsg}`.cwd(repoRoot).quiet()
 
                 await client.app.log({
@@ -126,80 +127,5 @@ export const MyPlugin: Plugin = async ({ project, client, $, directory }) => {
                 })
             }
         },
-
-        // event: async ({ event }) => {
-        //     if (event.type == "session.diff") {
-        //         const diffs = event.properties?.diff ?? []
-        //
-        //         if (diffs.length === 0) return
-        //
-        //         // TODO: figure out getting the prompt(s) here
-        //         const commitMsg = "opencode"
-        //         try {
-        //             // commit changes staged from pre-edit to create user checkpoint
-        //             await client.app.log({
-        //                 body: {
-        //                     service: PLUGIN_NAME,
-        //                     level: "info",
-        //                     message: "saved user checkpoint",
-        //                     extra: { diff: await $`git show`.cwd(repoRoot).quiet() },
-        //                 },
-        //             })
-        //
-        //             const files = diffs.map((d: any) => d.file) // stage only changed files
-        //             await $`git add ${files}`.cwd(repoRoot).quiet()
-        //             await $`git commit -m ${commitMsg} -c "user.name=opencode" -c "user.email=opencode@oc.ai" `.cwd(repoRoot).quiet()
-        //
-        //             await client.app.log({
-        //                 body: {
-        //                     service: PLUGIN_NAME,
-        //                     level: "info",
-        //                     message: "Committed OC changes",
-        //                     extra: { files },
-        //                 },
-        //             })
-        //         }
-        //         catch (e) {
-        //             await client.app.log({
-        //                 body: {
-        //                     service: PLUGIN_NAME,
-        //                     level: "error",
-        //                     message: `skill issue: ${e}`,
-        //                 },
-        //             })
-        //         }
-        //
-        //         // const diffs = event.properties?.diff ?? []
-        //         //
-        //         // if (diffs.length === 0) return
-        //         //
-        //         // try {
-        //         //     const files = diffs.map((d: any) => d.file) // stage only changed files
-        //         //     await $`git add --quiet ${files}`.cwd(repoRoot)
-        //         //
-        //         //     const message = `opencode: apply ${files.length} change(s)\n\n${files.join("\n")}`
-        //         //     await $`git commit --quiet -c "user.name=opencode" -c "user.email=opencode@oc.ai" -m ${message}`.cwd(repoRoot)
-        //         //
-        //         //     await client.app.log({
-        //         //         body: {
-        //         //             service: PLUGIN_NAME,
-        //         //             level: "info",
-        //         //             message: "Committed changes",
-        //         //             extra: { files },
-        //         //         },
-        //         //     })
-        //         // } catch (err) {
-        //         //     await client.app.log({
-        //         //         body: {
-        //         //             service: PLUGIN_NAME,
-        //         //             level: "error",
-        //         //             message: "Git commit failed",
-        //         //             extra: { error: String(err) },
-        //         //         },
-        //         //     })
-        //         // }
-        //     }
-        // },
     }
-
 }
