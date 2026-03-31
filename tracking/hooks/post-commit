@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Get the last commit
+USER_COMMIT=$(git rev-parse HEAD)
+
+# Retrieve and unset current tracy ID
+TRACY_ID=$(git config --get tracy.current-id || true)
+if [[ -n "$TRACY_ID" ]]; then
+    git notes add -f -m "tracy-id: $TRACY_ID" "$USER_COMMIT"
+    git config --unset tracy.current-id
+fi
