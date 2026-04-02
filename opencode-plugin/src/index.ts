@@ -7,9 +7,10 @@ const PLUGIN_NAME = "tracybot-plugin"
 const TASKLETS_FILE = path.join(__dirname, "../tasklets.json")
 
 interface MessageState {
+    parentId: string
     id: string
     role: string
-    mode: string
+    agent: string
     text: string
 }
 
@@ -53,40 +54,54 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
     
     function saveTasklet(tasklet: Tasklet) {
         let existing: Tasklet[] = []
-        if (fs.existsSync(TASKLETS_FILE)) {
-            try {
-                existing = JSON.parse(fs.readFileSync(TASKLETS_FILE, "utf-8"))
-            } catch {
-                existing = []
-            }
-        } 
-        existing.push(tasklet)
-        fs.writeFileSync(TASKLETS_FILE, JSON.stringify(existing, null, 2))
+        try {
+            if (fs.existsSync(TASKLETS_FILE)) {
+                try {
+                    existing = JSON.parse(fs.readFileSync(TASKLETS_FILE, "utf-8"))
+                } catch {
+                    existing = []
+                }
+            } 
+            existing.push(tasklet)
+            fs.writeFileSync(TASKLETS_FILE, JSON.stringify(existing, null, 2))
+
+        } catch (error) {
+            client.app.log({
+                body: {
+                    service: PLUGIN_NAME,
+                    level: "error",
+                    message: `Failed to save tasklet: ${error}` 
+                }
+            })
+        }
     }
 
     function createTasklet(sessionId: string, buildMsg: MessageState) {
         const planOutputs: PlanOutput[] = []
         
         const allMessages = Array.from(messages.values())
-        
+        const messagesById = new Map(allMessages.map(message => [message.id, message]))
+
         for (const msg of allMessages) {
-            if (msg.role === "user" && msg.mode === "build") continue
-            
-            if (msg.role === "user" && msg.mode !== "build") {
-                const assistantMsg = allMessages.find(
-                    (m) => m.role === "assistant" && m.mode === msg.mode
+            if (msg.role === "user" && msg.agent === "build") continue
+            if (msg.role === "user" && msg.agent !== "build") {
+                const assistantMsg = Array.from(messagesById.values()).find(
+                    (message) => message.role === "assistant" && message.parentId === msg.id
                 )
-                planOutputs.push({
-                    id: `plan_${planOutputs.length}`,
-                    prompt: msg.text, 
-                    response: assistantMsg?.text || "",
-                })
+                if(assistantMsg) {
+                    planOutputs.push({
+                        id: `plan_${planOutputs.length}`,
+                        prompt: msg.text, 
+                        response: assistantMsg?.text || "",
+                    })
+                }
             }
         }
 
         const buildUserMsg = allMessages.find(
-            (message) => message.role === "user" && message.mode === "build" 
+            (message) => message.role === "user" && message.agent === "build" 
         )
+        if (!buildUserMsg) return
 
         const buildOutput: BuildOutput = {
             id: `build_${taskletCounter}`,
@@ -103,7 +118,8 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
         saveTasklet(tasklet)
         taskletCounter++
-
+        messages.clear()
+        
         client.app.log({
             body: {
                 service: PLUGIN_NAME,
@@ -115,49 +131,57 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
     return {
 
-        "session.created": async (props: { info: { id: string } }) => {
-            currentSessionId = props.info?.id || ""
-            messages.clear()
-            taskletCounter = 0
-        },
-
-        "message.updated": async (props: { info: { id: any; role: string; mode: string; finish: any; parentID?: string } }) => {
-            const msgId = props.info?.id 
-            if (!msgId) return
-
-            const role = props.info?.role || ""
-            const mode = props.info?.mode || "plan"
-            const parentId = props.info?.parentID
+        event: async (input: any) => {
+            const { event } = input
+            if (event.type === "session.created") {              
+                currentSessionId = event.properties?.info?.id || ""
+                messages.clear()
+                taskletCounter = 0
+                return
+            }
             
-            messages.set(msgId, {
-                id: msgId,
-                role,
-                mode,
-                text: "",
-            })
+            if (event.type === "message.part.updated" && event.properties?.part) {
+                const part = event.properties.part
+                if (part.type === "text" && part.text) {
+                    const msgId = part.messageID
+                    const msg = messages.get(msgId)
+                    if (msg) {
+                        msg.text = part.text
+                    
+                        if (msg.role === "assistant" && msg.agent === "build") {
+                            createTasklet(currentSessionId, msg)
+                        }
+                    }
 
-            // If this is an assistant message, update the parent user message's mode
-            if (role === "assistant" && parentId) {
-                const parentMsg = messages.get(parentId)
-                if (parentMsg && parentMsg.role === "user") {
-                    parentMsg.mode = mode
                 }
+                
             }
 
-            if (role === "assistant" && props.info?.finish && mode === "build") {
-                const buildMsg = messages.get(msgId)
-                if (buildMsg) {
-                    createTasklet(currentSessionId, buildMsg)
+            if (event.type === "message.updated" && event.properties?.info) {
+                const info = event.properties.info
+                const msgId = info?.id 
+                if (!msgId) return
+    
+                const role = info.role || ""
+                const agent = info.agent || "plan"
+                const parentId = info.parentID
+                
+                const existingMsg = messages.get(msgId)
+                messages.set(msgId, {
+                    parentId,
+                    id: msgId,
+                    role,
+                    agent,
+                    text: existingMsg?.text || "",
+                })
+            
+                if (role === "assistant" && parentId) {
+                    const parentMsg = messages.get(parentId)
+                    if (parentMsg && parentMsg.role === "user") {
+                        parentMsg.agent = agent
+                    }
                 }
-            }
-        },
-
-        "message.part.updated": async (props: { info: { type: string }; part: { messageID: any; text: string } }) => {
-            if (props.info?.type !== "text") return
-            const msgId = props.part?.messageID
-            const msg = messages.get(msgId)
-            if (msg && props.part?.text) {
-                msg.text += props.part.text
+                return
             }
         },
 
