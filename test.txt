@@ -1,0 +1,1 @@
+looks like the agent cant check inside opencode logs :)
