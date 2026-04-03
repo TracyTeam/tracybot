@@ -1,0 +1,32 @@
+Plugin Source Code Analysis
+
+The opencode-plugin is a TracyBot plugin for OpenCode AI. Here's what it does:
+
+Core Functionality
+
+1. Git Checkpointing (Auto-commit on edit)
+   - tool.execute.before hook: Runs git add + git commit -m "user checkpoint" before any file edit
+   - tool.execute.after hook: Commits changes with message "opencode: update <path>" after edits
+   - Uses a git-based checkpoint system to save work-in-progress
+
+2. Tasklet Logging (Training Data Collection)
+   - Tracks all messages during an OpenCode session
+   - On session completion (build agent finishes), creates a "tasklet" record containing:
+     - All plan phase prompts and responses
+     - The build phase prompt and response
+   - Saves tasklets to tasklets.json for later analysis/training
+
+3. Session Tracking
+   - Listens to session.created, message.part.updated, and message.updated events
+   - Associates messages with agents (plan, build, etc.)
+
+Data Structures (tasklet.ts)
+- Tasklet: Captures a completed coding task (id, sessionId, planOutputs, buildOutput)
+- PlanOutput: Individual plan prompt/response pair
+- BuildOutput: Final build phase prompt/response
+
+Purpose
+This appears to be a research/thesis project that collects data about how users interact with AI coding assistants. The tasklet data could be used to:
+- Analyze patterns in AI-assisted coding
+- Train/improve downstream models
+- Research human-AI collaboration patterns
