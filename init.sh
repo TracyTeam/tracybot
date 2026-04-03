@@ -48,8 +48,7 @@ git_dir="$repo_path/.git"
 tracy_dir="$git_dir/tracybot"
 
 # Determine the absolute path to the tracy.sh script
-script_source="$(dirname "$(dirname "${BASH_SOURCE[0]}")")/tracking/tracy.sh"
-script_source="$(cd "$(dirname "$script_source")" && pwd)/$(basename "$script_source")"
+script_source="$(dirname "${BASH_SOURCE[0]}")/tracking/tracy.sh"
 
 mkdir -p "$tracy_dir"
 
@@ -64,7 +63,7 @@ cat > "$tracy_dir/config" << EOF
 TRACY_SCRIPT=$script_source
 EOF
 
-hooks_source="$(dirname "$(dirname "${BASH_SOURCE[0]}")")/tracking/hooks"
+hooks_source="$(dirname "${BASH_SOURCE[0]}")/tracking/hooks"
 hooks_dir="$git_dir/hooks"
 mkdir -p "$hooks_dir"
 
