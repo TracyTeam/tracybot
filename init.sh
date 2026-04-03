@@ -53,6 +53,12 @@ script_source="$(cd "$(dirname "$script_source")" && pwd)/$(basename "$script_so
 
 mkdir -p "$tracy_dir"
 
+git -C "$repo_path" config notes.rewrite.rebase true
+git -C "$repo_path" config notes.rewrite.merge true
+git -C "$repo_path" config notes.rewriteRef refs/notes/commits
+
+echo "Configured git notes rewriting"
+
 # Write the config file
 cat > "$tracy_dir/config" << EOF
 TRACY_SCRIPT=$script_source
@@ -63,7 +69,7 @@ hooks_dir="$git_dir/hooks"
 mkdir -p "$hooks_dir"
 
 # Install hooks
-for hook in pre-commit post-commit; do
+for hook in pre-commit post-commit post-rewrite; do
     source_hook="$hooks_source/$hook"
     dest_hook="$hooks_dir/$hook"
 
