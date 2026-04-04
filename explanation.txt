@@ -1,0 +1,45 @@
+Programming Paradigms
+
+1. Object-Oriented Programming (OOP)
+Organizes code around "objects" (data + functions). Key concepts: classes, inheritance, encapsulation, polymorphism. Popular languages: Java, Python, C++, C#.
+
+2. Functional Programming (FP)
+Treats computation as evaluating functions. Emphasizes immutability, pure functions, and higher-order functions. Languages: Haskell, Erlang, Scala, JavaScript (has FP features).
+
+3. Procedural Programming
+Sequential execution with procedures/functions. Simpler, top-down approach. Languages: C, Pascal, BASIC.
+
+4. Event-Driven Programming
+Flow is determined by events (user actions, sensor outputs). Common in GUIs and web browsers. Languages: JavaScript, C#.
+
+5. Aspect-Oriented Programming (AOP)
+Separates cross-cutting concerns (logging, security) from business logic. Languages: AspectJ, PostSharp.
+
+6. Reactive Programming
+Focuses on data streams and propagating changes. Used in modern UI frameworks. Languages: RxJS, Reactor (Java).
+
+Most modern languages are multi-paradigm (e.g., Python, JavaScript, C++ support multiple styles).
+
+---
+
+Bun
+
+Bun is a modern JavaScript runtime (like Node.js) built from scratch by Oven. It's designed to be fast and all-in-one:
+
+Key features:
+- Fast startup & execution - Built on WebKit's JavaScriptCore, significantly faster than Node.js for many workloads
+- All-in-one tool - Includes bundler, test runner, package manager, and runtime
+- Native TypeScript support - Run .ts files directly without transpiling
+- Web APIs - Implements standard Web APIs (fetch, WebSocket, etc.)
+- Built-in SQLite - bun:sqlite for database access
+- Built-in Redis - Bun.redis for Redis
+- Bun.serve() - Built-in HTTP server with route handling
+
+Use cases:
+- Building APIs and servers
+- Running TypeScript/JavaScript directly
+- Bundling frontend assets
+- Running tests
+- Database operations
+
+It's often 2-10x faster than Node.js for typical tasks, though it's newer and has a smaller ecosystem than Node.js.
