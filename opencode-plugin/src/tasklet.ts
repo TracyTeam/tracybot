@@ -1,8 +1,8 @@
 export interface Tasklet {
     id: string
     sessionId: string
-    planOutputs?: PlanOutput[]
-    buildOutput: BuildOutput | null
+    planOutputs: PlanOutput[]
+    buildOutput: BuildOutput
 
 }
 

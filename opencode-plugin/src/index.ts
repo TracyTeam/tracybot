@@ -1,18 +1,10 @@
 import type { Plugin, PluginInput } from "@opencode-ai/plugin"
+import type { Part } from "@opencode-ai/sdk"
 import type { Tasklet, PlanOutput, BuildOutput } from "./tasklet"
-import fs from "fs"
 import path from "path"
 
 const PLUGIN_NAME = "tracybot-plugin"
 const TASKLETS_FILE = path.join(__dirname, "../tasklets.json")
-
-interface MessageState {
-    parentId: string
-    id: string
-    role: string
-    agent: string
-    text: string
-}
 
 export const MyPlugin: Plugin = async (input: PluginInput) => {
     const { client, $, directory } = input
@@ -48,22 +40,26 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
     const EDIT_TOOLS = ["edit", "write"]
 
-    const messages: Map<string, MessageState> = new Map()
     let currentSessionId = ""
     let taskletCounter = 0
     
-    function saveTasklet(tasklet: Tasklet) {
-        let existing: Tasklet[] = []
+    async function saveTasklet(tasklet: Tasklet) {
         try {
-            if (fs.existsSync(TASKLETS_FILE)) {
+            const file = Bun.file(TASKLETS_FILE)
+            let existing: Tasklet[] = []
+
+            if (await file.exists()) {
                 try {
-                    existing = JSON.parse(fs.readFileSync(TASKLETS_FILE, "utf-8"))
+                    const text = await file.text()
+                    if (text.trim()) {
+                        existing = JSON.parse(text)
+                    }
                 } catch {
                     existing = []
                 }
             } 
             existing.push(tasklet)
-            fs.writeFileSync(TASKLETS_FILE, JSON.stringify(existing, null, 2))
+            await Bun.write(TASKLETS_FILE, JSON.stringify(existing, null, 2))
 
         } catch (error) {
             client.app.log({
@@ -76,37 +72,77 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         }
     }
 
-    function createTasklet(sessionId: string, buildMsg: MessageState) {
-        const planOutputs: PlanOutput[] = []
+    async function createTasklet(sessionId: string) {
+        const response = await client.session.messages({
+            path: { id: sessionId}
+        })
+        const allMessages = response.data ?? []
+
+        const getTextFromParts = (parts: Part[] | undefined): string => {
+            if (!parts) return ""
+            return parts
+                .flatMap(part => part.type === "text" && part.text ? [part.text] : [])
+                .join("\n\n---\n\n")
+
+        } 
         
-        const allMessages = Array.from(messages.values())
-        const messagesById = new Map(allMessages.map(message => [message.id, message]))
-
-        for (const msg of allMessages) {
-            if (msg.role === "user" && msg.agent === "build") continue
-            if (msg.role === "user" && msg.agent !== "build") {
-                const assistantMsg = Array.from(messagesById.values()).find(
-                    (message) => message.role === "assistant" && message.parentId === msg.id
-                )
-                if(assistantMsg) {
-                    planOutputs.push({
-                        id: `plan_${planOutputs.length}`,
-                        prompt: msg.text, 
-                        response: assistantMsg?.text || "",
-                    })
-                }
-            }
-        }
-
-        const buildUserMsg = allMessages.find(
-            (message) => message.role === "user" && message.agent === "build" 
+        const planOutputs: PlanOutput[] = []
+        const planUserMsgs = allMessages.filter(
+            (message) => message.info.role === "user" && message.info.agent !== "build"
         )
-        if (!buildUserMsg) return
+
+        for (const msgWrapper of planUserMsgs) {
+            const userMsg = msgWrapper
+            const userText = getTextFromParts(userMsg.parts)
+            
+
+            const assistantMsgs = allMessages.filter(
+                (message) => message.info.role === "assistant" && 
+                message.info.parentID === userMsg.info.id
+            )
+
+            const combinedResponse = assistantMsgs
+                .map(message => getTextFromParts(message.parts))
+                .filter(text => text)
+                .join("\n\n---\n\n")
+                
+            planOutputs.push({
+                id: `plan_${planOutputs.length}`,
+                prompt: userText, 
+                response: combinedResponse,
+            })
+        }
+        
+        const buildUserMsgs = allMessages.filter(
+            (message) => message.info.role === "user" && message.info.agent === "build" 
+        )
+        
+        const buildUserMsg = buildUserMsgs[0]
+        if (!buildUserMsg) {
+            client.app.log({
+                body: {
+                    service: PLUGIN_NAME,
+                    level: "warn",
+                    message: "Skipping tasklet creation: no build user message found"
+                }
+            })
+            return
+        }
+        
+        const buildAssistantMsgs = allMessages.filter(
+            (message) => message.info.role === "assistant" &&
+                        message.info.parentID === buildUserMsg.info.id
+        )
+
+        const combinedBuildResponse = buildAssistantMsgs
+              .map(message => getTextFromParts(message.parts))
+              .filter(text => text)
+              .join("\n\n---\n\n")
 
         const buildOutput: BuildOutput = {
             id: `build_${taskletCounter}`,
-            prompt: buildUserMsg?.text || "",
-            response: buildMsg.text, 
+            prompt: getTextFromParts(buildUserMsg.parts),
+            response: combinedBuildResponse, 
         }
 
         const tasklet: Tasklet = {
@@ -116,9 +152,8 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             buildOutput
         }
 
-        saveTasklet(tasklet)
+        await saveTasklet(tasklet)
         taskletCounter++
-        messages.clear()
         
         client.app.log({
             body: {
@@ -131,63 +166,20 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
     return {
 
-        event: async (input: any) => {
-            const { event } = input
+        event: async ({ event }) => {
             if (event.type === "session.created") {              
                 currentSessionId = event.properties?.info?.id || ""
-                messages.clear()
                 taskletCounter = 0
                 return
             }
             
-            if (event.type === "message.part.updated" && event.properties?.part) {
-                const part = event.properties.part
-                if (part.type === "text" && part.text) {
-                    const msgId = part.messageID
-                    const msg = messages.get(msgId)
-                    if (msg) {
-                        msg.text = part.text
-                    
-                        if (msg.role === "assistant" && msg.agent === "build") {
-                            createTasklet(currentSessionId, msg)
-                        }
-                    }
-
-                }
-                
-            }
-
-            if (event.type === "message.updated" && event.properties?.info) {
-                const info = event.properties.info
-                const msgId = info?.id 
-                if (!msgId) return
-    
-                const role = info.role || ""
-                const agent = info.agent || "plan"
-                const parentId = info.parentID
-                
-                const existingMsg = messages.get(msgId)
-                messages.set(msgId, {
-                    parentId,
-                    id: msgId,
-                    role,
-                    agent,
-                    text: existingMsg?.text || "",
-                })
-            
-                if (role === "assistant" && parentId) {
-                    const parentMsg = messages.get(parentId)
-                    if (parentMsg && parentMsg.role === "user") {
-                        parentMsg.agent = agent
-                    }
-                }
-                return
+            if (event.type === "session.idle") {
+                await createTasklet(currentSessionId)
             }
         },
-
         "tool.execute.before": async (input, output) => {
             if (!EDIT_TOOLS.includes(input.tool)) return
-
+            
             const path = output.args.filePath as string | undefined
             if (!path) {
                 await client.app.log({
