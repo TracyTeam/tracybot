@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONFIG_FILE="$(dirname "$0")/../tracybot/config"
+
+if [[ -f "$CONFIG_FILE" ]]; then
+    source "$CONFIG_FILE"
+    
+    if [[ -n "${TRACY_SCRIPT:-}" ]]; then
+        if [[ -f "$TRACY_SCRIPT" ]]; then
+            "$TRACY_SCRIPT"
+        else
+            echo "Error: TRACY_SCRIPT is set to '$TRACY_SCRIPT' but the file does not exist." >&2
+            exit 1
+        fi
+    else
+        echo "Error: TRACY_SCRIPT is not set in the config file." >&2
+        exit 1
+    fi
+else
+    echo "Error: Config file '$CONFIG_FILE' not found." >&2
+    exit 1
+fi
