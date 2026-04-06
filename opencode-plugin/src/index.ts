@@ -122,7 +122,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             buildOutput
         }
 
-        await L.info(`Created tasklet: ${tasklet.id}`, { tasklet })
+        await L.debug(`Created tasklet: ${tasklet.id}`, { tasklet })
         return tasklet
     }
 
@@ -148,7 +148,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                 if (sessions.has(idleSessionId)) {
                     const tasklet = await createTasklet(idleSessionId) // TODO: CACHE THIS PLEASE FOR THE LOVE OF GOD
                     if (!tasklet) {
-                        await L.warn("Skipping tasklet creation: no build user message found")
+                        await L.debug("Skipping tasklet creation: no build user message found")
                         return
                     }
 
