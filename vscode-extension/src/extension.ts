@@ -1,8 +1,9 @@
 import * as vscode from 'vscode';
 
-import { getMockData } from './mockData';
+import { getMockHistory } from './history/mockHistory';
 import { getContiguousChunks } from './utils';
 import { getPromptPanelHtml } from './promptPanel';
+import { buildHistory } from './history/buildHistory';
 
 // Transform MockData into the shape extension.ts works with, adding selected state
 type Entry = { lines: number[]; message: string; prompt: string; selected: boolean };
@@ -10,7 +11,7 @@ type FileEntries = Record<string, Entry[]>;
 
 // Build the initial FileEntries structure from the mock data, and setting selected attribute to false for all entries
 function buildFileEntries(): FileEntries {
-  const data = getMockData();
+  const data = getMockHistory();
   const result: FileEntries = {};
 
   for (const file of data.files) {
@@ -23,6 +24,14 @@ function buildFileEntries(): FileEntries {
   }
 
   return result;
+}
+
+// TODO: remove this once integrated with the workspace
+const TEST_HISTORY_BUILDER = true;
+if (TEST_HISTORY_BUILDER) {
+  buildHistory(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath).then(history => {
+    console.log(history);
+  });
 }
 
 // Mutable at runtime so toggleAiBlame can update selected state
