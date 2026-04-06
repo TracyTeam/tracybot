@@ -72,7 +72,32 @@ git -C "$repo_path" config notes.rewriteRef refs/notes/commits
 
 printf "+----------------------------------------------------+\n"
 printf "| [DONE] Git notes rewriting configured              |\n"
-printf "+----------------------------------------------------+\n\n"
+
+if git -C "$repo_path" remote get-url origin >/dev/null 2>&1; then
+    git -C "$repo_path" config --add remote.origin.push "refs/tracy/*:refs/tracy/*"
+    git -C "$repo_path" config --add remote.origin.push "refs/notes/commits:refs/notes/commits"
+
+    printf "| [DONE] Tracy refs configured for push              |\n"
+    printf "+----------------------------------------------------+\n\n"
+
+    printf "${BOLD}Syncing with remote...${NC}\n"
+    set +e
+    git -C "$repo_path" fetch origin >/dev/null 2>&1
+    git -C "$repo_path" fetch origin "+refs/tracy/*:refs/tracy/*" >/dev/null 2>&1
+    git -C "$repo_path" fetch origin "+refs/notes/commits:refs/notes/commits" >/dev/null 2>&1
+    fetch_status=$?
+    set -e
+
+    if [[ $fetch_status -ne 0 ]]; then
+        printf "  [INFO] No remote tracing data found (clean start)\n"
+    else
+        printf "  ${G}[OK] Successfully fetched latest tracing data${NC}\n"
+    fi
+    printf "\n"
+else
+    printf "| [SKIP] No origin remote found; skipping config     |\n"
+    printf "+----------------------------------------------------+\n\n"
+fi
 
 cat > "$tracy_dir/config" << EOF
 TRACY_SCRIPT=$script_source
