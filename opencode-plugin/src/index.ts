@@ -2,13 +2,14 @@ import type { Plugin, PluginInput } from "@opencode-ai/plugin"
 import type { Part } from "@opencode-ai/sdk"
 import type { Tasklet, PlanOutput, BuildOutput } from "./Tasklet"
 import path from "path"
+import { Logger } from "./Logger"
 
-const PLUGIN_NAME = "tracybot-plugin"
 const TASKLETS_FILE = path.join(__dirname, "../tasklets.json")
+const EDIT_TOOLS = new Set(["edit", "write", "patch", "multiedit", "apply_patch", "applypatch"])
 
 export const MyPlugin: Plugin = async (input: PluginInput) => {
     const { client, $, directory } = input
-
+    const L = new Logger(client)
 
     async function getRepoRoot(): Promise<string | null> {
         try {
@@ -21,13 +22,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
     const repoRoot = await getRepoRoot()
     if (!repoRoot) {
-        await client.app.log({
-            body: {
-                service: PLUGIN_NAME,
-                level: "error",
-                message: "Not a git repo",
-            },
-        })
+        await L.error("Not a git repo")
         return {} // No-op
     }
 
@@ -58,58 +53,14 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
     const isInstalled = tracyPath ? await Bun.file(tracyPath).exists() : false
 
     if (!isInstalled || !tracyPath) {
-        await client.app.log({
-            body: {
-                service: PLUGIN_NAME,
-                level: "error",
-                message: "tracy.sh not found",
-            },
-        })
+        await L.error("tracy.sh not found")
         return {} // No-op
     }
 
+    await L.info("Plugin initialized", { repoRoot, tracyPath })
 
-    await client.app.log({
-        body: {
-            service: PLUGIN_NAME,
-            level: "info",
-            message: "Plugin initialized",
-            extra: { repoRoot, tracyPath }
-        },
-    })
-
-    const EDIT_TOOLS = new Set(["edit", "write", "patch", "multiedit", "apply_patch", "applypatch"])
 
     let sessions = new Set<string>()
-
-    async function saveTasklet(tasklet: Tasklet) {
-        try {
-            const file = Bun.file(TASKLETS_FILE)
-            let existing: Tasklet[] = []
-
-            if (await file.exists()) {
-                try {
-                    const text = await file.text()
-                    if (text.trim()) {
-                        existing = JSON.parse(text)
-                    }
-                } catch {
-                    existing = []
-                }
-            }
-            existing.push(tasklet)
-            await Bun.write(TASKLETS_FILE, JSON.stringify(existing, null, 2))
-
-        } catch (error) {
-            client.app.log({
-                body: {
-                    service: PLUGIN_NAME,
-                    level: "error",
-                    message: `Failed to save tasklet: ${error}`
-                }
-            })
-        }
-    }
 
     async function createTasklet(sessionId: string): Promise<Tasklet | undefined> {
         const response = await client.session.messages({
@@ -172,18 +123,11 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             buildOutput
         }
 
-        await client.app.log({
-            body: {
-                service: PLUGIN_NAME,
-                level: "info",
-                message: `Created tasklet: ${tasklet.id}`
-            }
-        })
+        await L.info(`Created tasklet: ${tasklet.id}`)
         return tasklet
     }
 
     return {
-
         event: async ({ event }) => {
             if (event.type === "session.created") {
                 const sessionId = event.properties.info.id
@@ -205,25 +149,12 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                 if (sessions.has(idleSessionId)) {
                     const tasklet = createTasklet(idleSessionId) // TODO: CACHE THIS PLEASE FOR THE LOVE OF GOD
                     if (!tasklet) {
-                        client.app.log({
-                            body: {
-                                service: PLUGIN_NAME,
-                                level: "warn",
-                                message: "Skipping tasklet creation: no build user message found"
-                            }
-                        })
+                        await L.warn("Skipping tasklet creation: no build user message found")
                         return
                     }
 
                     await $`${tracyPath} --user-name "opencode" --user-email "opencode" --description ${JSON.stringify(tasklet)}`.cwd(repoRoot).quiet()
-
-                    await client.app.log({
-                        body: {
-                            service: PLUGIN_NAME,
-                            level: "info",
-                            message: `committed OC changes for ${path}`,
-                        },
-                    })
+                    await L.info(`committed OC changes for ${path}`)
                 }
             }
         },
@@ -233,47 +164,16 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
             const path = output.args.filePath as string | undefined
             if (!path) {
-                await client.app.log({
-                    body: {
-                        service: PLUGIN_NAME,
-                        level: "error",
-                        message: `skill issue: missing path in before hook`,
-                        extra: { input, output },
-                    },
-                })
+                await L.error(`skill issue: missing pth in tool.execute.before hook`, { input, output })
                 return
             }
 
             try {
                 await $`${tracyPath}`.cwd(repoRoot).quiet() // user snapshot
-
-                await client.app.log({
-                    body: {
-                        service: PLUGIN_NAME,
-                        level: "info",
-                        message: `created user snapshot for ${path}`,
-                    },
-                })
+                await L.info(`created user snapshot for ${path}`)
             }
             catch (e: any) {
-                if (e.exitCode === 1 || String(e).includes("exit code 1")) {
-                    await client.app.log({
-                        body: {
-                            service: PLUGIN_NAME,
-                            level: "info",
-                            message: `no pre-existing changes for ${path}, skipping checkpoint`,
-                        },
-                    })
-                    return
-                }
-
-                await client.app.log({
-                    body: {
-                        service: PLUGIN_NAME,
-                        level: "error",
-                        message: `skill issue: ${e}`,
-                    },
-                })
+                L.error(`skill issue: ${e}`)
             }
         },
     }
