@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ensure_refspec() {
+    local key="$1"
+    local value="$2"
+
+    if ! git config --get-all "$key" 2>/dev/null | grep -Fxq "$value"; then
+        git config --add "$key" "$value"
+        return 0
+    fi
+
+    return 1 
+}
+
+changed=false
+
+if git remote get-url origin >/dev/null 2>&1; then
+    if ensure_refspec remote.origin.push "refs/tracy/*:refs/tracy/*"; then
+        changed=true
+    fi
+
+    if ensure_refspec remote.origin.push "refs/notes/commits:refs/notes/commits"; then
+        changed=true
+    fi
+
+    if [ "$changed" = true ]; then
+        echo "Tracy refs configured for push"
+    fi
+fi
