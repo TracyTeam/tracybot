@@ -9,17 +9,10 @@ const TASKLETS_FILE = path.join(__dirname, "../tasklets.json")
 export const MyPlugin: Plugin = async (input: PluginInput) => {
     const { client, $, directory } = input
 
-    await client.app.log({
-        body: {
-            service: PLUGIN_NAME,
-            level: "info",
-            message: "Plugin initialized",
-        },
-    })
 
     async function getRepoRoot(): Promise<string | null> {
         try {
-            const result = await $`git rev-parse --show-toplevel`.cwd(directory)
+            const result = await $`git rev-parse --show-toplevel`.cwd(directory).quiet()
             return String(result.stdout).trim() as string
         } catch {
             return null
@@ -31,14 +24,59 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         await client.app.log({
             body: {
                 service: PLUGIN_NAME,
-                level: "warn",
+                level: "error",
                 message: "Not a git repo",
             },
         })
-        throw new Error("Not a git repo");
+        return {} // No-op
+    }
+
+    async function resolveTracyPath(repoRoot: string): Promise<string | undefined> {
+        // support passing from shell instead of file
+        if (process.env.TRACY_SCRIPT) {
+            return process.env.TRACY_SCRIPT
+        }
+
+        const configPath = path.join(repoRoot, ".git", "tracybot", "config")
+        const configFile = Bun.file(configPath)
+
+        if (!(await configFile.exists())) return // no env and no config = bye
+
+        // cannot use dotenv, so enjoy this handrolled env parsing
+        const text = await configFile.text()
+        for (const line of text.split("\n")) {
+            const match = line.match(/^([^=]+)=(.*)$/)
+            if (match && match[1] && match[2]) {
+                process.env[match[1].trim()] = match[2].trim()
+            }
+        }
+
+        return process.env.TRACY_SCRIPT
+    }
+
+    const tracyPath = await resolveTracyPath(repoRoot)
+    const isInstalled = tracyPath ? await Bun.file(tracyPath).exists() : false
+
+    if (!isInstalled || !tracyPath) {
+        await client.app.log({
+            body: {
+                service: PLUGIN_NAME,
+                level: "error",
+                message: "tracy.sh not found",
+            },
+        })
+        return {} // No-op
     }
 
 
+    await client.app.log({
+        body: {
+            service: PLUGIN_NAME,
+            level: "info",
+            message: "Plugin initialized",
+            extra: { repoRoot, tracyPath }
+        },
+    })
 
     const EDIT_TOOLS = new Set(["edit", "write", "patch", "multiedit", "apply_patch", "applypatch"])
 
@@ -110,13 +148,6 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         )
 
         if (!buildUserMsg) {
-            client.app.log({
-                body: {
-                    service: PLUGIN_NAME,
-                    level: "warn",
-                    message: "Skipping tasklet creation: no build user message found"
-                }
-            })
             return
         }
 
@@ -155,7 +186,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
         event: async ({ event }) => {
             if (event.type === "session.created") {
-                const sessionId = event.properties?.info?.id
+                const sessionId = event.properties.info.id
                 if (sessionId) {
                     sessions.add(sessionId)
                 }
@@ -163,7 +194,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             }
 
             if (event.type === "session.deleted") {
-                const sessionId = (event as any).properties.sessionID
+                const sessionId = event.properties.info.id
                 if (sessionId) {
                     sessions.delete(sessionId)
                 }
@@ -172,31 +203,33 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             if (event.type === "session.idle") {
                 const idleSessionId = event.properties.sessionID
                 if (sessions.has(idleSessionId)) {
-                    const tasklet = await createTasklet(idleSessionId)
+                    const tasklet = createTasklet(idleSessionId) // TODO: CACHE THIS PLEASE FOR THE LOVE OF GOD
                     if (!tasklet) {
-                        await client.app.log({
+                        client.app.log({
                             body: {
                                 service: PLUGIN_NAME,
-                                level: "error",
-                                message: `failed to create tasklet`,
-                            },
+                                level: "warn",
+                                message: "Skipping tasklet creation: no build user message found"
+                            }
                         })
+                        return
                     }
 
-                    // await saveTasklet(tasklet)
-                } else {
+                    await $`${tracyPath} --user-name "opencode" --user-email "opencode" --description ${JSON.stringify(tasklet)}`.cwd(repoRoot).quiet()
+
                     await client.app.log({
                         body: {
                             service: PLUGIN_NAME,
-                            level: "warn",
-                            message: `untracked session went idle: ${idleSessionId}`,
+                            level: "info",
+                            message: `committed OC changes for ${path}`,
                         },
                     })
                 }
             }
         },
+
         "tool.execute.before": async (input, output) => {
-            if (!EDIT_TOOLS.includes(input.tool)) return
+            if (!EDIT_TOOLS.has(input.tool)) return
 
             const path = output.args.filePath as string | undefined
             if (!path) {
@@ -212,15 +245,13 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             }
 
             try {
-                await $`tracybot`
-                // await $`git add ${path}`.cwd(repoRoot).quiet()
-                // await $`git commit -m "user checkpoint"`.cwd(repoRoot).quiet()
+                await $`${tracyPath}`.cwd(repoRoot).quiet() // user snapshot
 
                 await client.app.log({
                     body: {
                         service: PLUGIN_NAME,
                         level: "info",
-                        message: `checkpoint: ${path}`,
+                        message: `created user snapshot for ${path}`,
                     },
                 })
             }
@@ -236,48 +267,6 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                     return
                 }
 
-                await client.app.log({
-                    body: {
-                        service: PLUGIN_NAME,
-                        level: "error",
-                        message: `skill issue: ${e}`,
-                    },
-                })
-            }
-        },
-
-        "tool.execute.after": async (input, output) => {
-            if (!EDIT_TOOLS.includes(input.tool)) return
-
-            const path = input.args.filePath as string | undefined
-            if (!path) {
-                await client.app.log({
-                    body: {
-                        service: PLUGIN_NAME,
-                        level: "error",
-                        message: `skill issue: missing path in after hook`,
-                        extra: { input, output },
-                    },
-                })
-                return
-            }
-
-            try {
-                await $`tracybot --user-name "opencode" --user-email "opencode" --description ${TODO}`
-
-                // await $`git add ${path}`.cwd(repoRoot).quiet()
-                // const commitMsg = `opencode: update ${path}`
-                // await $`git -c "user.name=opencode" -c "user.email=opencode@oc.ai" commit -m ${commitMsg}`.cwd(repoRoot).quiet()
-
-                await client.app.log({
-                    body: {
-                        service: PLUGIN_NAME,
-                        level: "info",
-                        message: `Committed OC changes for ${path}`,
-                    },
-                })
-            }
-            catch (e) {
                 await client.app.log({
                     body: {
                         service: PLUGIN_NAME,
