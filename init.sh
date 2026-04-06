@@ -175,3 +175,4 @@ echo ""
 printf "${BOLD}New command:${NC}\n"
 printf "Run ${B}git fetch-tracy${NC} to pull the latest AI tracking data."
 echo ""
+

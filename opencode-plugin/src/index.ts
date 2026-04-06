@@ -2,24 +2,17 @@ import type { Plugin, PluginInput } from "@opencode-ai/plugin"
 import type { Part } from "@opencode-ai/sdk"
 import type { Tasklet, PlanOutput, BuildOutput } from "./Tasklet"
 import path from "path"
+import { Logger } from "./Logger"
 
-const PLUGIN_NAME = "tracybot-plugin"
-const TASKLETS_FILE = path.join(__dirname, "../tasklets.json")
+const EDIT_TOOLS = new Set(["edit", "write", "patch", "multiedit", "apply_patch", "applypatch"])
 
 export const MyPlugin: Plugin = async (input: PluginInput) => {
     const { client, $, directory } = input
-
-    await client.app.log({
-        body: {
-            service: PLUGIN_NAME,
-            level: "info",
-            message: "Plugin initialized",
-        },
-    })
+    const L = new Logger(client)
 
     async function getRepoRoot(): Promise<string | null> {
         try {
-            const result = await $`git rev-parse --show-toplevel`.cwd(directory)
+            const result = await $`git rev-parse --show-toplevel`.cwd(directory).quiet()
             return String(result.stdout).trim() as string
         } catch {
             return null
@@ -28,52 +21,49 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
     const repoRoot = await getRepoRoot()
     if (!repoRoot) {
-        await client.app.log({
-            body: {
-                service: PLUGIN_NAME,
-                level: "warn",
-                message: "Not a git repo",
-            },
-        })
-        throw new Error("Not a git repo");
+        await L.error("Not a git repo")
+        return {} // No-op
     }
 
-    const EDIT_TOOLS = ["edit", "write"]
+    async function resolveTracyPath(repoRoot: string): Promise<string | undefined> {
+        // support passing from shell instead of file
+        if (process.env.TRACY_SCRIPT) {
+            return process.env.TRACY_SCRIPT
+        }
+
+        const configPath = path.join(repoRoot, ".git", "tracybot", "config")
+        const configFile = Bun.file(configPath)
+
+        if (!(await configFile.exists())) return // no env and no config = bye
+
+        // cannot use dotenv, so enjoy this handrolled env parsing
+        const text = await configFile.text()
+        for (const line of text.split("\n")) {
+            const match = line.match(/^([^=]+)=(.*)$/)
+            if (match && match[1] && match[2]) {
+                process.env[match[1].trim()] = match[2].trim()
+            }
+        }
+
+        return process.env.TRACY_SCRIPT
+    }
+
+    const tracyPath = await resolveTracyPath(repoRoot)
+    const isInstalled = tracyPath ? await Bun.file(tracyPath).exists() : false
+
+    if (!isInstalled || !tracyPath) {
+        await L.error("tracy.sh not found")
+        return {} // No-op
+    }
+
+    await L.info("Plugin initialized", { repoRoot, tracyPath })
+
 
     let sessions = new Set<string>()
-    
-    async function saveTasklet(tasklet: Tasklet) {
-        try {
-            const file = Bun.file(TASKLETS_FILE)
-            let existing: Tasklet[] = []
 
-            if (await file.exists()) {
-                try {
-                    const text = await file.text()
-                    if (text.trim()) {
-                        existing = JSON.parse(text)
-                    }
-                } catch {
-                    existing = []
-                }
-            } 
-            existing.push(tasklet)
-            await Bun.write(TASKLETS_FILE, JSON.stringify(existing, null, 2))
-
-        } catch (error) {
-            client.app.log({
-                body: {
-                    service: PLUGIN_NAME,
-                    level: "error",
-                    message: `Failed to save tasklet: ${error}` 
-                }
-            })
-        }
-    }
-
-    async function createTasklet(sessionId: string) {
+    async function createTasklet(sessionId: string): Promise<Tasklet | undefined> {
         const response = await client.session.messages({
-            path: { id: sessionId}
+            path: { id: sessionId }
         })
         const allMessages = response.data ?? []
 
@@ -82,66 +72,47 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             return parts
                 .flatMap(part => part.type === "text" && part.text ? [part.text] : [])
                 .join("\n\n---\n\n")
-
-        } 
-        
-        const planOutputs: PlanOutput[] = []
-        const planUserMsgs = allMessages.filter(
-            (message) => message.info.role === "user" && message.info.agent !== "build"
-        )
-
-        for (const msgWrapper of planUserMsgs) {
-            const userMsg = msgWrapper
-            const userText = getTextFromParts(userMsg.parts)
-            
-
-            const assistantMsgs = allMessages.filter(
-                (message) => message.info.role === "assistant" && 
-                message.info.parentID === userMsg.info.id
-            )
-
-            const combinedResponse = assistantMsgs
-                .map(message => getTextFromParts(message.parts))
-                .filter(text => text)
-                .join("\n\n---\n\n")
-                
-            planOutputs.push({
-                id: `plan_${planOutputs.length}`,
-                prompt: userText, 
-                response: combinedResponse,
-            })
         }
-        
-        const buildUserMsgs = allMessages.filter(
-            (message) => message.info.role === "user" && message.info.agent === "build" 
-        )
-        
-        const buildUserMsg = buildUserMsgs[0]
-        if (!buildUserMsg) {
-            client.app.log({
-                body: {
-                    service: PLUGIN_NAME,
-                    level: "warn",
-                    message: "Skipping tasklet creation: no build user message found"
+
+        const planOutputs: PlanOutput[] = allMessages
+            .filter((message) => message.info.role === "user" && message.info.agent !== "build")
+            .map((userMsg, idx) => {
+                const assistantMsgs = allMessages.filter((message) =>
+                    message.info.role === "assistant" && message.info.parentID === userMsg.info.id)
+
+                const userText = getTextFromParts(userMsg.parts)
+                const combinedResponse = assistantMsgs
+                    .map(msg => getTextFromParts(msg.parts))
+                    .filter(text => text)
+                    .join("\n\n---\n\n")
+
+                return {
+                    id: `plan_${idx}`,
+                    prompt: userText,
+                    response: combinedResponse,
                 }
             })
-            return
-        }
-        
-        const buildAssistantMsgs = allMessages.filter(
-            (message) => message.info.role === "assistant" &&
-                        message.info.parentID === buildUserMsg.info.id
+
+        const buildUserMsg = allMessages.find(
+            (message) => message.info.role === "user" && message.info.agent === "build"
         )
 
-        const combinedBuildResponse = buildAssistantMsgs
-              .map(message => getTextFromParts(message.parts))
-              .filter(text => text)
-              .join("\n\n---\n\n")
+        if (!buildUserMsg) {
+            return
+        }
+
+        const buildAssistantMsgs = allMessages.filter(
+            (message) => message.info.role === "assistant" &&
+                message.info.parentID === buildUserMsg.info.id
+        )
 
         const buildOutput: BuildOutput = {
-            id: `build_${Date.now()}`,
+            id: `build_${planOutputs.length}`,
             prompt: getTextFromParts(buildUserMsg.parts),
-            response: combinedBuildResponse, 
+            response: buildAssistantMsgs
+                .map(message => getTextFromParts(message.parts))
+                .filter(text => text)
+                .join("\n\n---\n\n"),
         }
 
         const tasklet: Tasklet = {
@@ -151,22 +122,14 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             buildOutput
         }
 
-        await saveTasklet(tasklet)
-        
-        client.app.log({
-            body: {
-                service: PLUGIN_NAME,
-                level: "info",
-                message: `Created tasklet: ${tasklet.id}`
-            }
-        })
+        await L.debug(`Created tasklet: ${tasklet.id}`, { tasklet })
+        return tasklet
     }
 
     return {
-
         event: async ({ event }) => {
-            if (event.type === "session.created") {              
-                const sessionId = event.properties?.info?.id
+            if (event.type === "session.created") {
+                const sessionId = event.properties.info.id
                 if (sessionId) {
                     sessions.add(sessionId)
                 }
@@ -174,107 +137,42 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             }
 
             if (event.type === "session.deleted") {
-                const sessionId = (event as any).properties.sessionID
+                const sessionId = event.properties.info.id
                 if (sessionId) {
                     sessions.delete(sessionId)
                 }
             }
-            
+
             if (event.type === "session.idle") {
                 const idleSessionId = event.properties.sessionID
                 if (sessions.has(idleSessionId)) {
-                    await createTasklet(idleSessionId)
+                    const tasklet = await createTasklet(idleSessionId) // TODO: CACHE THIS PLEASE FOR THE LOVE OF GOD
+                    if (!tasklet) {
+                        await L.debug("Skipping tasklet creation: no build user message found")
+                        return
+                    }
+
+                    await $`${tracyPath} --user-name "opencode" --user-email "opencode" --description ${JSON.stringify(tasklet)}`.cwd(repoRoot).quiet()
+                    await L.info(`committed OC changes`, { tasklet })
                 }
             }
         },
+
         "tool.execute.before": async (input, output) => {
-            if (!EDIT_TOOLS.includes(input.tool)) return
-            
+            if (!EDIT_TOOLS.has(input.tool)) return
+
             const path = output.args.filePath as string | undefined
             if (!path) {
-                await client.app.log({
-                    body: {
-                        service: PLUGIN_NAME,
-                        level: "error",
-                        message: `skill issue: missing path in before hook`,
-                        extra: { input, output },
-                    },
-                })
+                await L.error(`skill issue: missing pth in tool.execute.before hook`, { input, output })
                 return
             }
 
             try {
-                await $`git add ${path}`.cwd(repoRoot).quiet()
-                await $`git commit -m "user checkpoint"`.cwd(repoRoot).quiet()
-
-                await client.app.log({
-                    body: {
-                        service: PLUGIN_NAME,
-                        level: "info",
-                        message: `checkpoint: ${path}`,
-                    },
-                })
+                await $`${tracyPath}`.cwd(repoRoot).quiet() // user snapshot
+                await L.info(`created user snapshot for ${path}`)
             }
             catch (e: any) {
-                if (e.exitCode === 1 || String(e).includes("exit code 1")) {
-                    await client.app.log({
-                        body: {
-                            service: PLUGIN_NAME,
-                            level: "info",
-                            message: `no pre-existing changes for ${path}, skipping checkpoint`,
-                        },
-                    })
-                    return
-                }
-
-                await client.app.log({
-                    body: {
-                        service: PLUGIN_NAME,
-                        level: "error",
-                        message: `skill issue: ${e}`,
-                    },
-                })
-            }
-        },
-
-        "tool.execute.after": async (input, output) => {
-            if (!EDIT_TOOLS.includes(input.tool)) return
-
-            const path = input.args.filePath as string | undefined
-            if (!path) {
-                await client.app.log({
-                    body: {
-                        service: PLUGIN_NAME,
-                        level: "error",
-                        message: `skill issue: missing path in after hook`,
-                        extra: { input, output },
-                    },
-                })
-                return
-            }
-
-            try {
-                await $`git add ${path}`.cwd(repoRoot).quiet()
-
-                const commitMsg = `opencode: update ${path}`
-                await $`git -c "user.name=opencode" -c "user.email=opencode@oc.ai" commit -m ${commitMsg}`.cwd(repoRoot).quiet()
-
-                await client.app.log({
-                    body: {
-                        service: PLUGIN_NAME,
-                        level: "info",
-                        message: `Committed OC changes for ${path}`,
-                    },
-                })
-            }
-            catch (e) {
-                await client.app.log({
-                    body: {
-                        service: PLUGIN_NAME,
-                        level: "error",
-                        message: `skill issue: ${e}`,
-                    },
-                })
+                await L.error(`skill issue: ${e}`)
             }
         },
     }
