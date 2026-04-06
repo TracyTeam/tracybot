@@ -38,7 +38,9 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         throw new Error("Not a git repo");
     }
 
-    const EDIT_TOOLS = ["edit", "write"]
+
+
+    const EDIT_TOOLS = new Set(["edit", "write", "patch", "multiedit", "apply_patch", "applypatch"])
 
     let sessions = new Set<string>()
 
@@ -179,10 +181,9 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                                 message: `failed to create tasklet`,
                             },
                         })
-                        return
                     }
 
-                    await saveTasklet(tasklet)
+                    // await saveTasklet(tasklet)
                 } else {
                     await client.app.log({
                         body: {
@@ -211,8 +212,9 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             }
 
             try {
-                await $`git add ${path}`.cwd(repoRoot).quiet()
-                await $`git commit -m "user checkpoint"`.cwd(repoRoot).quiet()
+                await $`tracybot`
+                // await $`git add ${path}`.cwd(repoRoot).quiet()
+                // await $`git commit -m "user checkpoint"`.cwd(repoRoot).quiet()
 
                 await client.app.log({
                     body: {
@@ -261,10 +263,11 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             }
 
             try {
-                await $`git add ${path}`.cwd(repoRoot).quiet()
+                await $`tracybot --user-name "opencode" --user-email "opencode" --description ${TODO}`
 
-                const commitMsg = `opencode: update ${path}`
-                await $`git -c "user.name=opencode" -c "user.email=opencode@oc.ai" commit -m ${commitMsg}`.cwd(repoRoot).quiet()
+                // await $`git add ${path}`.cwd(repoRoot).quiet()
+                // const commitMsg = `opencode: update ${path}`
+                // await $`git -c "user.name=opencode" -c "user.email=opencode@oc.ai" commit -m ${commitMsg}`.cwd(repoRoot).quiet()
 
                 await client.app.log({
                     body: {
