@@ -4,7 +4,6 @@ import type { Tasklet, PlanOutput, BuildOutput } from "./Tasklet"
 import path from "path"
 import { Logger } from "./Logger"
 
-const TASKLETS_FILE = path.join(__dirname, "../tasklets.json")
 const EDIT_TOOLS = new Set(["edit", "write", "patch", "multiedit", "apply_patch", "applypatch"])
 
 export const MyPlugin: Plugin = async (input: PluginInput) => {
@@ -173,7 +172,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                 await L.info(`created user snapshot for ${path}`)
             }
             catch (e: any) {
-                L.error(`skill issue: ${e}`)
+                await L.error(`skill issue: ${e}`)
             }
         },
     }
