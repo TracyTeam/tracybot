@@ -118,34 +118,64 @@ rows=()
 
 for hook in pre-commit post-commit post-rewrite; do
     source_hook="$hooks_source/$hook"
+    tracy_hook="$hooks_dir/${hook}.tracy"
     dest_hook="$hooks_dir/$hook"
 
+    tracy_block=$(cat <<'EOF'
+# --- TRACYBOT START ---
+#
+# !!! WARNING: DO NOT MODIFY OR REMOVE THIS BLOCK !!!
+#
+# This section is managed automatically by Tracybot.
+# Any manual changes inside these markers may be overwritten.
+# You may safely edit anything outside this block.
+
+if [ -x "\$(dirname "\$0")/${hook}.tracy" ]; then
+    "\$(dirname "\$0")/${hook}.tracy" "\$@"
+fi
+
+# --- TRACYBOT END ---
+EOF
+)
+
     if [[ -f "$dest_hook" ]]; then
-        printf "${Y}WARNING: %s hook already exists.${NC}\n" "$hook"
-        printf "Existing hook will be backed up to ${B}%s.backup${NC}\n" "$hook"
-        printf "Continue with overwrite? (y/n) "
-        read -n 1 -r REPLY
-
-        while [[ "$REPLY" == "" || -z "$REPLY" ]]; do
-            printf "Continue with overwrite? (y/n) "
-            read -n 1 -r REPLY
-        done
-
-        echo -e "\n"
-
-        if [[ "$REPLY" =~ ^[Yy]$ ]]; then
-            mv "$dest_hook" "${dest_hook}.backup"
-            status="${Y}Backed up & Updated${NC}"
+        if grep -q "# --- TRACYBOT START ---" "$dest_hook"; then
+            status="${G}Updated${NC}"
         else
-            printf "${R}Initialization aborted.${NC}\n"
-            exit 0
+            printf "${Y}WARNING: %s hook already exists.${NC}\n" "$hook"
+            printf "Tracybot will preserve its current functionality.\n"
+            printf "A backup of the original hook will be saved as ${B}%s.backup${NC}\n\n" "$hook"
+
+            cp "$dest_hook" "${dest_hook}.backup"
+            temp_file=$(mktemp)
+                
+            # Extract the shebang if it exists
+            first_line=$(head -n 1 "$dest_hook")
+            if [[ "$first_line" == "#!"* ]]; then
+                echo "$first_line" > "$temp_file"
+                echo "$tracy_block" >> "$temp_file"
+
+                tail -n +2 "$dest_hook" >> "$temp_file"
+            else
+                echo "$tracy_block" > "$temp_file"
+                cat "$dest_hook" >> "$temp_file"
+            fi
+                
+            mv "$temp_file" "$dest_hook"
+            chmod +x "$dest_hook"
+
+            status="${Y}Backed up & Updated${NC}"
         fi
     else
+        echo "#!/usr/bin/env bash" > "$dest_hook"
+        echo "$tracy_block" >> "$dest_hook"
+        chmod +x "$dest_hook"
+
         status="${G}Installed${NC}"
     fi
 
-    cp "$source_hook" "$dest_hook"
-    chmod +x "$dest_hook"
+    cp "$source_hook" "$tracy_hook"
+    chmod +x "$tracy_hook"
 
     rows+=("$(printf "| %-16s | %-40b |" "$hook" "$status")")
 done
