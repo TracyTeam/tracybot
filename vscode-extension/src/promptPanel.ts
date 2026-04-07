@@ -1,5 +1,6 @@
+import { marked } from "marked";
 // Returns the HTML content for the prompt webview panel
-export function getPromptPanelHtml(prompt: string): string {
+export function getPromptPanelHtml(prompt: string, message: string, model: string, lines: number[]): string {
   return `
     <!DOCTYPE html>
     <html lang="en">
@@ -14,7 +15,6 @@ export function getPromptPanelHtml(prompt: string): string {
           color: var(--vscode-foreground);
           background-color: var(--vscode-editor-background);
           padding: 20px;
-          line-height: 1.6;
         }
         h2 {
           color: var(--vscode-textLink-foreground);
@@ -28,12 +28,50 @@ export function getPromptPanelHtml(prompt: string): string {
           white-space: pre-wrap;
           word-break: break-word;
         }
+        .prompt-box p {
+          margin: 0;
+          padding: 0;
+        }
+        .nav-bar {
+          display: flex;
+          align-items: center;
+          justify-content: space-evenly;
+        }
+        button {
+          background-color: var(--vscode-textLink-foreground);
+          border: none;
+          padding: 5px;
+          font-weight: bold;
+          font-size: 12px;
+          border-radius: 5px;
+        }
       </style>
     </head>
     <body>
-      <h2>Tracybot Prompt</h2>
-      <div class="prompt-box">${prompt}</div>
+      <div class="nav-bar">
+        <div class="column">
+          <h2>${message}</h2>
+        </div>
+        <div class="column">
+          <button type="button" onclick="openTaskletMenu()">All Tasklets</button>
+        </div>
+      </div>
+
+      <div class="prompt-box">
+        <p>MODEL: ${model}</p>
+        ${marked.parse(prompt)}
+        <p>LINES: ${lines}</p>
+      </div>
     </body>
+    <script>
+      const vscode = acquireVsCodeApi();
+
+      function openTaskletMenu() {
+        vscode.postMessage({
+          command: 'openTaskletMenu'
+        });
+      }
+    </script>
     </html>
   `;
 }
