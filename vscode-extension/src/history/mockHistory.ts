@@ -11,7 +11,7 @@ export function getMockHistory(): History {
           {
             model: "mock-model1",
             name: "tasklet1",
-            prompt: "mock-prompt1 sdopfkasdfposadk",
+            prompt: "## mock-prompt1 \n**this should be bold** \n_this should be italic_ \n1. list \n2. here [link](https://www.google.com)",
             lines: [1, 2, 10]
           },
           {

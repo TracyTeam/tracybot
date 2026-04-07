@@ -4,9 +4,10 @@ import { getMockHistory } from './history/mockHistory';
 import { getContiguousChunks } from './utils';
 import { getPromptPanelHtml } from './promptPanel';
 import { buildHistory } from './history/buildHistory';
+import { openTaskletMenu } from './taskletMenu';
 
 // Transform MockData into the shape extension.ts works with, adding selected state
-type Entry = { lines: number[]; message: string; prompt: string; selected: boolean };
+type Entry = { lines: number[]; message: string; prompt: string; model: string; selected: boolean };
 type FileEntries = Record<string, Entry[]>;
 
 // Build the initial FileEntries structure from the mock data, and setting selected attribute to false for all entries
@@ -19,6 +20,7 @@ function buildFileEntries(): FileEntries {
       lines: tasklet.lines,
       message: tasklet.name,
       prompt: tasklet.prompt,
+      model: tasklet.model,
       selected: false,
     }));
   }
@@ -106,7 +108,7 @@ class TracybotCodeLensProvider implements vscode.CodeLensProvider {
         title: `AI blame: ${entryUnderCursor.message}`,
         // Opens the prompt panel when clicked, passing the entry's prompt
         command: 'tracybot-extension.openPromptPanel',
-        arguments: [entryUnderCursor.prompt, entryUnderCursor.message],
+        arguments: [entryUnderCursor.prompt, entryUnderCursor.message, entryUnderCursor.model, entryUnderCursor.lines],
         tooltip: `Click to view prompt for "${entryUnderCursor.message}"`,
       })
     ];
@@ -188,16 +190,53 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Register command to open a prompt panel with the entry's prompt
   context.subscriptions.push(
-    vscode.commands.registerCommand('tracybot-extension.openPromptPanel', (prompt: string, message: string) => {
+    vscode.commands.registerCommand('tracybot-extension.openPromptPanel', (prompt: string, message: string, model: string, lines: number[]) => {
       // Create and show a webview panel to display the prompt
+
+      const editor = vscode.window.activeTextEditor;
+      const fileName = editor?.document.fileName.split(/[\\/]/).pop() || '';
+
       const panel = vscode.window.createWebviewPanel(
         'tracybotPrompt',
         message,
         vscode.ViewColumn.Beside,
-        {}
+        {enableScripts: true}
       );
 
-      panel.webview.html = getPromptPanelHtml(prompt);
+      panel.webview.onDidReceiveMessage(
+        msg => {
+          console.log("received message", msg);
+          if (msg.command === 'openTaskletMenu') {
+            
+            const entries = mockData[fileName];
+            if (!entries) {
+              console.log("No entries for", fileName);
+              return;
+            }
+            const taskletNames = entries.map(e => e.message);
+
+            panel.webview.html = openTaskletMenu(taskletNames);
+          }
+
+          if (msg.command === 'openTasklet') {
+            const entries = mockData[fileName];
+            if (!entries) { return; }
+
+            const entry = entries[msg.index];
+
+            panel.webview.html = getPromptPanelHtml(
+              entry.prompt,
+              entry.message,
+              entry.model,
+              entry.lines
+            );
+          }
+        },
+        undefined,
+        context.subscriptions
+      );
+
+      panel.webview.html = getPromptPanelHtml(prompt, message, model, lines);
     })
   );
 
