@@ -26,9 +26,9 @@ if [[ $# -eq 0 ]]; then # No args
     done
 
     if [[ -z "$repo_path" ]] || [[ ! -d "$repo_path/.git" ]]; then
-        printf "\n${R}*********************************${NC}\n"
-        printf "${R}* ERROR: No git repository found *${NC}\n"
-        printf "${R}**********************************${NC}\n\n"
+        printf "\n${R}******************************************************${NC}\n"
+        printf "${R}* ERROR: No git repository found                     *${NC}\n"
+        printf "${R}******************************************************${NC}\n\n"
         exit 1
     fi
 
@@ -53,9 +53,18 @@ else
     done
 
     if [[ ! -d "$repo_path/.git" ]]; then
-        printf "\n${R}!! ERROR: Tracybot requires a git repository !!${NC}\n"
+        printf "\n${R}******************************************************${NC}\n"
+        printf "${R}* ERROR: Tracybot requires a git repository          *${NC}\n"
+        printf "${R}******************************************************${NC}\n\n"
         exit 1
     fi
+fi
+
+if ! git -C "$repo_path" remote get-url origin >/dev/null 2>&1; then
+    printf "\n${R}******************************************************${NC}\n"
+    printf "${R}* ERROR: Tracybot requires an 'origin' remote        *${NC}\n"
+    printf "${R}******************************************************${NC}\n\n"
+    exit 1
 fi
 
 git_dir="$repo_path/.git"
@@ -70,34 +79,31 @@ git -C "$repo_path" config notes.rewrite.rebase true
 git -C "$repo_path" config notes.rewrite.merge true
 git -C "$repo_path" config notes.rewriteRef refs/notes/commits
 
+git -C "$repo_path" config --add remote.origin.push "refs/tracy/*:refs/tracy/*"
+git -C "$repo_path" config --add remote.origin.push "refs/notes/commits:refs/notes/commits"
+git -C "$repo_path" config --add remote.origin.fetch "+refs/tracy/*:refs/remotes/origin/tracy/*"
+git -C "$repo_path" config --add remote.origin.fetch "+refs/notes/commits:refs/notes/commits"
+
 printf "+----------------------------------------------------+\n"
 printf "| [DONE] Git notes rewriting configured              |\n"
+printf "| [DONE] Tracy refs configured for fetch and push    |\n"
+printf "+----------------------------------------------------+\n\n"
 
-if git -C "$repo_path" remote get-url origin >/dev/null 2>&1; then
-    git -C "$repo_path" config --add remote.origin.push "refs/tracy/*:refs/tracy/*"
-    git -C "$repo_path" config --add remote.origin.push "refs/notes/commits:refs/notes/commits"
+printf "${BOLD}Syncing with remote...${NC}\n\n"
+set +e
+git -C "$repo_path" fetch origin >/dev/null 2>&1
+git -C "$repo_path" fetch origin "+refs/tracy/*:refs/tracy/*" >/dev/null 2>&1
+git -C "$repo_path" fetch origin "+refs/notes/commits:refs/notes/commits" >/dev/null 2>&1
+fetch_status=$?
+set -e
 
-    printf "| [DONE] Tracy refs configured for push              |\n"
-    printf "+----------------------------------------------------+\n\n"
-
-    printf "${BOLD}Syncing with remote...${NC}\n"
-    set +e
-    git -C "$repo_path" fetch origin >/dev/null 2>&1
-    git -C "$repo_path" fetch origin "+refs/tracy/*:refs/tracy/*" >/dev/null 2>&1
-    git -C "$repo_path" fetch origin "+refs/notes/commits:refs/notes/commits" >/dev/null 2>&1
-    fetch_status=$?
-    set -e
-
-    if [[ $fetch_status -ne 0 ]]; then
-        printf "  [INFO] No remote tracing data found (clean start)\n"
-    else
-        printf "  ${G}[OK] Successfully fetched latest tracing data${NC}\n"
-    fi
-    printf "\n"
+if [[ $fetch_status -ne 0 ]]; then
+    printf "  [INFO] No remote tracing data found\n"
 else
-    printf "| [SKIP] No origin remote found; skipping config     |\n"
-    printf "+----------------------------------------------------+\n\n"
+    printf "  ${G}[OK] Successfully fetched latest tracing data${NC}\n"
 fi
+
+echo ""
 
 cat > "$tracy_dir/config" << EOF
 TRACY_SCRIPT=$script_source
@@ -110,36 +116,66 @@ mkdir -p "$hooks_dir"
 printf "${BOLD}Installing Git Hooks:${NC}\n\n"
 rows=()
 
-for hook in pre-commit post-commit post-rewrite pre-push; do
+for hook in pre-commit post-commit post-rewrite; do
     source_hook="$hooks_source/$hook"
+    tracy_hook="$hooks_dir/${hook}.tracy"
     dest_hook="$hooks_dir/$hook"
 
+    tracy_block=$(cat <<'EOF'
+# --- TRACYBOT START ---
+#
+# !!! WARNING: DO NOT MODIFY OR REMOVE THIS BLOCK !!!
+#
+# This section is managed automatically by Tracybot.
+# Any manual changes inside these markers may be overwritten.
+# You may safely edit anything outside this block.
+
+if [ -x "\$(dirname "\$0")/${hook}.tracy" ]; then
+    "\$(dirname "\$0")/${hook}.tracy" "\$@"
+fi
+
+# --- TRACYBOT END ---
+EOF
+)
+
     if [[ -f "$dest_hook" ]]; then
-        printf "${Y}WARNING: %s hook already exists.${NC}\n" "$hook"
-        printf "Existing hook will be backed up to ${B}%s.backup${NC}\n" "$hook"
-        printf "Continue with overwrite? (y/n) "
-        read -n 1 -r REPLY
-
-        while [[ "$REPLY" == "" || -z "$REPLY" ]]; do
-            printf "Continue with overwrite? (y/n) "
-            read -n 1 -r REPLY
-        done
-
-        echo -e "\n"
-
-        if [[ "$REPLY" =~ ^[Yy]$ ]]; then
-            mv "$dest_hook" "${dest_hook}.backup"
-            status="${Y}Backed up & Updated${NC}"
+        if grep -q "# --- TRACYBOT START ---" "$dest_hook"; then
+            status="${G}Updated${NC}"
         else
-            printf "${R}Initialization aborted.${NC}\n"
-            exit 0
+            printf "${Y}WARNING: %s hook already exists.${NC}\n" "$hook"
+            printf "Tracybot will preserve its current functionality.\n"
+            printf "A backup of the original hook will be saved as ${B}%s.backup${NC}\n\n" "$hook"
+
+            cp "$dest_hook" "${dest_hook}.backup"
+            temp_file=$(mktemp)
+                
+            # Extract the shebang if it exists
+            first_line=$(head -n 1 "$dest_hook")
+            if [[ "$first_line" == "#!"* ]]; then
+                echo "$first_line" > "$temp_file"
+                echo "$tracy_block" >> "$temp_file"
+
+                tail -n +2 "$dest_hook" >> "$temp_file"
+            else
+                echo "$tracy_block" > "$temp_file"
+                cat "$dest_hook" >> "$temp_file"
+            fi
+                
+            mv "$temp_file" "$dest_hook"
+            chmod +x "$dest_hook"
+
+            status="${Y}Backed up & Updated${NC}"
         fi
     else
+        echo "#!/usr/bin/env bash" > "$dest_hook"
+        echo "$tracy_block" >> "$dest_hook"
+        chmod +x "$dest_hook"
+
         status="${G}Installed${NC}"
     fi
 
-    cp "$source_hook" "$dest_hook"
-    chmod +x "$dest_hook"
+    cp "$source_hook" "$tracy_hook"
+    chmod +x "$tracy_hook"
 
     rows+=("$(printf "| %-16s | %-40b |" "$hook" "$status")")
 done
@@ -154,25 +190,17 @@ done
 
 printf "+------------------+---------------------------------+\n\n"
 
-git -C "$repo_path" config alias.fetch-tracy '!f() { \
-    printf "Fetching Tracybot data from remote...\n"; \
-    set +e; \
-    git fetch origin >/dev/null 2>&1; \
-    git fetch origin "+refs/tracy/*:refs/remotes/origin/tracy/*" >/dev/null 2>&1; \
-    git fetch origin "+refs/notes/commits:refs/notes/commits" >/dev/null 2>&1; \
-    if [[ $? -ne 0 ]]; then \
-        printf "No tracing changes found on remote.\n"; \
-    else \
-        printf "Fetched latest tracing changes successfully.\n"; \
-    fi; \
-    set -e; \
-}; f'
-
-printf "${G}*************************************${NC}\n"
-printf "${G}* SUCCESS: Tracybot is ready to go! *${NC}\n"
-printf "${G}*************************************${NC}\n"
+printf "${G}******************************************************${NC}\n"
+printf "${G}* SUCCESS: Tracybot is ready to go!                  *${NC}\n"
+printf "${G}******************************************************${NC}\n"
 echo ""
-printf "${BOLD}New command:${NC}\n"
-printf "Run ${B}git fetch-tracy${NC} to pull the latest AI tracking data."
+
+printf "${Y}Note:${NC} If the ${B}origin${NC} remote is changed or replaced,\n"
+printf "you must re-run this initialization script, or manually reconfigure:\n\n"
+
+printf "  git config --add remote.origin.push \"refs/tracy/*:refs/tracy/*\"\n"
+printf "  git config --add remote.origin.push \"refs/notes/commits:refs/notes/commits\"\n"
+printf "  git config --add remote.origin.fetch \"+refs/tracy/*:refs/remotes/origin/tracy/*\"\n"
+printf "  git config --add remote.origin.fetch \"+refs/notes/commits:refs/notes/commits\"\n"
 echo ""
 
