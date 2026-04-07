@@ -228,33 +228,39 @@ export function activate(context: vscode.ExtensionContext) {
         'tracybotPrompt',
         message,
         vscode.ViewColumn.Beside,
-        {enableScripts: true}
+        { enableScripts: true }
       );
 
       panel.webview.onDidReceiveMessage(
         msg => {
           console.log("received message", msg);
           if (msg.command === 'openTaskletMenu') {
-            
-            const entries = mockData[fileName];
+
+            const entries = history?.files.find(f =>
+              f.path.endsWith(fileName)
+            )?.tasklets;
+
             if (!entries) {
               console.log("No entries for", fileName);
               return;
             }
-            const taskletNames = entries.map(e => e.message);
+            const taskletNames = entries.map(e => e.name);
 
             panel.webview.html = openTaskletMenu(taskletNames);
           }
 
           if (msg.command === 'openTasklet') {
-            const entries = mockData[fileName];
+            const entries = history?.files.find(f =>
+              f.path.endsWith(fileName)
+            )?.tasklets;
+
             if (!entries) { return; }
 
             const entry = entries[msg.index];
 
             panel.webview.html = getPromptPanelHtml(
               entry.prompt,
-              entry.message,
+              entry.name,
               entry.model,
               entry.lines
             );
