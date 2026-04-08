@@ -121,7 +121,7 @@ for hook in pre-commit post-commit post-rewrite; do
     tracy_hook="$hooks_dir/${hook}.tracy"
     dest_hook="$hooks_dir/$hook"
 
-    tracy_block=$(cat <<'EOF'
+    tracy_block=$(cat <<EOF
 # --- TRACYBOT START ---
 #
 # !!! WARNING: DO NOT MODIFY OR REMOVE THIS BLOCK !!!
