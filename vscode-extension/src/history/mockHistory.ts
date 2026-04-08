@@ -11,19 +11,19 @@ export function getMockHistory(): History {
           {
             model: "mock-model1",
             name: "tasklet1",
-            prompt: "## mock-prompt1 \n**this should be bold** \n_this should be italic_ \n1. list \n2. here [link](https://www.google.com)",
+            messages: [],
             lines: [1, 2, 10]
           },
           {
             model: "mock-model2",
             name: "tasklet2",
-            prompt: "mock-prompt2 asdfasdpoifasodf",
+            messages: [],
             lines: [5, 6, 7]
           },
           {
             model: "mock-model3",
             name: "tasklet3",
-            prompt: "mock-prompt3 asdfasdpoifasodf",
+            messages: [],
             lines: [11]
           }
         ]
@@ -34,19 +34,19 @@ export function getMockHistory(): History {
           {
             model: "mock-model1",
             name: "tasklet1",
-            prompt: "mock-prompt1 sdopfkasdfposadk",
+            messages: [],
             lines: [2, 3]
           },
           {
             model: "mock-model2",
             name: "tasklet2",
-            prompt: "mock-prompt2 asdfasdpoifasodf",
+            messages: [],
             lines: [4, 5]
           },
           {
             model: "mock-model3",
             name: "tasklet3",
-            prompt: "mock-prompt3 asdfasdpoifasodf",
+            messages: [],
             lines: [8, 9, 11]
           }
         ]

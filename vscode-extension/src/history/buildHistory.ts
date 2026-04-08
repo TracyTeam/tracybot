@@ -1,5 +1,6 @@
-import { Change, CommitInfo, History } from "./types";
+import { Change, CommitInfo, History, TaskletMessage } from "./types";
 import { getChangedLines, getCommitTree, getDiff, getTracyRefCommit, groupChangesByFile, runGit } from "./helpers";
+import { error } from "console";
 
 // Get all visible (non-hidden) commits from the user branch
 async function getMainCommits(repoPath: string): Promise<CommitInfo[]> {
@@ -39,7 +40,7 @@ async function getTracyIdNote(repoPath: string, commitHash: string): Promise<str
   try {
     const output = await runGit(repoPath, ["notes", "show", commitHash]);
     const match = output.match(/tracy-id:\s*([a-f0-9-]+)/);
-    
+
     return match ? match[1] : null;
   } catch {
     return null;
@@ -79,11 +80,11 @@ async function getTracyChain(repoPath: string, startCommit: string): Promise<Com
 
   while (queue.length > 0) {
     const currentHash = queue.shift()!;
-    
+
     if (visited.has(currentHash)) {
       continue;
     }
-    
+
     visited.add(currentHash);
 
     try {
@@ -136,6 +137,42 @@ function isAiChange(commit: CommitInfo): boolean {
   return commit.authorEmail.toLowerCase() === "opencode";
 }
 
+function buildTaskletMessages(tasklet_str: string): TaskletMessage[] {
+  let tasklet_obj: any;
+  try {
+    tasklet_obj = JSON.parse(tasklet_str);
+  } catch (e) {
+    console.error(`Could not parse tasklet: ${tasklet_str}`);
+    return [];
+  }
+
+  if (!tasklet_obj) {
+    console.error(`Could not parse tasklet: ${tasklet_str}`);
+    return [];
+  }
+
+  let messages: TaskletMessage[] = [];
+  if (tasklet_obj?.planOutputs && Array.isArray(tasklet_obj.planOutputs)) {
+    tasklet_obj.planOutputs.forEach((plan: any) => {
+      if (plan.prompt) {
+        messages.push({ stage: "plan", type: "prompt", message: plan.prompt });
+      }
+      if (plan.response) {
+        messages.push({ stage: "plan", type: "response", message: plan.response });
+      }
+    });
+  }
+
+  if (!tasklet_obj.buildOutput) {
+    console.warn(`Missing build output in tasklet: ${tasklet_str}`);
+  } else {
+    messages.push({ stage: "build", type: "prompt", message: tasklet_obj.buildOutput?.prompt });
+    messages.push({ stage: "build", type: "response", message: tasklet_obj.buildOutput?.response });
+  }
+
+  return messages;
+}
+
 // AAAAAAAAAAAAAAA
 export async function buildHistory(repoPath: string | undefined): Promise<History | null> {
   if (!repoPath) {
@@ -159,24 +196,25 @@ export async function buildHistory(repoPath: string | undefined): Promise<Histor
     const changes: Change[] = [];
     for (let i = 0; i < mainCommits.length; i++) {
       const mainCommit = mainCommits[i];
-      
+
       const tracyId = await getTracyIdNote(repoPath, mainCommit.hash);
       if (tracyId) {
         const tracyStartCommit = await getTracyRefCommit(repoPath, tracyId);
         if (!tracyStartCommit) {
           continue;
         }
-        
-        const tracyChain = await getTracyChain(repoPath, tracyStartCommit);
+
+        const tracyChain: CommitInfo[] = await getTracyChain(repoPath, tracyStartCommit);
         const prevMainTree = i > 0 ? mainCommits[i - 1].treeHash : mainCommit.treeHash;
 
         for (let j = 0; j < tracyChain.length; j++) {
-          const snapshot = tracyChain[j];
+          const snapshot: CommitInfo = tracyChain[j];
+          const messages: Array<TaskletMessage> = buildTaskletMessages(snapshot.description);
 
           if (isAiChange(snapshot)) {
             const parentInChain = j > 0 ? tracyChain[j - 1].treeHash : prevMainTree;
             let diffFromTree = parentInChain;
-            
+
             if (snapshot.parentHash) {
               const parentTree = await getCommitTree(repoPath, snapshot.parentHash);
 
@@ -184,16 +222,16 @@ export async function buildHistory(repoPath: string | undefined): Promise<Histor
                 diffFromTree = parentTree;
               }
             }
-            
+
             const fileChangesMap = await getDiff(repoPath, diffFromTree, snapshot.treeHash);
             for (const filePath of fileChangesMap.keys()) {
               const lines = await getChangedLines(repoPath, diffFromTree, snapshot.treeHash, filePath);
-              
+
               changes.push({
                 filePath,
                 lines,
                 model: snapshot.authorName,
-                prompt: snapshot.description.trim()
+                tasklet_messages: messages,
               });
             }
           }
