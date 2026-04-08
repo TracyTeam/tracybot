@@ -304,7 +304,6 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     history = result as unknown as { files: { path: string; tasklets: TaskletUI[] }[] } & History;
-    console.log(`history: ${JSON.stringify(history)}`);
     console.log(`Tracybot: loaded history with ${history.files.length} files`);
 
     // Build the line map from the loaded history for fast per-line lookups
