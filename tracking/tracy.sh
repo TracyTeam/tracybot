@@ -59,6 +59,18 @@ else
 fi
 
 # -------------------------------
+# SKIP IF NO FILE CHANGES
+# -------------------------------
+if git rev-parse --verify HEAD >/dev/null 2>&1; then
+    if git diff --quiet HEAD -- && git diff --cached --quiet; then
+        if $DEBUG; then
+            echo "No repository changes detected. Skipping Tracy snapshot."
+        fi
+        exit 0
+    fi
+fi
+
+# -------------------------------
 # TRACY ID
 # -------------------------------
 

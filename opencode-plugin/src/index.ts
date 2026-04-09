@@ -152,7 +152,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                         return
                     }
 
-                    const output = await $`${tracyPath} --user-name "opencode" --user-email "opencode" --description "${JSON.stringify(tasklet)}"`.cwd(repoRoot).quiet().text()
+                    const output = await $`${tracyPath} --user-name "opencode" --user-email "opencode" --description "${JSON.stringify(tasklet)}"`.cwd(repoRoot).text()
                     await L.info(`committed OC changes. tracy.sh: ${output}`, { tasklet })
                 }
             }
