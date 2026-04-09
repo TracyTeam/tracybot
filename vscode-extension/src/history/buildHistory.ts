@@ -1,6 +1,5 @@
 import { Change, CommitInfo, History, TaskletMessage } from "./types";
-import { getChangedLines, getCommitTree, getDiff, getTracyRefCommit, groupChangesByFile, runGit } from "./helpers";
-import { error } from "console";
+import { getChangedLines, getCommitTree, getDiff, getTracyRefCommit, groupChangesByFile, mapLinesToTree, runGit } from "./helpers";
 
 // Get all visible (non-hidden) commits from the user branch
 async function getMainCommits(repoPath: string): Promise<CommitInfo[]> {
@@ -193,6 +192,13 @@ export async function buildHistory(repoPath: string | undefined): Promise<Histor
       return null;
     }
 
+    const headCommitHash = await runGit(repoPath, ["rev-parse", "HEAD"]);
+    const headTree = await getCommitTree(repoPath, headCommitHash);
+      
+    if (!headTree) {
+      return null;
+    }
+
     const changes: Change[] = [];
     for (let i = 0; i < mainCommits.length; i++) {
       const mainCommit = mainCommits[i];
@@ -225,14 +231,17 @@ export async function buildHistory(repoPath: string | undefined): Promise<Histor
 
             const fileChangesMap = await getDiff(repoPath, diffFromTree, snapshot.treeHash);
             for (const filePath of fileChangesMap.keys()) {
-              const lines = await getChangedLines(repoPath, diffFromTree, snapshot.treeHash, filePath);
-
-              changes.push({
-                filePath,
-                lines,
-                model: snapshot.authorName,
-                tasklet_messages: messages,
-              });
+              const linesAtSnapshot = await getChangedLines(repoPath, diffFromTree, snapshot.treeHash, filePath);
+              const lines = await mapLinesToTree(repoPath, snapshot.treeHash, headTree, filePath, linesAtSnapshot);
+              
+              if (lines.length > 0) {
+                changes.push({
+                  filePath,
+                  lines,
+                  model: snapshot.authorName,
+                  tasklet_messages: messages,
+                });
+              }
             }
           }
         }
@@ -240,7 +249,7 @@ export async function buildHistory(repoPath: string | undefined): Promise<Histor
     }
 
     return {
-      id: await runGit(repoPath, ["rev-parse", "HEAD"]),
+      id: headCommitHash,
       files: groupChangesByFile(changes)
     };
   } catch (error) {
