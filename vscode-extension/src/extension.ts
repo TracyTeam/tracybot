@@ -4,7 +4,8 @@ import { getContiguousChunks } from './utils';
 import { getPromptPanelHtml } from './promptPanel';
 import { buildHistory } from './history/buildHistory';
 import { openTaskletMenu } from './taskletMenu';
-import { History } from './history/types';
+import { History, TaskletUI, LineMap } from './history/types';
+import { getRepoPath, getLineDeltas, applyDiffToLineMap } from './utils';
 
 // Tracks whether "AI blame mode" is currently active
 let aiBlameModeActive = false;
@@ -12,14 +13,11 @@ let aiBlameModeActive = false;
 // History data — populated asynchronously when the extension activates
 let history: History | undefined;
 
-// Extends the base Tasklet type from History with runtime-only UI state
-type TaskletUI = History['files'][number]['tasklets'][number] & { selected: boolean };
-
 // Maps a relative file path to a map of line number -> Tasklet
-// Built once after history loads, used for O(1) line lookups
+// Built once after history loads
 // When lines overlap, the last tasklet to claim a line wins
-type LineMap = Map<string, Map<number, TaskletUI>>;
 let lineMap: LineMap = new Map();
+let displayLineMap: LineMap = new Map(); // lineMap adjusted for user edits, used for decorations and CodeLens
 
 // Builds the lineMap from the loaded history
 // For every file in the history, create a map of line numbers to tasklets
@@ -44,11 +42,10 @@ function buildLineMap(h: typeof history & {}): LineMap {
   return result;
 }
 
-// Returns the line->tasklet map for a given document, or undefined if not in history
-function getLineMapForDocument(document: vscode.TextDocument): Map<number, TaskletUI> | undefined {
-  if (!lineMap.size) { return undefined; }
 
-  // Get the workspace root and ensure it's available, exit if not
+
+// Returns the relative path for a document, or undefined if outside the workspace
+function getDocumentRelativePath(document: vscode.TextDocument): string | undefined {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!workspaceRoot) { return undefined; }
 
@@ -56,18 +53,23 @@ function getLineMapForDocument(document: vscode.TextDocument): Map<number, Taskl
   const fullPath = document.uri.fsPath.replace(/\\/g, '/');
   const rootPath = workspaceRoot.replace(/\\/g, '/');
 
-  // Strip the workspace root prefix to get a relative path like 'backend/utils/config.py'
-  const relativePath = fullPath.startsWith(rootPath)
+  return fullPath.startsWith(rootPath)
     ? fullPath.slice(rootPath.length).replace(/^\//, '')
-    : fullPath;
+    : undefined;
+}
 
-  return lineMap.get(relativePath);
+// Returns the line->tasklet map for a given document, or undefined if not in history
+function getDisplayLineMapForDocument(document: vscode.TextDocument): Map<number, TaskletUI> | undefined {
+  if (!displayLineMap.size) { return undefined; }
+  const relativePath = getDocumentRelativePath(document);
+  if (!relativePath) { return undefined; }
+  return displayLineMap.get(relativePath);
 }
 
 // Returns the unique tasklets for a document in their original order
 // Used for decoration passes that need to iterate per-tasklet rather than per-line
 function getUniqueTaskletsForDocument(document: vscode.TextDocument): TaskletUI[] | undefined {
-  const map = getLineMapForDocument(document);
+  const map = getDisplayLineMapForDocument(document);
   if (!map) { return undefined; }
 
   // Deduplicate by reference — preserves original tasklet order
@@ -114,7 +116,7 @@ class TracybotCodeLensProvider implements vscode.CodeLensProvider {
     // Only show CodeLens when AI blame mode is active
     if (!aiBlameModeActive) { return []; }
 
-    const map = getLineMapForDocument(document);
+    const map = getDisplayLineMapForDocument(document);
     if (!map) { return []; }
 
     // Get the active editor and ensure it's the same document, exit if not
@@ -188,10 +190,40 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Refresh CodeLens whenever the cursor moves so the ghost text follows the cursor
   context.subscriptions.push(
-    vscode.window.onDidChangeTextEditorSelection(() => {
+    vscode.window.onDidChangeTextEditorSelection(event => {
+      // Ignore events from non-file editors (output panels, etc.)
+      if (event.textEditor.document.uri.scheme !== 'file') { return; }
       if (aiBlameModeActive) {
         // Update highlighted entry based on new cursor position, then refresh UI
         updateActiveSelection();
+        codeLensProvider.refresh();
+      }
+    })
+  );
+
+  // Watch for user edits and update the display lineMap in real time
+  context.subscriptions.push(
+    vscode.workspace.onDidSaveTextDocument(async document => {
+      // Ignore non-file documents (output channels, git internals, etc.)
+      if (document.uri.scheme !== 'file') { return; }
+
+      const relativePath = getDocumentRelativePath(document);
+      if (!relativePath) { return; }
+
+      const fileMap = displayLineMap.get(relativePath);
+      if (!fileMap) { return; } // file not in history — nothing to update
+
+      const repoPath = await getRepoPath();
+      if (!repoPath) { return; }
+
+      // Get the line deltas for the entire repo, then apply them to just this file's line map
+      const deltas = await getLineDeltas(repoPath);
+
+      displayLineMap = applyDiffToLineMap(lineMap, deltas);
+
+      // Redraw decorations and refresh CodeLens to reflect the updated map
+      updateDecorations();
+      if (aiBlameModeActive) {
         codeLensProvider.refresh();
       }
     })
@@ -276,7 +308,9 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Re-apply decorations when switching files
   context.subscriptions.push(
-    vscode.window.onDidChangeActiveTextEditor(() => {
+    vscode.window.onDidChangeActiveTextEditor(editor => {
+      // Ignore non-file editors
+      if (!editor || editor.document.uri.scheme !== 'file') { return; }
       if (aiBlameModeActive) {
         updateActiveSelection();
         codeLensProvider.refresh();
@@ -287,12 +321,16 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.workspace.onDidOpenTextDocument(() => updateDecorations())
+    vscode.workspace.onDidOpenTextDocument(document => {
+      // Ignore non-file documents (output channels, git internals, etc.)
+      if (document.uri.scheme !== 'file') { return; }
+      updateDecorations();
+    })
   );
 
   // Load history asynchronously then trigger an initial decoration pass
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  buildHistory(workspaceRoot).then(result => {
+  buildHistory(workspaceRoot).then(async (result) => {
     if (!result) {
       console.error('Failed to build history');
       return;
@@ -309,6 +347,14 @@ export function activate(context: vscode.ExtensionContext) {
     // Build the line map from the loaded history for fast per-line lookups
     lineMap = buildLineMap(history);
 
+    // Get repo path
+    const repoPath = await getRepoPath();
+    if (!repoPath) { return; }
+
+    // Apply latest line deltas on initial history load
+    const deltas = await getLineDeltas(repoPath);
+    displayLineMap = applyDiffToLineMap(lineMap, deltas);
+
     updateDecorations();
     codeLensProvider.refresh();
   });
@@ -319,10 +365,12 @@ export function activate(context: vscode.ExtensionContext) {
 function updateActiveSelection() {
   const editor = vscode.window.activeTextEditor;
   if (!editor) { return; }
+  // Ignore non-file editors (output panels, etc.)
+  if (editor.document.uri.scheme !== 'file') { return; }
 
   // Use cursor position only, ignoring any selection range
   const cursorLine = editor.selection.active.line;
-  const map = getLineMapForDocument(editor.document);
+  const map = getDisplayLineMapForDocument(editor.document);
   const tasklets = getUniqueTaskletsForDocument(editor.document);
 
   if (map && tasklets) {
@@ -343,8 +391,9 @@ function updateDecorations() {
   // Get the active editor, exit if there's none
   const editor = vscode.window.activeTextEditor;
   if (!editor) { return; }
+  if (editor.document.uri.scheme !== 'file') { return; }
 
-  const map = getLineMapForDocument(editor.document);
+  const map = getDisplayLineMapForDocument(editor.document);
 
   // If there are no tasklets for this file, clear all decorations and exit
   if (!map) {

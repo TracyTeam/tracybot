@@ -34,3 +34,13 @@ export interface Change {
   model: string;
   prompt: string;
 }
+
+export type FileLineDelta = {
+  consumed: { at: number; oldCount: number }[];
+  shifts: { at: number; delta: number; oldCount: number }[];
+};
+
+// Extends the base Tasklet type from History with runtime-only UI state
+export type TaskletUI = History['files'][number]['tasklets'][number] & { selected: boolean };
+
+export type LineMap = Map<string, Map<number, TaskletUI>>;
