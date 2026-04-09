@@ -1,26 +1,31 @@
+import pLimit from 'p-limit';
 import { spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import { Change, DiffHunk, History } from "./types";
 
+const PROCESS_LIMIT = pLimit(5);
+
 export async function runGit(repoPath: string, args: string[]): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn("git", ["-C", repoPath, ...args]);
-    let stdout = "";
-    let stderr = "";
+  return PROCESS_LIMIT(() => {
+    return new Promise((resolve, reject) => {
+      const proc = spawn("git", ["-C", repoPath, ...args]);
+      let stdout = "";
+      let stderr = "";
 
-    proc.stdout.on("data", (data) => { stdout += data.toString(); });
-    proc.stderr.on("data", (data) => { stderr += data.toString(); });
+      proc.stdout.on("data", (data) => { stdout += data.toString(); });
+      proc.stderr.on("data", (data) => { stderr += data.toString(); });
 
-    proc.on("close", (code) => {
-      if (code === 0) {
-        resolve(stdout.trim());
-      } else {
-        reject(new Error(`Command failed: git -C ${repoPath} ${args.join(" ")}\n${stderr}`));
-      }
+      proc.on("close", (code) => {
+        if (code === 0) {
+          resolve(stdout.trim());
+        } else {
+          reject(new Error(`Command failed: git -C ${repoPath} ${args.join(" ")}\n${stderr}`));
+        }
+      });
+
+      proc.on("error", reject);
     });
-
-    proc.on("error", reject);
   });
 }
 
