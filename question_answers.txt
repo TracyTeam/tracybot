@@ -1,5 +1,0 @@
-Question: What's your favorite color?
-Answer: Purple
-
-Question: If you could take a dream vacation anywhere, where would you go?
-Answer: Stay at home
