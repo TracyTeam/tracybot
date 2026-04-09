@@ -130,9 +130,11 @@ fi
 # HIDDEN COMMIT
 # -------------------------------
 
+SESSION_ID=$(echo "$DESCRIPTION" | jq -r '.sessionId // empty' 2>/dev/null || true)
+
 COMMIT=$(GIT_AUTHOR_NAME="$USER_NAME" GIT_AUTHOR_EMAIL="$USER_EMAIL" \
         GIT_COMMITTER_NAME="$USER_NAME" GIT_COMMITTER_EMAIL="$USER_EMAIL" \
-        git commit-tree "$TREE" $PARENT_FLAG -m "tracy snapshot" ${DESCRIPTION:+-m "$DESCRIPTION"})
+        git commit-tree "$TREE" $PARENT_FLAG -m "$SESSION_ID" ${DESCRIPTION:+-m "$DESCRIPTION"})
 
 # Store hidden commit reference
 git config tracy."$VISIBLE_HEAD".hidden "$COMMIT" 
