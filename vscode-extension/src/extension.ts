@@ -292,7 +292,10 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Load history asynchronously then trigger an initial decoration pass
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const time = Date.now();
   buildHistory(workspaceRoot).then(result => {
+    console.log(Date.now() - time);
+
     if (!result) {
       console.error('Failed to build history');
       return;

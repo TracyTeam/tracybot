@@ -1,6 +1,5 @@
 import { Change, CommitInfo, History, TaskletMessage } from "./types";
-import { getChangedLines, getCommitTree, getDiff, getTracyRefCommit, groupChangesByFile, runGit } from "./helpers";
-import { error } from "console";
+import { getChangedLines, getCommitTree, getDiff, getTracyRefCommit, groupChangesByFile, mapLinesToTree, runGit } from "./helpers";
 
 // Get all visible (non-hidden) commits from the user branch
 async function getMainCommits(repoPath: string): Promise<CommitInfo[]> {
@@ -193,27 +192,36 @@ export async function buildHistory(repoPath: string | undefined): Promise<Histor
       return null;
     }
 
-    const changes: Change[] = [];
-    for (let i = 0; i < mainCommits.length; i++) {
-      const mainCommit = mainCommits[i];
+    const headCommitHash = await runGit(repoPath, ["rev-parse", "HEAD"]);
+    const headTree = await getCommitTree(repoPath, headCommitHash);
+      
+    if (!headTree) {
+      return null;
+    }
 
-      const tracyId = await getTracyIdNote(repoPath, mainCommit.hash);
-      if (tracyId) {
+    const changesNested = await Promise.all(
+      mainCommits.map(async (mainCommit, i) => {
+        const tracyId = await getTracyIdNote(repoPath, mainCommit.hash);
+        if (!tracyId) {
+          return [];
+        }
+
         const tracyStartCommit = await getTracyRefCommit(repoPath, tracyId);
         if (!tracyStartCommit) {
-          continue;
+          return [];
         }
 
         const tracyChain: CommitInfo[] = await getTracyChain(repoPath, tracyStartCommit);
         const prevMainTree = i > 0 ? mainCommits[i - 1].treeHash : mainCommit.treeHash;
 
-        for (let j = 0; j < tracyChain.length; j++) {
-          const snapshot: CommitInfo = tracyChain[j];
-          const messages: Array<TaskletMessage> = buildTaskletMessages(snapshot.description);
+        const chainChanges = await Promise.all(
+          tracyChain.map(async (snapshot, j) => {
+            if (!isAiChange(snapshot)) {
+              return [];
+            }
 
-          if (isAiChange(snapshot)) {
-            const parentInChain = j > 0 ? tracyChain[j - 1].treeHash : prevMainTree;
-            let diffFromTree = parentInChain;
+            const messages: Array<TaskletMessage> = buildTaskletMessages(snapshot.description);
+            let diffFromTree = j > 0 ? tracyChain[j - 1].treeHash : prevMainTree;
 
             if (snapshot.parentHash) {
               const parentTree = await getCommitTree(repoPath, snapshot.parentHash);
@@ -224,24 +232,35 @@ export async function buildHistory(repoPath: string | undefined): Promise<Histor
             }
 
             const fileChangesMap = await getDiff(repoPath, diffFromTree, snapshot.treeHash);
-            for (const filePath of fileChangesMap.keys()) {
-              const lines = await getChangedLines(repoPath, diffFromTree, snapshot.treeHash, filePath);
+            const fileResults = await Promise.all(
+              Array.from(fileChangesMap.keys()).map(async (filePath) => {
+                const linesAtSnapshot = await getChangedLines(repoPath, diffFromTree, snapshot.treeHash, filePath);
+                const lines = await mapLinesToTree(repoPath, snapshot.treeHash, headTree, filePath, linesAtSnapshot);
 
-              changes.push({
-                filePath,
-                lines,
-                model: snapshot.authorName,
-                tasklet_messages: messages,
-              });
-            }
-          }
-        }
-      }
-    }
+                if (lines.length > 0) {
+                  return {
+                    filePath,
+                    lines,
+                    model: snapshot.authorName,
+                    tasklet_messages: messages,
+                  } as Change;
+                }
+
+                return null;
+              })
+            );
+
+            return fileResults.filter((res): res is Change => res !== null);
+          })
+        );
+
+        return chainChanges.flat();
+      })
+    );
 
     return {
-      id: await runGit(repoPath, ["rev-parse", "HEAD"]),
-      files: groupChangesByFile(changes)
+      id: headCommitHash,
+      files: groupChangesByFile(changesNested.flat())
     };
   } catch (error) {
     console.error("Error building history:", error);
