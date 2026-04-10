@@ -1,1 +1,0 @@
-{"questions": [{"header": "Test file", "multiple": false, "options": [{"description": "Create the file as requested", "label": "Yes"}, {"description": "Something else", "label": "No"}], "question": "Should I create freeme.txt with the question tool call content?"}]}
