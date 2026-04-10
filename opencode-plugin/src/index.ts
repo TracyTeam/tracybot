@@ -117,7 +117,6 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             const questionText = JSON.stringify(question)
             
             if (question.planOutputIndex >= finalPlanCount) {
-    
                 continue
             }
             
