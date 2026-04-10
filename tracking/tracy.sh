@@ -7,6 +7,7 @@ USER_EMAIL=""
 DESCRIPTION=""        # Optional description (prompt) for snapshot
 SESSION_ID=""
 RESET_ID=false        # Flag to reset identifier
+INDEX_ONLY=false      # Flag to snapshot the index instead of the working tree
 DEBUG=true
 
 while [[ $# -gt 0 ]]; do
@@ -29,6 +30,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --reset)
             RESET_ID=true
+            shift
+            ;;
+        --index-only)
+            INDEX_ONLY=true
             shift
             ;;
         *)
@@ -80,18 +85,23 @@ fi
 # TRACY ID
 # -------------------------------
 
+TRACY_ID=$(git config --get tracy.current-id || true)  # Try to get existing Tracy ID
+
 if $RESET_ID; then
     # Remove stored Tracy ID
     git config --unset tracy.current-id 2>/dev/null || true 
     # Remove mapping to hidden commit
-    git config --unset tracy."$VISIBLE_HEAD".hidden 2>/dev/null || true 
+    if [[ -n "$TRACY_ID" ]]; then
+        git config --unset tracy."$TRACY_ID".hidden 2>/dev/null || true
+    fi
 
     if $DEBUG; then
         echo "Tracy chain reset."
     fi
+
+    TRACY_ID=""
 fi
 
-TRACY_ID=$(git config --get tracy.current-id || true)  # Try to get existing Tracy ID
 if [[ -z "$TRACY_ID" ]]; then
     TRACY_ID=$(uuidgen | tr '[:upper:]' '[:lower:]')   # Generate new UUID if missing
     git config tracy.current-id "$TRACY_ID"            # Store it in git config
@@ -102,24 +112,30 @@ REF="$REF_BASE/$TRACY_ID"
 # TEMPORARY INDEX FOR HIDDEN COMMIT
 # -------------------------------
 
-TMP_INDEX=$(mktemp)                            # Create temporary file for Git index
-REAL_INDEX="$(git rev-parse --git-dir)/index"  # Path to real Git index
+if $INDEX_ONLY; then
+    TREE=$(git write-tree) # Snapshot the actual staged changes
+else
+    TMP_INDEX=$(mktemp)                            # Create temporary file for Git index
+    REAL_INDEX="$(git rev-parse --git-dir)/index"  # Path to real Git index
 
-# Only copy index if it actually exists (prevents crash on fresh repos)
-if [[ -f "$REAL_INDEX" ]]; then
-    cp "$REAL_INDEX" "$TMP_INDEX"   # Copy current index to temp index
+    # Only copy index if it actually exists (prevents crash on fresh repos)
+    if [[ -f "$REAL_INDEX" ]]; then
+        cp "$REAL_INDEX" "$TMP_INDEX"   # Copy current index to temp index
+    fi
+
+    export GIT_INDEX_FILE="$TMP_INDEX"  # Tell Git to use temp index instead of real one
+    git add -A                          # Stage everything into the temporary index
+    TREE=$(git write-tree)              # Create a tree object from current index state
+    
+    rm -f "$TMP_INDEX"                  # Delete temporary index file
 fi
-
-export GIT_INDEX_FILE="$TMP_INDEX"  # Tell Git to use temp index instead of real one
-git add -A                          # Stage everything into the temporary index
-TREE=$(git write-tree)              # Create a tree object from current index state
 
 # -------------------------------
 # CHECK FOR PARENT & REDUNDANCY
 # -------------------------------
 
 # Get last hidden commit for this HEAD
-LATEST_HIDDEN=$(git config --get tracy."$VISIBLE_HEAD".hidden || true)
+LATEST_HIDDEN=$(git config --get tracy."$TRACY_ID".hidden || true)
 
 # Prevent creating identical, empty snapshots
 if [[ -n "$LATEST_HIDDEN" ]]; then
@@ -130,7 +146,6 @@ if [[ -n "$LATEST_HIDDEN" ]]; then
             echo "No changes since last tracy snapshot. Skipping."
         fi
 
-        rm -f "$TMP_INDEX"  # Clean up temp index
         exit 0
     fi
 fi
@@ -154,14 +169,13 @@ COMMIT=$(GIT_AUTHOR_NAME="$USER_NAME" GIT_AUTHOR_EMAIL="$USER_EMAIL" \
         git commit-tree "$TREE" $PARENT_FLAG -m "$SESSION_ID" ${DESCRIPTION:+-m "$DESCRIPTION"})
 
 # Store hidden commit reference
-git config tracy."$VISIBLE_HEAD".hidden "$COMMIT" 
+git config tracy."$TRACY_ID".hidden "$COMMIT" 
 
 # -------------------------------
 # UPDATE HIDDEN BRANCH REF
 # -------------------------------
 
 git update-ref "$REF" "$COMMIT"  # Move/update Tracy ref to new commit
-rm -f "$TMP_INDEX"               # Delete temporary index file
 
 if $DEBUG; then
     echo "Committed to $REF -> $COMMIT"

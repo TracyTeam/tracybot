@@ -188,7 +188,14 @@ export function groupChangesByFile(changes: Change[]): History["files"] {
 
   for (const change of changes) {
     const existing = fileMap.get(change.filePath) || [];
-    existing.push(change);
+
+    const duplicate = existing.find(e => e.snapshotHash === change.snapshotHash);
+    if (duplicate) {
+      // remove the duplicates by turning them into a set then back to an array
+      duplicate.lines = Array.from(new Set([...duplicate.lines, ...change.lines])).sort((a, b) => a - b);
+    } else {
+      existing.push(change);
+    }
 
     fileMap.set(change.filePath, existing);
   }
