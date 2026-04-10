@@ -95,7 +95,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
     const snapshotLocks = new Map<string, Promise<void>>()
 
     const sessionQuestions = new Map<string, Question[]>()
-    const pendingQuestionsIndices = new Map<string, number[]>()
+    const pendingQuestionsIndices = new Map<string, number>()
 
     async function createTasklet(sessionId: string): Promise<Tasklet | undefined> {
         const planOutputs = await getPlanOutputs(sessionId)
@@ -216,7 +216,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                 const callID = input.callID
                 if (callID) {
                     const planOutputIndex = (await getPlanOutputs(sessionId)).length
-                    pendingQuestionsIndices.set(`${sessionId}:${callID}:`, planOutputIndex)
+                    pendingQuestionsIndices.set(`${sessionId}:${callID}`, planOutputIndex)
                     await L.debug(`Captured planOutputIndex ${planOutputIndex} for question in before hook`)
                 }
             }
