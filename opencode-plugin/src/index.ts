@@ -143,10 +143,10 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             .filter(text => text)
             .join("\n\n---\n\n"),
         }
-        
+
         const buildQuestions = storedQuestions.filter(q => q.planOutputIndex >= planOutputs.length)
         if (buildQuestions.length > 0) {
-            const buildQuestionText = buildQuestions.map(q => `Q: ${q.question}\nA: ${q.answer}`)
+            const buildQuestionText = buildQuestions.map(q => `Q: ${q.question}\nA: ${q.answer}`).join("\n\n---\n\n")
             buildOutput.response = buildOutput.response ? `${buildOutput.response}\n\n---\n\n${buildQuestionText}` : buildQuestionText
         }
         
