@@ -1,6 +1,6 @@
 import * as z from "zod";
 
-const taskletMessage = z.object({
+export const taskletMessage = z.object({
   stage: z.enum(["plan", "build"]),
   type: z.enum(["prompt", "response"]),
   message: z.string(),
@@ -42,6 +42,16 @@ export interface Change {
   tasklet_messages: TaskletMessage[];
   snapshotHash: string;
 }
+
+export type FileLineDelta = {
+  consumed: { at: number; oldCount: number }[];
+  shifts: { at: number; delta: number; oldCount: number }[];
+};
+
+// Extends the base Tasklet type from History with runtime-only UI state
+export type TaskletUI = History['files'][number]['tasklets'][number] & { selected: boolean };
+
+export type LineMap = Map<string, Map<number, TaskletUI>>;
 
 export interface DiffHunk {
   oldStart: number;

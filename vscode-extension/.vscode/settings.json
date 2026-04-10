@@ -8,7 +8,7 @@
 	},
 	// Turn off tsc task auto detection since we have the necessary tasks as npm scripts
 	"js/ts.tsc.autoDetect": "off",
-	"editor.formatOnSave": true,
+	"editor.formatOnSave": false,
 	"editor.insertSpaces": true,
 	"editor.tabSize": 2
 }
