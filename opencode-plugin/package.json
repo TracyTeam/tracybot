@@ -4,20 +4,19 @@
   "type": "module",
   "private": true,
   "dependencies": {
-    "@opencode-ai/plugin": "^1.3.2",
-    "@opencode-ai/sdk": "^1.3.2",
-    "zod": "^4.3.6",
   },
   "devDependencies": {
-    "@types/bun": "^1.3.11",
+    "@opencode-ai/plugin": "^1.3.2",
+    "@opencode-ai/sdk": "^1.3.2",
+    "@types/bun": "^1.3.11"
   },
   "peerDependencies": {
-    "typescript": "^5",
+    "typescript": "^5"
   },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
     "deploy": "bun scripts/deploy.js",
-    "logs": "bun scripts/getLogs.js",
-  },
+    "logs": "bun scripts/getLogs.js"
+  }
 }
