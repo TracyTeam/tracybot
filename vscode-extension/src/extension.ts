@@ -4,7 +4,7 @@ import { getContiguousChunks } from './utils';
 import { getPromptPanelHtml } from './promptPanel';
 import { buildHistory } from './history/buildHistory';
 import { openTaskletMenu } from './taskletMenu';
-import { History } from './history/types';
+import { History, TaskletMessage } from './history/types';
 
 // Tracks whether "AI blame mode" is currently active
 let aiBlameModeActive = false;
@@ -142,7 +142,7 @@ class TracybotCodeLensProvider implements vscode.CodeLensProvider {
         title: `AI blame: ${taskletUnderCursor.name}`,
         // Opens the prompt panel when clicked, passing the tasklet's prompt
         command: 'tracybot-extension.openPromptPanel',
-        arguments: [taskletUnderCursor.prompt, taskletUnderCursor.name, taskletUnderCursor.model, taskletUnderCursor.lines],
+        arguments: [taskletUnderCursor.messages, taskletUnderCursor.name, taskletUnderCursor.model, taskletUnderCursor.lines],
         tooltip: `Click to view prompt for "${taskletUnderCursor.name}"`,
       })
     ];
@@ -218,7 +218,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Register command to open a prompt panel with the tasklet's prompt
   context.subscriptions.push(
-    vscode.commands.registerCommand('tracybot-extension.openPromptPanel', (prompt: string, message: string, model: string, lines: number[]) => {
+    vscode.commands.registerCommand('tracybot-extension.openPromptPanel', (taskletMessages: TaskletMessage[], message: string, model: string, lines: number[]) => {
       // Create and show a webview panel to display the prompt
 
       const editor = vscode.window.activeTextEditor;
@@ -259,7 +259,7 @@ export function activate(context: vscode.ExtensionContext) {
             const entry = entries[msg.index];
 
             panel.webview.html = getPromptPanelHtml(
-              entry.prompt,
+              entry.messages,
               entry.name,
               entry.model,
               entry.lines
@@ -270,7 +270,7 @@ export function activate(context: vscode.ExtensionContext) {
         context.subscriptions
       );
 
-      panel.webview.html = getPromptPanelHtml(prompt, message, model, lines);
+      panel.webview.html = getPromptPanelHtml(taskletMessages, message, model, lines);
     })
   );
 
@@ -292,7 +292,10 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Load history asynchronously then trigger an initial decoration pass
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const time = Date.now();
   buildHistory(workspaceRoot).then(result => {
+    console.log(Date.now() - time);
+
     if (!result) {
       console.error('Failed to build history');
       return;

@@ -1,5 +1,11 @@
 import * as z from "zod";
 
+const taskletMessage = z.object({
+  stage: z.enum(["plan", "build"]),
+  type: z.enum(["prompt", "response"]),
+  message: z.string(),
+});
+
 const historySchema = z.object({
   id: z.string(),
   files: z.array(
@@ -9,7 +15,7 @@ const historySchema = z.object({
         z.object({
           model: z.string(),
           name: z.string(),
-          prompt: z.string(),
+          messages: z.array(taskletMessage),
           lines: z.array(z.number())
         })
       )
@@ -17,6 +23,7 @@ const historySchema = z.object({
   )
 });
 export type History = z.infer<typeof historySchema>;
+export type TaskletMessage = z.infer<typeof taskletMessage>
 
 export interface CommitInfo {
   hash: string;
@@ -32,5 +39,12 @@ export interface Change {
   filePath: string;
   lines: number[];
   model: string;
-  prompt: string;
+  tasklet_messages: TaskletMessage[];
+}
+
+export interface DiffHunk {
+  oldStart: number;
+  oldCount: number;
+  newStart: number;
+  newCount: number;
 }
