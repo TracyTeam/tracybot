@@ -2,7 +2,7 @@ import pLimit from 'p-limit';
 import { spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
-import { Change, DiffHunk, History } from "./types";
+import { Change, CommitInfo, DiffHunk, History } from "./types";
 
 const PROCESS_LIMIT = pLimit(5);
 
@@ -45,10 +45,17 @@ export async function getTracyRefCommit(repoPath: string, tracyId: string): Prom
 export async function getDiff(
   repoPath: string, 
   fromTree: string, 
-  toTree: string, 
+  toTree: string | "WORKING_TREE", 
   filePath?: string
 ): Promise<Map<string, DiffHunk[]>> {
-  const args = ["diff", "--no-color", "--unified=0", `${fromTree}..${toTree}`];
+  const args = ["diff", "--no-color", "--unified=0"];
+  
+  if (toTree === "WORKING_DIR") {
+    args.push(fromTree);
+  } else {
+    args.push(`${fromTree}..${toTree}`);
+  }
+
   if (filePath) {
     args.push("--", filePath);
   }
@@ -109,6 +116,24 @@ export async function getChangedLines(repoPath: string, fromTree: string, toTree
   }
 
   return lines;
+}
+
+export async function fileExists(
+  repoPath: string,
+  treeHash: string,
+  filePath: string
+): Promise<boolean> {
+  try {
+    await runGit(repoPath, [
+      "cat-file",
+      "-e",
+      `${treeHash}:${filePath}`,
+    ]);
+
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // Map line numbers from an old tree to their 
@@ -181,6 +206,34 @@ export async function getCommitTree(repoPath: string, commitHash: string): Promi
   } catch {
     return null;
   }
+}
+
+export async function getActiveTracyId(repoPath: string): Promise<string | null> {
+  try {
+    return await runGit(repoPath, ["config", "--get", "tracy.current-id"]);
+  } catch {
+    return null;
+  }
+}
+
+export async function getActiveHiddenCommit(repoPath: string, tracyId: string): Promise<string | null> {
+  try {
+    return await runGit(repoPath, ["config", "--get", `tracy.${tracyId}.hidden`]);
+  } catch {
+    return null;
+  }
+}
+
+export async function getUserName(repoPath: string): Promise<string> {
+  try {
+    return await runGit(repoPath, ["config", "--get", "user.name"]);
+  } catch {
+    return "User";
+  }
+}
+
+export function isAiChange(commit: CommitInfo): boolean {
+  return commit.authorEmail.toLowerCase() === "opencode";
 }
 
 export function groupChangesByFile(changes: Change[]): History["files"] {

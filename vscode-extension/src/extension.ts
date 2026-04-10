@@ -161,6 +161,7 @@ export function activate(context: vscode.ExtensionContext) {
   const time = Date.now();
   buildHistory(workspaceRoot).then(async (result) => {
     console.log(`History build time: ${Date.now() - time}ms`);
+    console.log(result);
 
     if (!result) {
       console.error('Failed to build history');

@@ -1,5 +1,17 @@
 import { Change, CommitInfo, History, TaskletMessage } from "./types";
-import { getChangedLines, getCommitTree, getDiff, getTracyRefCommit, groupChangesByFile, mapLinesToTree, runGit } from "./helpers";
+import {
+  getActiveHiddenCommit,
+  getActiveTracyId,
+  getChangedLines,
+  getCommitTree,
+  getDiff,
+  getTracyRefCommit,
+  getUserName,
+  groupChangesByFile,
+  isAiChange,
+  mapLinesToTree,
+  runGit
+} from "./helpers";
 
 const DELIMITER = "||#--TRACY--#||";
 
@@ -131,11 +143,7 @@ async function getTracyChain(repoPath: string, startCommit: string): Promise<Com
     }
   }
 
-  return commits;
-}
-
-function isAiChange(commit: CommitInfo): boolean {
-  return commit.authorEmail.toLowerCase() === "opencode";
+  return commits.reverse();
 }
 
 function buildTaskletMessages(tasklet_str: string): TaskletMessage[] {
@@ -174,6 +182,211 @@ function buildTaskletMessages(tasklet_str: string): TaskletMessage[] {
   return messages;
 }
 
+async function extractChangesFromSnapshotChain(
+  repoPath: string,
+  chain: CommitInfo[],
+  baseTree: string,
+  targetTree: string | "WORKING_DIR",
+  finalTree: string | "WORKING_DIR"
+): Promise<Change[]> {
+  const results = await Promise.all(
+    chain.map(async (snapshot, index) => {
+      return extractSnapshot(repoPath, snapshot, chain, baseTree, index, targetTree, finalTree);
+    })
+  );
+
+  return results.flat();
+}
+
+async function extractSnapshot(
+  repoPath: string,
+  snapshot: CommitInfo,
+  chain: CommitInfo[],
+  baseTree: string,
+  index: number,
+  targetTree: string | "WORKING_DIR",
+  finalTree: string | "WORKING_DIR"
+): Promise<Change[]> {
+  if (!isAiChange(snapshot)) {
+    return [];
+  }
+
+  const messages: Array<TaskletMessage> = buildTaskletMessages(snapshot.description);
+  let diffFromTree = index > 0 ? chain[index - 1].treeHash : baseTree;
+
+  if (snapshot.parentHash) {
+    const parentTree = await getCommitTree(repoPath, snapshot.parentHash);
+    
+    if (parentTree) {
+      diffFromTree = parentTree;
+    }
+  }
+
+  const fileChangesMap = await getDiff(repoPath, diffFromTree, snapshot.treeHash);
+  const fileResults = await Promise.all(
+    Array.from(fileChangesMap.keys()).map(async (filePath) => {
+      const linesAtSnapshot = await getChangedLines(
+        repoPath,
+        diffFromTree,
+        snapshot.treeHash,
+        filePath
+      );
+
+      let lines: number[] = [];
+
+      if (targetTree === "WORKING_DIR") {
+        lines = await mapLinesToTree(
+          repoPath,
+          snapshot.treeHash,
+          "WORKING_DIR",
+          filePath,
+          linesAtSnapshot
+        );
+      } else {
+        // Map the snapshot to the real commit. Unstaged lines will be treated as deleted and dropped.
+        const linesInMainCommit = await mapLinesToTree(
+          repoPath,
+          snapshot.treeHash,
+          targetTree,
+          filePath,
+          linesAtSnapshot
+        );
+
+        // Map the surviving lines from the real commit to the finalTree
+        lines = await mapLinesToTree(
+          repoPath,
+          targetTree,
+          finalTree,
+          filePath,
+          linesInMainCommit
+        );
+      }
+
+      if (lines.length > 0) {
+        return {
+          filePath,
+          lines,
+          model: snapshot.authorName,
+          tasklet_messages: messages,
+          snapshotHash: snapshot.hash,
+        } as Change;
+      }
+
+      return null;
+    })
+  );
+
+  return fileResults.filter((res): res is Change => res !== null);
+}
+
+async function buildCommittedHistory(
+  repoPath: string,
+  mainCommits: CommitInfo[],
+  headTree: string
+): Promise<Change[]> {
+  const result = await Promise.all(
+    mainCommits.map(async (mainCommit, i) => {
+      const tracyId = await getTracyIdNote(repoPath, mainCommit.hash);
+      if (!tracyId) {
+        return [];
+      }
+
+      const tracyStartCommit = await getTracyRefCommit(repoPath, tracyId);
+      if (!tracyStartCommit) {
+        return [];
+      }
+
+      const tracyChain: CommitInfo[] = await getTracyChain(repoPath, tracyStartCommit);
+      const prevMainTree = i > 0 ? mainCommits[i - 1].treeHash : mainCommit.treeHash;
+
+      return extractChangesFromSnapshotChain(
+        repoPath,
+        tracyChain,
+        prevMainTree,
+        mainCommit.treeHash,
+        headTree
+      );
+    })
+  );
+
+  return result.flat();
+}
+
+async function buildUncommittedChanges(
+  repoPath: string,
+  headTree: string
+): Promise<{ uncommittedChanges: Change[]; lastTreeForUserDiff: string }> {
+  let uncommittedChanges: Change[] = [];
+  let lastTreeForUserDiff = headTree;
+
+  const activeTracyId = await getActiveTracyId(repoPath);
+  if (!activeTracyId) {
+    return { uncommittedChanges, lastTreeForUserDiff };
+  }
+
+  const activeHiddenTip = await getActiveHiddenCommit(repoPath, activeTracyId);
+  if (!activeHiddenTip) {
+    return { uncommittedChanges, lastTreeForUserDiff };
+  }
+
+  const tracyChain = await getTracyChain(repoPath, activeHiddenTip);
+
+  if (tracyChain.length > 0) {
+    lastTreeForUserDiff = tracyChain[tracyChain.length - 1].treeHash;
+  }
+
+  const chainChanges = await Promise.all(
+    tracyChain.map((snapshot, index) =>
+      extractSnapshot(
+        repoPath,
+        snapshot,
+        tracyChain,
+        headTree,
+        index,
+        "WORKING_DIR",
+        "WORKING_DIR"
+      )
+    )
+  );
+
+  uncommittedChanges.push(...chainChanges.flat());
+
+  return { uncommittedChanges, lastTreeForUserDiff };
+}
+
+async function buildUserWorkingChanges(
+  repoPath: string,
+  baseTree: string
+): Promise<Change[]> {
+  const userName = await getUserName(repoPath);
+  const userDiffMap = await getDiff(repoPath, baseTree, "WORKING_DIR");
+
+  const userChanges = await Promise.all(
+    Array.from(userDiffMap.keys()).map(async (filePath) => {
+      const lines = await getChangedLines(
+        repoPath,
+        baseTree,
+        "WORKING_DIR",
+        filePath
+      );
+
+      if (lines.length > 0) {
+        return {
+          filePath,
+          lines,
+          model: userName,
+          tasklet_messages: [],
+          snapshotHash: "WORKING_DIR",
+        } as Change;
+      }
+
+      return null;
+    })
+  );
+
+  return userChanges.filter((res): res is Change => res !== null);
+}
+
 // AAAAAAAAAAAAAAA
 export async function buildHistory(repoPath: string | undefined): Promise<History | null> {
   if (!repoPath) {
@@ -201,73 +414,17 @@ export async function buildHistory(repoPath: string | undefined): Promise<Histor
       return null;
     }
 
-    const changesNested = await Promise.all(
-      mainCommits.map(async (mainCommit, i) => {
-        const tracyId = await getTracyIdNote(repoPath, mainCommit.hash);
-        if (!tracyId) {
-          return [];
-        }
-
-        const tracyStartCommit = await getTracyRefCommit(repoPath, tracyId);
-        if (!tracyStartCommit) {
-          return [];
-        }
-
-        const tracyChain: CommitInfo[] = await getTracyChain(repoPath, tracyStartCommit);
-        const prevMainTree = i > 0 ? mainCommits[i - 1].treeHash : mainCommit.treeHash;
-
-        const chainChanges = await Promise.all(
-          tracyChain.map(async (snapshot, j) => {
-            if (!isAiChange(snapshot)) {
-              return [];
-            }
-
-            const messages: Array<TaskletMessage> = buildTaskletMessages(snapshot.description);
-            let diffFromTree = j > 0 ? tracyChain[j - 1].treeHash : prevMainTree;
-
-            if (snapshot.parentHash) {
-              const parentTree = await getCommitTree(repoPath, snapshot.parentHash);
-
-              if (parentTree) {
-                diffFromTree = parentTree;
-              }
-            }
-
-            const fileChangesMap = await getDiff(repoPath, diffFromTree, snapshot.treeHash);
-            const fileResults = await Promise.all(
-              Array.from(fileChangesMap.keys()).map(async (filePath) => {
-                const linesAtSnapshot = await getChangedLines(repoPath, diffFromTree, snapshot.treeHash, filePath);
-                
-                // Map the snapshot to the real commit. Unstaged lines will be treated as deleted and dropped.
-                const linesInMainCommit = await mapLinesToTree(repoPath, snapshot.treeHash, mainCommit.treeHash, filePath, linesAtSnapshot);
-                // Map the surviving lines from the real commit to the absolute latest HEAD
-                const lines = await mapLinesToTree(repoPath, mainCommit.treeHash, headTree, filePath, linesInMainCommit);
-                
-                if (lines.length > 0) {
-                  return {
-                    filePath,
-                    lines,
-                    model: snapshot.authorName,
-                    tasklet_messages: messages,
-                    snapshotHash: snapshot.hash,
-                  } as Change;
-                }
-
-                return null;
-              })
-            );
-
-            return fileResults.filter((res): res is Change => res !== null);
-          })
-        );
-
-        return chainChanges.flat();
-      })
-    );
+    // TODO: these should contain both AI and user changes
+    // Otherwise, there is no way to detect if an AI line was user changed
+    const committedChanges = await buildCommittedHistory(repoPath, mainCommits, headTree);
+    const { uncommittedChanges, lastTreeForUserDiff } = await buildUncommittedChanges(repoPath, headTree);
+    // FIX: this right now treats user changes as AI changes, 
+    // because the returned object of buildHistory contains only AI changes
+    const userChanges = await buildUserWorkingChanges(repoPath, lastTreeForUserDiff);
 
     return {
-      id: headCommitHash,
-      files: groupChangesByFile(changesNested.flat())
+      id: headCommitHash || "WORKING_DIR",
+      files: groupChangesByFile([...committedChanges, ...uncommittedChanges, ...userChanges]),
     };
   } catch (error) {
     console.error("Error building history:", error);
