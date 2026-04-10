@@ -10,7 +10,6 @@ export interface PlanOutput {
     id: string
     prompt: string
     response: string
-    questions?: Question[]
     
 }
 
