@@ -6,6 +6,7 @@ import { buildHistory } from './history/buildHistory';
 import { openTaskletMenu } from './taskletMenu';
 import { History, TaskletUI, LineMap } from './history/types';
 import { getRepoPath, getLineDeltas, applyDiffToLineMap } from './utils';
+import { getBlameViewHtml } from './blameView';
 
 // Tracks whether "AI blame mode" is currently active
 let aiBlameModeActive = false;
@@ -226,6 +227,95 @@ export function activate(context: vscode.ExtensionContext) {
       if (aiBlameModeActive) {
         codeLensProvider.refresh();
       }
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('tracybot-extension.blameAI', async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) {
+        vscode.window.showWarningMessage('AI Blame: No active editor.');
+        return;
+      }
+      if (editor.document.uri.scheme !== 'file') {
+        vscode.window.showWarningMessage('AI Blame: Not a file editor.');
+        return;
+      }
+
+      const document = editor.document;
+      const fileName = document.fileName.split(/[\\/]/).pop() ?? document.fileName;
+
+      // Snapshot file content immediately — before the async work below —
+      // so the webview reflects exactly what the user sees right now.
+      const fileContent = document.getText();
+
+      // Rebuild history fresh on every invocation so the blame view always
+      // reflects the latest tasklet data rather than the stale in-memory copy.
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Window,
+          title: `AI Blame: loading history for ${fileName}…`,
+          cancellable: false,
+        },
+        async () => {
+          const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+          const result = await buildHistory(workspaceRoot);
+
+          if (!result) {
+            vscode.window.showErrorMessage('AI Blame: Failed to build history.');
+            return;
+          }
+
+          // Extend each tasklet with the runtime 'selected' flag and store globally
+          result.files.forEach(file =>
+            file.tasklets.forEach(t => (t as TaskletUI).selected = false)
+          );
+
+          history = result as unknown as { files: { path: string; tasklets: TaskletUI[] }[] } & History;
+
+          // Rebuild both line maps from the fresh history.
+          lineMap = buildLineMap(history);
+
+          const repoPath = await getRepoPath();
+          if (repoPath) {
+            const deltas = await getLineDeltas(repoPath);
+            displayLineMap = applyDiffToLineMap(lineMap, deltas);
+          } else {
+            // No repo / no deltas available — use the raw lineMap as-is.
+            displayLineMap = new Map(lineMap);
+          }
+        }
+      );
+
+      // Resolve the (now-fresh) file map for the active document.
+      const fileMap: Map<number, TaskletUI> | undefined =
+        getDisplayLineMapForDocument(document) ??
+        (() => {
+          const relativePath = getDocumentRelativePath(document);
+          return relativePath ? lineMap.get(relativePath) : undefined;
+        })();
+
+      if (!fileMap || fileMap.size === 0) {
+        vscode.window.showInformationMessage(
+          `AI Blame: No AI-generated lines found in "${fileName}".`
+        );
+        return;
+      }
+
+      // Open the blame webview in the full editor group. Using ViewColumn.Active
+      // keeps it in the same column; retainContextWhenHidden preserves scroll
+      // and selection state across tab switches.
+      const panel = vscode.window.createWebviewPanel(
+        'tracybotBlameView',
+        `AI Blame — ${fileName}`,
+        vscode.ViewColumn.Active,
+        {
+          enableScripts: true,
+          retainContextWhenHidden: true,
+        }
+      );
+
+      panel.webview.html = getBlameViewHtml(fileContent, fileName, fileMap, panel.webview);
     })
   );
 

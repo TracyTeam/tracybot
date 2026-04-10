@@ -21,6 +21,10 @@
         "title": "Tracybot: Blame zi AI"
       },
       {
+        "command": "tracybot-extension.blameAI",
+        "title": "Tracybot: Open AI Blame window"
+      },
+      {
         "command": "tracybot-extension.openPromptPanel",
         "title": "Tracybot: Open Prompt Panel"
       }
