@@ -4,7 +4,7 @@ import type { Tasklet, PlanOutput, BuildOutput, Question } from "./Tasklet"
 import path from "path"
 import { Logger } from "./Logger"
 
-const EDIT_TOOLS = new Set(["edit", "write", "patch", "multiedit", "apply_patch", "applypatch", "question"])
+const EDIT_TOOLS = new Set(["edit", "write", "patch", "multiedit", "apply_patch", "applypatch"])
 
 export const MyPlugin: Plugin = async (input: PluginInput) => {
     const { client, $, directory } = input
@@ -198,7 +198,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         },
 
         "tool.execute.before": async (input, output) => {
-            if (!EDIT_TOOLS.has(input.tool)) return
+            if (!EDIT_TOOLS.has(input.tool) && input.tool !== "question") return
             await L.info(`tool.execute.before`, { input, output })
 
             const sessionId = input.sessionID
@@ -233,7 +233,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         },
 
         "tool.execute.after": async (input, output) => {
-            if (!EDIT_TOOLS.has(input.tool)) return
+            if (!EDIT_TOOLS.has(input.tool) && input.tool !== "question") return
             await L.info(`tool.execute.after`, { input, output })
             
             if (input.tool === "question") {
