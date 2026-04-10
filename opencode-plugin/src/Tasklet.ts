@@ -20,9 +20,7 @@ export interface BuildOutput {
 }
 
 export interface Question {
-    question: string
-    header: string
-    options: {label: string; description: string}[]
-    answer: string
+    questions: { question: string; header: string; options: {label: string; description: string}[] }[]
+    answers: string[]
     planOutputIndex: number
 }

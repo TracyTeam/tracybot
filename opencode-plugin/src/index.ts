@@ -115,7 +115,8 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         for (const question of storedQuestions) {
             const target = planOutputs[question.planOutputIndex]
             if (target) {
-                const questionText = `Q: ${question.question}\nA: ${question.answer}`
+                const questionTexts = question.questions.map((q, i) => `${q.question}\nA: ${question.answers[i]}`)
+                const questionText = questionTexts.join("\n\n---\n\n")
                 target.response = target.response ? `${target.response}\n\n---\n\n${questionText}` : questionText
             }
         }
@@ -146,7 +147,10 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
         const buildQuestions = storedQuestions.filter(q => q.planOutputIndex >= planOutputs.length)
         if (buildQuestions.length > 0) {
-            const buildQuestionText = buildQuestions.map(q => `Q: ${q.question}\nA: ${q.answer}`).join("\n\n---\n\n")
+            const allQuestionTexts = buildQuestions.flatMap(q => 
+                q.questions.map((ques, i) => `Q: ${ques.question}\nA: ${q.answers[i]}`)
+            )
+            const buildQuestionText = allQuestionTexts.join("\n\n---\n\n")
             buildOutput.response = buildOutput.response ? `${buildOutput.response}\n\n---\n\n${buildQuestionText}` : buildQuestionText
         }
         
@@ -239,10 +243,8 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             if (input.tool === "question") {
                 const planOutputIndex = (await getPlanOutputs(input.sessionID as string)).length
                 const question: Question = {
-                    question: input.args.questions,
-                    header: input.args.header,
-                    options: input.args.options,
-                    answer: output.metadata.answers[0][0] as string,
+                    questions: input.args.questions,
+                    answers: output.metadata.answers.map(answerArray => answerArray[0] as string),
                     planOutputIndex 
                 }
 
