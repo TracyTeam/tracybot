@@ -235,21 +235,31 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         "tool.execute.after": async (input, output) => {
             if (!EDIT_TOOLS.has(input.tool)) return
             await L.info(`tool.execute.after`, { input, output })
-
+            
             if (input.tool === "question") {
+                const questionsArg = input.args.questions as Array<{
+                    question: string
+                    header: string
+                    options: Array<{label: string; description: string}>
+                }>
+
                 const planOutputIndex = (await getPlanOutputs(input.sessionID as string)).length
-                const questionsArg = input.args.questions as string[]
-                for (const q in questionsArg) {
-                    const question: Question = {
-                        question: q,
-                        header: input.args.header,
-                        options: input.args.options,
-                        answer: output.metadata.answers.map((answers: string[]) => answers[0] as string),
-                        planOutputIndex
+                for (let i = 0; i < questionsArg.length; i++) {
+                    const q = questionsArg[i]
+                    if (q) {
+                        const question: Question = {
+                            question: q.question,
+                            header: q.header,
+                            options: q.options,
+                            answer: output.metadata.answers[i]?.[0] as string ?? "",
+                            planOutputIndex
+                        }
+
+                        const existing = sessionQuestions.get(input.sessionID) ?? []
+                        sessionQuestions.set(input.sessionID, [...existing, question])
+                    } else {
+                        await L.error("Question not found when tool was called")
                     }
-                    
-                    const existing = sessionQuestions.get(input.sessionID) ?? []
-                    sessionQuestions.set(input.sessionID, [question])
                 }
 
             }
