@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BASE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 MOCK_DIR="$BASE_DIR/test/mock-repository"
-REMOTE_DIR="$BASE_DIR/test/mock-origin.git"
+REMOTE_DIR="$BASE_DIR/test/mock-remote.git"
 TRACY_SCRIPT="$BASE_DIR/tracking/tracy.sh"
 INIT_SCRIPT="$BASE_DIR/init.sh"
 
@@ -18,7 +18,9 @@ echo "-------------------------------------"
 echo
 
 rm -rf "$MOCK_DIR"
+rm -rf "$REMOTE_DIR"
 mkdir -p "$MOCK_DIR"
+mkdir -p "$REMOTE_DIR"
 cd "$MOCK_DIR"
 
 git init 2>/dev/null
