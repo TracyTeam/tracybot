@@ -174,7 +174,8 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             if (event.type === "session.idle") {
                 const idleSessionId = event.properties.sessionID
                 if (sessions.has(idleSessionId)) {
-                    const tasklet = await createTasklet(idleSessionId) // TODO: CACHE THIS PLEASE FOR THE LOVE OF GOD
+                    const tasklet = await createTasklet(idleSessionId) // TODO: CACHE THIS PLEASE FOR THE LOVE OF GOD // No :)
+                    
                     if (!tasklet) {
                         await L.debug("Skipping tasklet creation: no build user message found")
                         return
