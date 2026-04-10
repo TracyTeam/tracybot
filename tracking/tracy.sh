@@ -130,12 +130,9 @@ fi
 # HIDDEN COMMIT
 # -------------------------------
 
-COMMIT_MSG="tracy snapshot"
-[[ -n "$DESCRIPTION" ]] && COMMIT_MSG="$COMMIT_MSG"$'\n'"$DESCRIPTION"
-
 COMMIT=$(GIT_AUTHOR_NAME="$USER_NAME" GIT_AUTHOR_EMAIL="$USER_EMAIL" \
         GIT_COMMITTER_NAME="$USER_NAME" GIT_COMMITTER_EMAIL="$USER_EMAIL" \
-        git commit-tree "$TREE" $PARENT_FLAG <<<"$COMMIT_MSG")
+        git commit-tree "$TREE" $PARENT_FLAG -m "tracy snapshot" ${DESCRIPTION:+-m "$DESCRIPTION"})
 
 # Store hidden commit reference
 git config tracy."$VISIBLE_HEAD".hidden "$COMMIT" 
