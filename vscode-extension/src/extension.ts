@@ -106,12 +106,6 @@ class TracybotCodeLensProvider implements vscode.CodeLensProvider {
 
 // Activate function
 export function activate(context: vscode.ExtensionContext) {
-  // Register a hello world command for testing
-  const disposable = vscode.commands.registerCommand('tracybot-extension.helloWorld', () => {
-    vscode.window.showInformationMessage('Hello World from tracybot-extension!');
-  });
-  context.subscriptions.push(disposable);
-
   // Create text highlights
   unselectedAIDecoration = vscode.window.createTextEditorDecorationType({
     isWholeLine: true,
@@ -120,7 +114,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   selectedAIDecoration = vscode.window.createTextEditorDecorationType({
     isWholeLine: true,
-    backgroundColor: 'rgba(128, 0, 255, 0.70)',
+    backgroundColor: 'rgba(128, 0, 255, 0.60)',
   });
 
   // Create gutter icons

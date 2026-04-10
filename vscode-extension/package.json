@@ -17,10 +17,6 @@
   "contributes": {
     "commands": [
       {
-        "command": "tracybot-extension.helloWorld",
-        "title": "Tracybot: Hello World"
-      },
-      {
         "command": "tracybot-extension.toggleAiBlame",
         "title": "Tracybot: Blame zi AI"
       },
