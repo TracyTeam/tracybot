@@ -122,7 +122,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             buildOutput
         }
 
-        await L.info(`Created tasklet: ${tasklet.id}`)
+        await L.info(`Created tasklet: ${tasklet.id}`, { tasklet })
         return tasklet
     }
 
@@ -146,14 +146,14 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             if (event.type === "session.idle") {
                 const idleSessionId = event.properties.sessionID
                 if (sessions.has(idleSessionId)) {
-                    const tasklet = createTasklet(idleSessionId) // TODO: CACHE THIS PLEASE FOR THE LOVE OF GOD
+                    const tasklet = await createTasklet(idleSessionId) // TODO: CACHE THIS PLEASE FOR THE LOVE OF GOD
                     if (!tasklet) {
                         await L.warn("Skipping tasklet creation: no build user message found")
                         return
                     }
 
                     await $`${tracyPath} --user-name "opencode" --user-email "opencode" --description ${JSON.stringify(tasklet)}`.cwd(repoRoot).quiet()
-                    await L.info(`committed OC changes for ${path}`)
+                    await L.info(`committed OC changes`, { tasklet })
                 }
             }
         },
