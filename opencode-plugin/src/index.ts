@@ -238,7 +238,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
             if (input.tool === "question") {
                 const planCount = (await getPlanOutputs(input.sessionID as string)).length
-                output.metadata.agent
+                
                 const question: Question = {
                     question: input.args.question,
                     header: input.args.header,
