@@ -111,12 +111,9 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
         const storedQuestions = sessionQuestions.get(sessionId) ?? []
         for (const question of storedQuestions) {
-            if (planOutputs[question.planOutputIndex]) {
-                const target = planOutputs[question.planOutputIndex]
-                if (target) {
-                    target.questions = [...(target.questions ?? []), question]
-
-                }
+            const target = planOutputs[question.planOutputIndex]
+            if (target) {
+                target.questions = [...(target.questions ?? []), question]
             }
         }
         sessionQuestions.delete(sessionId)
@@ -207,7 +204,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         "tool.execute.after": async (input, output) => {
             if (input.tool === "question") {
                 await L.info("The question tool output and input after execution: ", { input, output })
-                const planOutputIndex = (await getPlanOutputs(input.sessionID as string)).length - 2
+                const planOutputIndex = (await getPlanOutputs(input.sessionID as string)).length - 2 // Hate this alot, but it works (even when first plan is a question)
 
                 const question: Question = {
                     question: input.args.question,
