@@ -115,7 +115,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         for (const question of storedQuestions) {
             const target = planOutputs[question.planOutputIndex]
             if (target) {
-                const questionText = `Q: ${question.question}\nA: ${question.answer}`
+                const questionText = JSON.stringify(question)
                 target.response = target.response ? `${target.response}\n\n---\n\n${questionText}` : questionText
             }
         }
@@ -146,7 +146,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
         const buildQuestions = storedQuestions.filter(q => q.planOutputIndex >= planOutputs.length)
         if (buildQuestions.length > 0) {
-            const buildQuestionText = buildQuestions.map(q => `Q: ${q.question}\nA: ${q.answer}`).join("\n\n---\n\n")
+            const buildQuestionText = buildQuestions.map(q => JSON.stringify(q)).join("\n\n---\n\n")
             buildOutput.response = buildOutput.response ? `${buildOutput.response}\n\n---\n\n${buildQuestionText}` : buildQuestionText
         }
         
