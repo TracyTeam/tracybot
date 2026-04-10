@@ -8,7 +8,7 @@ if [[ -f "$CONFIG_FILE" ]]; then
     
     if [[ -n "${TRACY_SCRIPT:-}" ]]; then
         if [[ -f "$TRACY_SCRIPT" ]]; then
-            "$TRACY_SCRIPT"
+            "$TRACY_SCRIPT" --index-only
         else
             echo "Error: TRACY_SCRIPT is set to '$TRACY_SCRIPT' but the file does not exist." >&2
             exit 1

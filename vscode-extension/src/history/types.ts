@@ -40,6 +40,7 @@ export interface Change {
   lines: number[];
   model: string;
   tasklet_messages: TaskletMessage[];
+  snapshotHash: string;
 }
 
 export type FileLineDelta = {
@@ -51,3 +52,10 @@ export type FileLineDelta = {
 export type TaskletUI = History['files'][number]['tasklets'][number] & { selected: boolean };
 
 export type LineMap = Map<string, Map<number, TaskletUI>>;
+
+export interface DiffHunk {
+  oldStart: number;
+  oldCount: number;
+  newStart: number;
+  newCount: number;
+}
