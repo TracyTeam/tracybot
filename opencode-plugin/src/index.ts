@@ -237,14 +237,14 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             await L.info(`tool.execute.after`, { input, output })
 
             if (input.tool === "question") {
-                const planCount = (await getPlanOutputs(input.sessionID as string)).length
+                const planOutputIndex = (await getPlanOutputs(input.sessionID as string)).length
                 
                 const question: Question = {
                     question: input.args.question,
                     header: input.args.header,
                     options: input.args.options,
                     answer: output.metadata.answers.map((answers: string[]) => answers[0] as string),
-                    planOutputIndex: planCount
+                    planOutputIndex
                 }
 
                 const existing = sessionQuestions.get(input.sessionID) ?? []
