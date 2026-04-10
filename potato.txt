@@ -1,1 +1,0 @@
-{"title":"Asked 1 question","output":"User has answered your questions: \"Test question?\"=\"Option 1\". You can now continue with your answers in mind.","metadata":{"answers":[["Option 1"]],"truncated":false}}
