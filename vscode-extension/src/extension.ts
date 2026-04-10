@@ -158,24 +158,6 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // Register hover provider (temporary for testing)
-  context.subscriptions.push(
-    vscode.languages.registerHoverProvider('*', {
-      provideHover(document, position) {
-        const fileName = document.fileName.split(/[\\/]/).pop() || '';
-        const entries = mockData[fileName];
-        if (!entries) { return; }
-
-        const entry = entries.find(e => e.lines.includes(position.line));
-        if (!entry) { return; }
-
-        const markdown = new vscode.MarkdownString();
-        markdown.appendMarkdown(`**Tracybot**\n\n${entry.message}`);
-        return new vscode.Hover(markdown);
-      }
-    })
-  );
-
   // Register command to toggle AI blame mode on/off
   context.subscriptions.push(
     vscode.commands.registerCommand('tracybot-extension.toggleAiBlame', () => {
@@ -288,7 +270,6 @@ function updateDecorations() {
     .filter(e => !e.selected)
     .flatMap(e => e.lines.map(line => ({
       range: new vscode.Range(line, 0, line, 0),
-      hoverMessage: new vscode.MarkdownString(e.message),
     })));
   editor.setDecorations(gutterUnselectedDecoration, unselectedGutterRanges);
 
@@ -297,7 +278,6 @@ function updateDecorations() {
     .filter(e => e.selected)
     .flatMap(e => e.lines.map(line => ({
       range: new vscode.Range(line, 0, line, 0),
-      hoverMessage: new vscode.MarkdownString(e.message),
     })));
   editor.setDecorations(gutterSelectedDecoration, selectedGutterRanges);
 
