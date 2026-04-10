@@ -7,12 +7,18 @@ export function getBlameViewHtml(
   fileMap: Map<number, TaskletUI>,
   webview: vscode.Webview
 ): string {
+  interface TaskletMessage {
+    stage: 'plan' | 'build';
+    type: 'prompt' | 'response';
+    message: string;
+  }
+
   interface TaskletData {
     id: string;
     name: string;
-    prompt: string;
     model: string;
-    lines: number[]; // 0-based
+    lines: number[];            // 0-based
+    messages: TaskletMessage[]; // parsed from tasklet_messages
   }
 
   const taskletsMap = new Map<TaskletUI, TaskletData>();
@@ -24,9 +30,10 @@ export function getBlameViewHtml(
       taskletsMap.set(tasklet, {
         id: String(idCounter++),
         name: tasklet.name,
-        prompt: tasklet.prompt,
         model: tasklet.model,
         lines: tasklet.lines.map(l => l - 1),
+        // tasklet_messages is already the parsed array from buildHistory
+        messages: tasklet.messages ?? [],
       });
     }
     lineToTaskletId[String(line)] = taskletsMap.get(tasklet)!.id;
@@ -79,9 +86,9 @@ export function getBlameViewHtml(
       background: var(--surface); border-bottom: 1px solid var(--border);
       flex-shrink: 0;
     }
-    #header .icon    { width: 18px; height: 18px; opacity: .7; }
+    #header .icon     { width: 18px; height: 18px; opacity: .7; }
     #header .filename { font-family: var(--font-mono); font-size: 12px; color: var(--text-bright); letter-spacing: .02em; }
-    #header .badge   {
+    #header .badge    {
       margin-left: auto; font-size: 10px; padding: 2px 8px; border-radius: 20px;
       background: var(--accent-dim); color: var(--accent); border: 1px solid var(--accent);
       letter-spacing: .06em; text-transform: uppercase;
@@ -90,9 +97,9 @@ export function getBlameViewHtml(
     #panels { display: flex; flex: 1; overflow: hidden; }
 
     /* ── Left: file panel ── */
-    #file-panel { flex: 1 1 55%; display: flex; flex-direction: column; border-right: 1px solid var(--border); overflow: hidden; }
-    #file-scroll { flex: 1; overflow-y: auto; overflow-x: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
-    #file-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+    #file-panel   { flex: 1 1 55%; display: flex; flex-direction: column; border-right: 1px solid var(--border); overflow: hidden; }
+    #file-scroll  { flex: 1; overflow-y: auto; overflow-x: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+    #file-scroll::-webkit-scrollbar       { width: 6px; height: 6px; }
     #file-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
     table.code-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.65; table-layout: fixed; }
@@ -101,24 +108,24 @@ export function getBlameViewHtml(
     td.line-num  { width: 52px; min-width: 52px; text-align: right; padding: 0 12px 0 0; color: var(--line-num); user-select: none; vertical-align: top; font-size: 11px; }
     td.line-code { padding: 0 16px 0 8px; white-space: pre; color: var(--text); overflow: hidden; text-overflow: ellipsis; }
 
-    tr.ai-line td            { background: var(--unselected-bg); }
-    tr.ai-line td.line-num   { color: var(--accent); opacity: .7; }
-    tr.ai-line               { cursor: pointer; }
-    tr.ai-line:hover td      { background: rgba(128,0,255,.28); }
-    tr.ai-selected td        { background: var(--selected-bg) !important; }
+    tr.ai-line td              { background: var(--unselected-bg); }
+    tr.ai-line td.line-num     { color: var(--accent); opacity: .7; }
+    tr.ai-line                 { cursor: pointer; }
+    tr.ai-line:hover td        { background: rgba(128,0,255,.28); }
+    tr.ai-selected td          { background: var(--selected-bg) !important; }
     tr.ai-selected td.line-num { color: var(--accent); opacity: 1; }
 
     /* ── Right: prompt panel ── */
-    #prompt-panel  { flex: 1 1 45%; display: flex; flex-direction: column; overflow: hidden; min-width: 280px; }
-    #prompt-header { padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 11px; color: var(--text-dim); letter-spacing: .08em; text-transform: uppercase; flex-shrink: 0; }
+    #prompt-panel   { flex: 1 1 45%; display: flex; flex-direction: column; overflow: hidden; min-width: 280px; }
+    #prompt-header  { padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 11px; color: var(--text-dim); letter-spacing: .08em; text-transform: uppercase; flex-shrink: 0; }
     #prompt-content { flex: 1; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
-    #prompt-content::-webkit-scrollbar { width: 6px; }
+    #prompt-content::-webkit-scrollbar       { width: 6px; }
     #prompt-content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
     /* ── Blank state ── */
-    #blank-state { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: var(--text-dim); user-select: none; }
+    #blank-state           { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: var(--text-dim); user-select: none; }
     #blank-state .hint-icon { width: 40px; height: 40px; opacity: .25; }
-    #blank-state p           { font-size: 12px; letter-spacing: .04em; }
+    #blank-state p          { font-size: 12px; letter-spacing: .04em; }
 
     /* ── Tasklet card ── */
     .tasklet-card { padding: 16px 20px 0; animation: fadeSlide .18s ease both; }
@@ -128,7 +135,7 @@ export function getBlameViewHtml(
       to   { opacity: 1; transform: translateY(0); }
     }
 
-    /* Single header row: [title] [model pill] [line-count pill] → [button] */
+    /* Single header row: [title] [model pill] [line-count pill] →→ [button] */
     .card-nav {
       display: flex;
       align-items: center;
@@ -147,7 +154,6 @@ export function getBlameViewHtml(
       overflow: hidden;
       text-overflow: ellipsis;
       min-width: 0;
-      /* shrinks to make room for pills + button, but won't disappear entirely */
       flex: 1 1 0;
     }
 
@@ -175,7 +181,6 @@ export function getBlameViewHtml(
       letter-spacing: .04em;
       white-space: nowrap;
       flex-shrink: 0;
-      /* pushes to the far right within the flex row */
       margin-left: auto;
       transition: border-color 120ms, color 120ms, background 120ms;
     }
@@ -184,25 +189,42 @@ export function getBlameViewHtml(
     /* ── Section label ── */
     .section-label { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 8px; }
 
-    /* ── Prompt box (VS Code-themed) ── */
-    .prompt-box {
+    /* ── Message boxes (matching old promptPanel.ts design) ── */
+    .messages-section { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+
+    .message-box {
       background-color: var(--vscode-textBlockQuote-background, rgba(255,255,255,0.05));
-      border-left: 4px solid var(--vscode-textLink-foreground, var(--accent));
-      border-radius: var(--radius);
       padding: 12px 16px;
-      font-family: var(--font-ui);
+      border-radius: var(--radius);
+      word-break: break-word;
       font-size: 13px;
       line-height: 1.7;
       color: var(--text);
-      word-break: break-word;
-      margin-bottom: 20px;
     }
-    .prompt-box p                    { margin: 0 0 8px; }
-    .prompt-box p:last-child         { margin-bottom: 0; }
-    .prompt-box code                 { font-family: var(--font-mono); font-size: 11.5px; background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 3px; }
-    .prompt-box pre                  { background: rgba(255,255,255,0.06); padding: 10px 12px; border-radius: 4px; overflow-x: auto; margin: 8px 0; }
-    .prompt-box pre code             { background: none; padding: 0; }
-    .prompt-box ul, .prompt-box ol   { padding-left: 20px; margin: 6px 0; }
+    /* prompt → left border, response → right border */
+    .message-box.prompt   { border-left:  4px solid transparent; }
+    .message-box.response { border-right: 4px solid transparent; }
+    /* build → blue, plan → orange */
+    .message-box.build { border-color: var(--vscode-charts-blue,   #3794ff); }
+    .message-box.plan  { border-color: var(--vscode-charts-orange, #e8a24a); }
+
+    /* stage label above each box */
+    .message-label {
+      font-size: 9px;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .message-label.build { color: var(--vscode-charts-blue,   #3794ff); }
+    .message-label.plan  { color: var(--vscode-charts-orange, #e8a24a); }
+
+    /* markdown content inside message boxes */
+    .message-box p                  { margin: 0 0 8px; }
+    .message-box p:last-child       { margin-bottom: 0; }
+    .message-box code               { font-family: var(--font-mono); font-size: 11.5px; background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 3px; }
+    .message-box pre                { background: rgba(255,255,255,0.06); padding: 10px 12px; border-radius: 4px; overflow-x: auto; margin: 8px 0; }
+    .message-box pre code           { background: none; padding: 0; }
+    .message-box ul, .message-box ol { padding-left: 20px; margin: 6px 0; }
 
     /* ── Chunk chips ── */
     .lines-section { margin-bottom: 24px; }
@@ -355,6 +377,13 @@ export function getBlameViewHtml(
         </div>\`;
     }
 
+    // ── Markdown helper ───────────────────────────────────────────────
+    function renderMd(text) {
+      if (!text) { return ''; }
+      console.log("AAAAAA: ", text);
+      return (typeof marked !== 'undefined') ? marked.parse(text) : \`<p>\${esc(text)}</p>\`;
+    }
+
     // ── Chunk helper: sorted 0-based lines → contiguous runs ─────────
     function toChunks(sorted) {
       if (!sorted.length) { return []; }
@@ -376,22 +405,28 @@ export function getBlameViewHtml(
       const t = TASKLETS[taskletId];
       if (!t) { return; }
 
-      const sorted = t.lines.slice().sort((a, b) => a - b);
-      const chunks = toChunks(sorted);
-
-      // Chunk chips — e.g. "1–3" or "7" (1-based display)
+      // ── Chunk chips ───────────────────────────────────────────────
+      const sorted     = t.lines.slice().sort((a, b) => a - b);
+      const chunks     = toChunks(sorted);
       const chunkChips = chunks.map(chunk => {
         const first = chunk[0];
         const last  = chunk[chunk.length - 1];
-        const label = first === last
-          ? \`\${first + 1}\`
-          : \`\${first + 1}–\${last + 1}\`;
+        const label = first === last ? \`\${first + 1}\` : \`\${first + 1}–\${last + 1}\`;
         return \`<span class="line-chip" data-first="\${first}" data-last="\${last}">\${label}</span>\`;
       }).join('');
 
-      const promptHtml = (typeof marked !== 'undefined')
-        ? marked.parse(t.prompt)
-        : \`<p>\${esc(t.prompt)}</p>\`;
+      // ── Message boxes ─────────────────────────────────────────────
+      // Each message gets a label (e.g. "Plan · Prompt") and a styled box.
+      // prompt → left border, response → right border
+      // build  → blue,        plan      → orange
+      const messagesHtml = (t.messages && t.messages.length > 0)
+        ? t.messages.map(msg => \`
+            <div>
+              <div class="message-label \${esc(msg.stage)}">\${esc(msg.stage)} · \${esc(msg.type)}</div>
+              <div class="message-box \${esc(msg.type)} \${esc(msg.stage)}">\${renderMd(msg.message)}</div>
+            </div>\`
+          ).join('')
+        : \`<div class="message-box prompt build"><p><em>No messages recorded for this tasklet.</em></p></div>\`;
 
       promptContent.innerHTML = \`
         <div class="tasklet-card">
@@ -402,8 +437,8 @@ export function getBlameViewHtml(
             <button class="menu-btn" id="all-tasklets-btn">All Tasklets</button>
           </div>
 
-          <div class="section-label">Prompt</div>
-          <div class="prompt-box">\${promptHtml}</div>
+          <div class="section-label">Messages</div>
+          <div class="messages-section">\${messagesHtml}</div>
 
           <div class="lines-section">
             <div class="section-label">Chunks</div>
@@ -419,7 +454,7 @@ export function getBlameViewHtml(
           const firstTr = tbody.querySelector('tr[data-line="' + firstLine + '"]');
           const lastTr  = tbody.querySelector('tr[data-line="' + lastLine  + '"]');
           if (firstTr) { firstTr.scrollIntoView({ block: 'start',   behavior: 'smooth' }); }
-          if (lastTr)  { lastTr.scrollIntoView ({  block: 'nearest', behavior: 'smooth' }); }
+          if (lastTr)  { lastTr.scrollIntoView({  block: 'nearest', behavior: 'smooth' }); }
         });
       });
 

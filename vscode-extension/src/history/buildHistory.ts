@@ -1,4 +1,4 @@
-import { Change, CommitInfo, History } from "./types";
+import { Change, CommitInfo, History, TaskletMessage } from "./types";
 import { getChangedLines, getCommitTree, getDiff, getTracyRefCommit, groupChangesByFile, runGit } from "./helpers";
 
 // Get all visible (non-hidden) commits from the user branch
@@ -136,6 +136,42 @@ function isAiChange(commit: CommitInfo): boolean {
   return commit.authorEmail.toLowerCase() === "opencode";
 }
 
+function buildTaskletMessages(tasklet_str: string): TaskletMessage[] {
+  let tasklet_obj: any;
+  try {
+    tasklet_obj = JSON.parse(tasklet_str);
+  } catch (e) {
+    console.error(`Could not parse tasklet: ${tasklet_str}`);
+    return [];
+  }
+
+  if (!tasklet_obj) {
+    console.error(`Could not parse tasklet: ${tasklet_str}`);
+    return [];
+  }
+
+  let messages: TaskletMessage[] = [];
+  if (tasklet_obj?.planOutputs && Array.isArray(tasklet_obj.planOutputs)) {
+    tasklet_obj.planOutputs.forEach((plan: any) => {
+      if (plan.prompt) {
+        messages.push({ stage: "plan", type: "prompt", message: plan.prompt });
+      }
+      if (plan.response) {
+        messages.push({ stage: "plan", type: "response", message: plan.response });
+      }
+    });
+  }
+
+  if (!tasklet_obj.buildOutput) {
+    console.warn(`Missing build output in tasklet: ${tasklet_str}`);
+  } else {
+    messages.push({ stage: "build", type: "prompt", message: tasklet_obj.buildOutput?.prompt });
+    messages.push({ stage: "build", type: "response", message: tasklet_obj.buildOutput?.response });
+  }
+
+  return messages;
+}
+
 // AAAAAAAAAAAAAAA
 export async function buildHistory(repoPath: string | undefined): Promise<History | null> {
   if (!repoPath) {
@@ -172,6 +208,7 @@ export async function buildHistory(repoPath: string | undefined): Promise<Histor
 
         for (let j = 0; j < tracyChain.length; j++) {
           const snapshot = tracyChain[j];
+          const messages: Array<TaskletMessage> = buildTaskletMessages(snapshot.description);
 
           if (isAiChange(snapshot)) {
             const parentInChain = j > 0 ? tracyChain[j - 1].treeHash : prevMainTree;
@@ -193,7 +230,7 @@ export async function buildHistory(repoPath: string | undefined): Promise<Histor
                 filePath,
                 lines,
                 model: snapshot.authorName,
-                prompt: snapshot.description.trim()
+                tasklet_messages: messages,
               });
             }
           }
