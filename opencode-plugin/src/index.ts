@@ -239,9 +239,19 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             if (input.tool === "question") {
                 const planOutputIndex = (await getPlanOutputs(input.sessionID as string)).length
                 const questionsArg = input.args.questions as string[]
+                for (const q in questionsArg) {
+                    const question: Question = {
+                        question: q,
+                        header: input.args.header,
+                        options: input.args.options,
+                        answer: output.metadata.answers.map((answers: string[]) => answers[0] as string),
+                        planOutputIndex
+                    }
+                    
+                    const existing = sessionQuestions.get(input.sessionID) ?? []
+                    sessionQuestions.set(input.sessionID, [question])
+                }
 
-                const existing = sessionQuestions.get(input.sessionID) ?? []
-                sessionQuestions.set(input.sessionID, [...existing, question])
             }
         }
     }
