@@ -1,6 +1,6 @@
 import type { Plugin, PluginInput } from "@opencode-ai/plugin"
 import type { Part } from "@opencode-ai/sdk"
-import type { Tasklet, PlanOutput, BuildOutput } from "./Tasklet"
+import type { Tasklet, PlanOutput, BuildOutput, Question } from "./Tasklet"
 import path from "path"
 import { Logger } from "./Logger"
 
@@ -23,6 +23,38 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
     if (!repoRoot) {
         await L.error("Not a git repo")
         return {} // No-op
+    }
+
+    async function getPlanOutputs(sessionId: string): Promise<PlanOutput[]>{
+        const response = await client.session.messages({
+            path: {id: sessionId}
+        })
+
+        const allMessages = response.data ?? []
+
+        const getTextFromParts = (parts: Part[] | undefined): string => {
+            if (!parts) return ""
+            return parts
+                .flatMap(part => part.type === "text" && part.text ? [part.text] : [])
+                .join("\n\n---\n\n")
+        }
+
+        return allMessages
+            .filter((message) => message.info.role === "user" && message.info.agent !== "build")
+            .map((userMsg, idx) => {
+                const assistantMsgs = allMessages.filter((message) =>
+                    message.info.role === "assistant" && message.info.parentID === userMsg.info.id)
+
+                return {
+                    id: `plan_${idx}`,
+                    prompt: getTextFromParts(userMsg.parts),
+                    response: assistantMsgs
+                    .map(msg => getTextFromParts(msg.parts))
+                    .filter(text => text)
+                    .join("\n\n---\n\n"),
+                }
+            })
+ 
     }
 
     async function resolveTracyPath(repoRoot: string): Promise<string | undefined> {
@@ -60,11 +92,14 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
 
     let sessions = new Set<string>()
-
+    const sessionQuestions = new Map<string, Question[]>()
     async function createTasklet(sessionId: string): Promise<Tasklet | undefined> {
+        const planOutputs = await getPlanOutputs(sessionId)
+        
         const response = await client.session.messages({
             path: { id: sessionId }
         })
+       
         const allMessages = response.data ?? []
 
         const getTextFromParts = (parts: Part[] | undefined): string => {
@@ -74,24 +109,17 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                 .join("\n\n---\n\n")
         }
 
-        const planOutputs: PlanOutput[] = allMessages
-            .filter((message) => message.info.role === "user" && message.info.agent !== "build")
-            .map((userMsg, idx) => {
-                const assistantMsgs = allMessages.filter((message) =>
-                    message.info.role === "assistant" && message.info.parentID === userMsg.info.id)
+        const storedQuestions = sessionQuestions.get(sessionId) ?? []
+        for (const question of storedQuestions) {
+            if (planOutputs[question.planOutputIndex]) {
+                const target = planOutputs[question.planOutputIndex]
+                if (target) {
+                    target.questions = [...(target.questions ?? []), question]
 
-                const userText = getTextFromParts(userMsg.parts)
-                const combinedResponse = assistantMsgs
-                    .map(msg => getTextFromParts(msg.parts))
-                    .filter(text => text)
-                    .join("\n\n---\n\n")
-
-                return {
-                    id: `plan_${idx}`,
-                    prompt: userText,
-                    response: combinedResponse,
                 }
-            })
+            }
+        }
+        sessionQuestions.delete(sessionId)
 
         const buildUserMsg = allMessages.find(
             (message) => message.info.role === "user" && message.info.agent === "build"
@@ -166,10 +194,6 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                 await L.error(`skill issue: missing pth in tool.execute.before hook`, { input, output })
                 return
             }
-            if (input.tool === "question") {
-                await L.info("The question tool before execution: ", output)
-            }
-
             try {
                 await $`${tracyPath}`.cwd(repoRoot).quiet() // user snapshot
                 await L.info(`created user snapshot for ${path}`)
@@ -178,10 +202,22 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                 await L.error(`skill issue: ${e}`)
             }
         },
-        
+
         "tool.execute.after": async (input, output) => {
             if (input.tool === "question") {
-                await L.info("The question tool after execution: ", output)
+                await L.info("The question tool output and input after execution: ", { input, output })
+                const planOutputIndex = (await getPlanOutputs(input.sessionID as string)).length - 1
+
+                const question: Question = {
+                    question: input.args.question,
+                    header: input.args.header,
+                    options: input.args.options,
+                    answer: output.metadata.answers[0][0] as string,
+                    planOutputIndex 
+                }
+
+                const existing = sessionQuestions.get(input.sessionID) ?? []
+                sessionQuestions.set(input.sessionID, [...existing, question])
             }
         }
     }
