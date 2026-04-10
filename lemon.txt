@@ -1,0 +1,23 @@
+Q1: What topic would you like me to ask questions about?
+A1: Technology
+
+Q2: What aspect of technology interests you most?
+A2: Software Development
+
+Q3: What do you enjoy most about software development?
+A3: New Projects
+
+Q4: What type of projects do you most like to build?
+A4: Whatever is useful for me
+
+Q5: What are you currently working on or interested in tackling?
+A5: Solving a Problem
+
+Q6: What kind of problem are you trying to solve?
+A6: Bug Fix
+
+Q7: How critical is this bug to fix right now?
+A7: High Priority
+
+Q8: Where does the bug appear to be located?
+A8: Backend
