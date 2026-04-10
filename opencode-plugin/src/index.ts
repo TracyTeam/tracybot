@@ -243,11 +243,19 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             await L.info(`tool.execute.after`, { input, output })
 
             if (input.tool === "question") {
+                const response = await client.session.messages({ path: { id: input.sessionID}})
+                const allMessages = response.data ?? []
+                const currentUserMsg = [...allMessages].reverse().find(m => m.info.role === "user")
+                const isBuildPhase = currentUserMsg?.info.role === "build"
+                
                 const planOutputIndex = (await getPlanOutputs(input.sessionID as string)).length
+                
+
+
                 const question: Question = {
                     questions: input.args.questions,
                     answers: output.metadata.answers.map((answerArray: string[]) => answerArray[0] as string),
-                    planOutputIndex 
+                    isBuildPhase 
                 }
 
                 const existing = sessionQuestions.get(input.sessionID) ?? []
