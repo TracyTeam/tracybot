@@ -40,6 +40,7 @@ export interface Change {
   lines: number[];
   model: string;
   tasklet_messages: TaskletMessage[];
+  snapshotHash: string;
 }
 
 export interface DiffHunk {

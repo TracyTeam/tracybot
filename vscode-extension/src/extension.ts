@@ -294,7 +294,7 @@ export function activate(context: vscode.ExtensionContext) {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   const time = Date.now();
   buildHistory(workspaceRoot).then(result => {
-    console.log(Date.now() - time);
+    console.log(`History build time: ${Date.now() - time}ms`);
 
     if (!result) {
       console.error('Failed to build history');

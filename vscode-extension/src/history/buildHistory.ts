@@ -1,13 +1,15 @@
 import { Change, CommitInfo, History, TaskletMessage } from "./types";
 import { getChangedLines, getCommitTree, getDiff, getTracyRefCommit, groupChangesByFile, mapLinesToTree, runGit } from "./helpers";
 
+const DELIMITER = "||#--TRACY--#||";
+
 // Get all visible (non-hidden) commits from the user branch
 async function getMainCommits(repoPath: string): Promise<CommitInfo[]> {
   // Commit info in format: hash|email|name|subject|body|parent|tree
   const output = await runGit(repoPath, [
     "log",
     "--reverse",
-    "--format=%H|%ae|%an|%s|%b|%P|%T",
+    `--format=%H${DELIMITER}%ae${DELIMITER}%an${DELIMITER}%s${DELIMITER}%b${DELIMITER}%P${DELIMITER}%T`,
   ]);
 
   if (!output) {
@@ -20,7 +22,7 @@ async function getMainCommits(repoPath: string): Promise<CommitInfo[]> {
       continue;
     }
 
-    const [hash, authorEmail, authorName, message, description, parentHash, treeHash] = line.split("|");
+    const [hash, authorEmail, authorName, message, description, parentHash, treeHash] = line.split(DELIMITER);
     commits.push({
       hash,
       authorEmail,
@@ -91,7 +93,7 @@ async function getTracyChain(repoPath: string, startCommit: string): Promise<Com
       const output = await runGit(repoPath, [
         "log",
         "-1",
-        "--format=%H|%ae|%an|%s|%b|%P|%T",
+        `--format=%H${DELIMITER}%ae${DELIMITER}%an${DELIMITER}%s${DELIMITER}%b${DELIMITER}%P${DELIMITER}%T`,
         currentHash
       ]);
 
@@ -99,7 +101,7 @@ async function getTracyChain(repoPath: string, startCommit: string): Promise<Com
         continue;
       }
 
-      const [hash, authorEmail, authorName, message, description, parentHash, treeHash] = output.split("|");
+      const [hash, authorEmail, authorName, message, description, parentHash, treeHash] = output.split(DELIMITER);
       commits.push({
         hash,
         authorEmail,
@@ -235,14 +237,19 @@ export async function buildHistory(repoPath: string | undefined): Promise<Histor
             const fileResults = await Promise.all(
               Array.from(fileChangesMap.keys()).map(async (filePath) => {
                 const linesAtSnapshot = await getChangedLines(repoPath, diffFromTree, snapshot.treeHash, filePath);
-                const lines = await mapLinesToTree(repoPath, snapshot.treeHash, headTree, filePath, linesAtSnapshot);
-
+                
+                // Map the snapshot to the real commit. Unstaged lines will be treated as deleted and dropped.
+                const linesInMainCommit = await mapLinesToTree(repoPath, snapshot.treeHash, mainCommit.treeHash, filePath, linesAtSnapshot);
+                // Map the surviving lines from the real commit to the absolute latest HEAD
+                const lines = await mapLinesToTree(repoPath, mainCommit.treeHash, headTree, filePath, linesInMainCommit);
+                
                 if (lines.length > 0) {
                   return {
                     filePath,
                     lines,
                     model: snapshot.authorName,
                     tasklet_messages: messages,
+                    snapshotHash: snapshot.hash,
                   } as Change;
                 }
 

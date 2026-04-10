@@ -8,5 +8,9 @@ USER_COMMIT=$(git rev-parse HEAD)
 TRACY_ID=$(git config --get tracy.current-id || true)
 if [[ -n "$TRACY_ID" ]]; then
     git notes add -f -m "tracy-id: $TRACY_ID" "$USER_COMMIT"
-    git config --unset tracy.current-id
+
+    # If there are no unstaged changes left, we can clear the chain
+    if git diff --quiet; then
+        git config --unset tracy.current-id
+    fi
 fi
