@@ -115,33 +115,41 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         for (const question of storedQuestions) {
             const target = planOutputs[question.planOutputIndex]
             if (target) {
-                target.questions = [...(target.questions ?? []), question]
+                const questionText = `Q: ${question.question}\nA: ${question.answer}`
+                target.response = target.response ? `${target.response}\n\n---\n\n${questionText}` : questionText
             }
         }
-        sessionQuestions.delete(sessionId)
 
+        sessionQuestions.delete(sessionId)
+        
         const buildUserMsg = allMessages.find(
             (message) => message.info.role === "user" && message.info.agent === "build"
         )
-
+        
         if (!buildUserMsg) {
             return
         }
-
+        
         const buildAssistantMsgs = allMessages.filter(
             (message) => message.info.role === "assistant" &&
-                message.info.parentID === buildUserMsg.info.id
+            message.info.parentID === buildUserMsg.info.id
         )
-
+        
         const buildOutput: BuildOutput = {
             id: `build_${planOutputs.length}`,
             prompt: getTextFromParts(buildUserMsg.parts),
             response: buildAssistantMsgs
-                .map(message => getTextFromParts(message.parts))
-                .filter(text => text)
-                .join("\n\n---\n\n"),
+            .map(message => getTextFromParts(message.parts))
+            .filter(text => text)
+            .join("\n\n---\n\n"),
         }
-
+        
+        const buildQuestions = storedQuestions.filter(q => q.planOutputIndex >= planOutputs.length)
+        if (buildQuestions.length > 0) {
+            const buildQuestionText = buildQuestions.map(q => `Q: ${q.question}\nA: ${q.answer}`)
+            buildOutput.response = buildOutput.response ? `${buildOutput.response}\n\n---\n\n${buildQuestionText}` : buildQuestionText
+        }
+        
         const tasklet: Tasklet = {
             id: `tasklet_${sessionId}_${Date.now()}`,
             sessionId,
@@ -230,7 +238,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
             if (input.tool === "question") {
                 await L.info("The question tool output and input after execution: ", { input, output })
-                const planOutputIndex = (await getPlanOutputs(input.sessionID as string)).length - 2 // Hate this alot, but it works (even when first plan is a question)
+                const planOutputIndex = (await getPlanOutputs(input.sessionID as string)).length
 
                 const question: Question = {
                     question: input.args.question,
