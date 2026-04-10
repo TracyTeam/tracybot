@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BASE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 MOCK_DIR="$BASE_DIR/test/mock-repository"
+REMOTE_DIR="$BASE_DIR/test/mock-origin.git"
 TRACY_SCRIPT="$BASE_DIR/tracking/tracy.sh"
 INIT_SCRIPT="$BASE_DIR/init.sh"
 
@@ -24,6 +25,9 @@ git init 2>/dev/null
 git branch -m main 2>/dev/null
 git config user.name "Thomas Turbando"
 git config user.email "thomas@brazil.se"
+
+git init --bare $REMOTE_DIR
+git remote add origin $REMOTE_DIR
 
 echo
 echo "-------------------------------------"
