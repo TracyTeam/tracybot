@@ -1,0 +1,24 @@
+Questionnaire Responses
+=======================
+
+1. Favorite Color: Red
+
+2. Favorite Programming Language: Rust
+
+3. Operating System: Linux
+
+4. Coffee or Tea: Neither
+
+5. Work Style: Flexible
+
+6. Animals (multiple): Dogs, Cats
+
+7. Music Genre: Rock
+
+8. Most Productive Time: Evening
+
+9. Vacation Type: City
+
+10. Learning Style: Doing
+
+11. Development Area: Full Stack
