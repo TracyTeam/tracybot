@@ -17,21 +17,13 @@
   "contributes": {
     "commands": [
       {
-        "command": "tracybot-extension.toggleAiBlame",
-        "title": "Tracybot: Blame zi AI"
-      },
-      {
         "command": "tracybot-extension.blameAI",
         "title": "Tracybot: Open AI Blame window"
-      },
-      {
-        "command": "tracybot-extension.openPromptPanel",
-        "title": "Tracybot: Open Prompt Panel"
       }
     ],
     "keybindings": [
       {
-        "command": "tracybot-extension.toggleAiBlame",
+        "command": "tracybot-extension.blameAI",
         "key": "ctrl+shift+0",
         "mac": "cmd+shift+0",
         "when": "editorTextFocus"
