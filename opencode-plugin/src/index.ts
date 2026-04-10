@@ -247,7 +247,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                 const allMessages = response.data ?? []
                 const currentUserMsg = [...allMessages].reverse().find(m => m.info.role === "user")
                 const isBuildPhase = currentUserMsg?.info.agent === "build"
-
+                input.args.agent
                 const planOutputIndex = (await getPlanOutputs(input.sessionID as string)).length
                 
 
