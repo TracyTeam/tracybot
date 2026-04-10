@@ -37,6 +37,22 @@ let gutterSelectedDecoration: vscode.TextEditorDecorationType;
 let unselectedAIDecoration: vscode.TextEditorDecorationType;
 let selectedAIDecoration: vscode.TextEditorDecorationType;
 
+// Status bar item that shows the current AI blame mode state
+let statusBarItem: vscode.StatusBarItem;
+
+// Updates the status bar item appearance based on the current AI blame mode state
+function updateStatusBar() {
+  if (aiBlameModeActive) {
+    statusBarItem.text = '$(eye) AI Blame';
+    statusBarItem.tooltip = 'AI Blame mode is active — click to turn off';
+    statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+  } else {
+    statusBarItem.text = '$(eye-closed) AI Blame';
+    statusBarItem.tooltip = 'AI Blame mode is inactive — click to turn on';
+    statusBarItem.backgroundColor = undefined;
+  }
+}
+
 // CodeLens provider that shows ghost text above the current chunk when AI blame mode is active
 class TracybotCodeLensProvider implements vscode.CodeLensProvider {
   private _onDidChangeCodeLenses = new vscode.EventEmitter<void>();
@@ -118,6 +134,13 @@ export function activate(context: vscode.ExtensionContext) {
     gutterIconSize: 'contain',
   });
 
+  // Create the status bar item at the bottom, right-aligned, clicking it toggles AI blame mode
+  statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+  statusBarItem.command = 'tracybot-extension.toggleAiBlame';
+  updateStatusBar();
+  statusBarItem.show();
+  context.subscriptions.push(statusBarItem);
+
   // Register the CodeLens provider and keep a reference so we can refresh it on cursor move
   const codeLensProvider = new TracybotCodeLensProvider();
   context.subscriptions.push(
@@ -172,12 +195,9 @@ export function activate(context: vscode.ExtensionContext) {
         updateDecorations();
       }
 
-      // Refresh CodeLens to show/hide ghost text
+      // Update status bar and CodeLens to reflect new mode state
+      updateStatusBar();
       codeLensProvider.refresh();
-
-      vscode.window.showInformationMessage(
-        aiBlameModeActive ? 'AI Blame mode: ON' : 'AI Blame mode: OFF'
-      );
     })
   );
 
