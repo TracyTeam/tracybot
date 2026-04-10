@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+while read -r old_sha new_sha; do
+    old_note="$(git notes show "$old_sha" 2>/dev/null || true)"
+    new_note="$(git notes show "$new_sha" 2>/dev/null || true)"
+
+    # Neither has a note
+    if [[ -z "$old_note" && -z "$new_note" ]]; then
+        continue
+    fi
+
+    # Only the old commit has a nore
+    if [[ -n "$old_note" && -z "$new_note" ]]; then
+        printf "%s\n" "$old_note" | git notes add -f -F - "$new_sha"
+        continue
+    fi
+
+    # Only new commit has note
+    if [[ -z "$old_note" && -n "$new_note" ]]; then
+        continue
+    fi
+
+    # Both commits have notes
+    merged_note="$new_note"$'\n'"$old_note"
+    printf "%s\n" "$merged_note" | git notes add -f -F - "$new_sha"
+done
