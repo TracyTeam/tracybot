@@ -112,10 +112,17 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         }
 
         const storedQuestions = sessionQuestions.get(sessionId) ?? []
+        const finalPlanCount = planOutputs.length
         for (const question of storedQuestions) {
+            const questionText = JSON.stringify(question)
+            
+            if (question.planOutputIndex >= finalPlanCount) {
+    
+                continue
+            }
+            
             const target = planOutputs[question.planOutputIndex]
             if (target) {
-                const questionText = JSON.stringify(question)
                 target.response = target.response ? `${target.response}\n\n---\n\n${questionText}` : questionText
             }
         }
