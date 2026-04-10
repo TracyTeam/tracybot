@@ -1,51 +1,46 @@
 import * as vscode from 'vscode';
-import { TaskletUI } from './history/types';
+import { TaskletUI, TaskletMessage } from './history/types';
+import { getContiguousChunks } from './utils';
+
+interface TaskletData {
+  id: string;
+  name: string;
+  model: string;
+  lines: number[];     // 0-based
+  messages: TaskletMessage[];
+  chunks: number[][];  // pre-computed contiguous line runs
+}
 
 export function getBlameViewHtml(
   fileContent: string,
   fileName: string,
-  fileMap: Map<number, TaskletUI>,
-  webview: vscode.Webview
+  fileMap: Map<number, TaskletUI>
 ): string {
-  interface TaskletMessage {
-    stage: 'plan' | 'build';
-    type: 'prompt' | 'response';
-    message: string;
-  }
-
-  interface TaskletData {
-    id: string;
-    name: string;
-    model: string;
-    lines: number[];            // 0-based
-    messages: TaskletMessage[]; // parsed from tasklet_messages
-  }
-
-  const taskletsMap = new Map<TaskletUI, TaskletData>();
+  const tasklets: Record<string, TaskletData> = {};
   const lineToTaskletId: Record<string, string> = {};
+  const seenTasklets = new Map<TaskletUI, string>();
 
   let idCounter = 0;
   for (const [line, tasklet] of fileMap.entries()) {
-    if (!taskletsMap.has(tasklet)) {
-      taskletsMap.set(tasklet, {
-        id: String(idCounter++),
+    let id = seenTasklets.get(tasklet);
+    if (id === undefined) {
+      id = String(idCounter++);
+      seenTasklets.set(tasklet, id);
+      const lines0 = tasklet.lines.map(l => l - 1);
+      tasklets[id] = {
+        id,
         name: tasklet.name,
         model: tasklet.model,
-        lines: tasklet.lines.map(l => l - 1),
-        // tasklet_messages is already the parsed array from buildHistory
+        lines: lines0,
         messages: tasklet.messages ?? [],
-      });
+        chunks: getContiguousChunks(lines0),
+      };
     }
-    lineToTaskletId[String(line)] = taskletsMap.get(tasklet)!.id;
+    lineToTaskletId[String(line)] = id;
   }
 
-  const tasklets: Record<string, TaskletData> = {};
-  for (const data of taskletsMap.values()) {
-    tasklets[data.id] = data;
-  }
-
-  const linesJson = JSON.stringify(fileContent.split('\n'));
-  const lineMapJson = JSON.stringify(lineToTaskletId);
+  const linesJson    = JSON.stringify(fileContent.split('\n'));
+  const lineMapJson  = JSON.stringify(lineToTaskletId);
   const taskletsJson = JSON.stringify(tasklets);
 
   return /* html */`<!DOCTYPE html>
@@ -201,10 +196,9 @@ export function getBlameViewHtml(
       line-height: 1.7;
       color: var(--text);
     }
-    /* prompt → left border, response → right border */
+    /* prompt → left border, response → right border; build → blue, plan → orange */
     .message-box.prompt   { border-left:  4px solid transparent; }
     .message-box.response { border-right: 4px solid transparent; }
-    /* build → blue, plan → orange */
     .message-box.build { border-color: var(--vscode-charts-blue,   #3794ff); }
     .message-box.plan  { border-color: var(--vscode-charts-orange, #e8a24a); }
 
@@ -308,7 +302,6 @@ export function getBlameViewHtml(
 
     let selectedTaskletId = null;
 
-    // ── Build code table ──────────────────────────────────────────────
     const tbody = document.getElementById('code-body');
 
     LINES.forEach((text, idx) => {
@@ -332,7 +325,6 @@ export function getBlameViewHtml(
       if (isAi) { tr.addEventListener('click', () => handleLineClick(idx)); }
     });
 
-    // ── Click handler ─────────────────────────────────────────────────
     function handleLineClick(lineIdx) {
       const taskletId = LINE_MAP[String(lineIdx)];
       if (taskletId === undefined) { return; }
@@ -357,14 +349,13 @@ export function getBlameViewHtml(
       const tasklet = TASKLETS[taskletId];
       if (!tasklet) { return; }
       tasklet.lines.forEach(li => {
-        const tr = tbody.querySelector('tr[data-line="' + li + '"]');
+        const tr = tbody.querySelector(\`tr[data-line="\${li}"]\`);
         if (tr) { tr.classList.add('ai-selected'); }
       });
       const first = tbody.querySelector('tr.ai-selected');
       if (first) { first.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
     }
 
-    // ── Prompt panel ──────────────────────────────────────────────────
     const promptContent = document.getElementById('prompt-content');
 
     function showBlank() {
@@ -377,48 +368,22 @@ export function getBlameViewHtml(
         </div>\`;
     }
 
-    // ── Markdown helper ───────────────────────────────────────────────
     function renderMd(text) {
       if (!text) { return ''; }
-      console.log("AAAAAA: ", text);
       return (typeof marked !== 'undefined') ? marked.parse(text) : \`<p>\${esc(text)}</p>\`;
-    }
-
-    // ── Chunk helper: sorted 0-based lines → contiguous runs ─────────
-    function toChunks(sorted) {
-      if (!sorted.length) { return []; }
-      const out = [];
-      let run = [sorted[0]];
-      for (let i = 1; i < sorted.length; i++) {
-        if (sorted[i] === sorted[i - 1] + 1) {
-          run.push(sorted[i]);
-        } else {
-          out.push(run);
-          run = [sorted[i]];
-        }
-      }
-      out.push(run);
-      return out;
     }
 
     function showPrompt(taskletId) {
       const t = TASKLETS[taskletId];
       if (!t) { return; }
 
-      // ── Chunk chips ───────────────────────────────────────────────
-      const sorted     = t.lines.slice().sort((a, b) => a - b);
-      const chunks     = toChunks(sorted);
-      const chunkChips = chunks.map(chunk => {
+      const chunkChips = t.chunks.map(chunk => {
         const first = chunk[0];
         const last  = chunk[chunk.length - 1];
         const label = first === last ? \`\${first + 1}\` : \`\${first + 1}–\${last + 1}\`;
         return \`<span class="line-chip" data-first="\${first}" data-last="\${last}">\${label}</span>\`;
       }).join('');
 
-      // ── Message boxes ─────────────────────────────────────────────
-      // Each message gets a label (e.g. "Plan · Prompt") and a styled box.
-      // prompt → left border, response → right border
-      // build  → blue,        plan      → orange
       const messagesHtml = (t.messages && t.messages.length > 0)
         ? t.messages.map(msg => \`
             <div>
@@ -446,13 +411,12 @@ export function getBlameViewHtml(
           </div>
         </div>\`;
 
-      // Chunk chips scroll the left panel only — no selection change
       promptContent.querySelectorAll('.line-chip').forEach(chip => {
         chip.addEventListener('click', () => {
           const firstLine = parseInt(chip.dataset.first, 10);
           const lastLine  = parseInt(chip.dataset.last,  10);
-          const firstTr = tbody.querySelector('tr[data-line="' + firstLine + '"]');
-          const lastTr  = tbody.querySelector('tr[data-line="' + lastLine  + '"]');
+          const firstTr = tbody.querySelector(\`tr[data-line="\${firstLine}"]\`);
+          const lastTr  = tbody.querySelector(\`tr[data-line="\${lastLine}"]\`);
           if (firstTr) { firstTr.scrollIntoView({ block: 'start',   behavior: 'smooth' }); }
           if (lastTr)  { lastTr.scrollIntoView({  block: 'nearest', behavior: 'smooth' }); }
         });
@@ -463,7 +427,7 @@ export function getBlameViewHtml(
       });
     }
 
-    // ── Tasklet menu ──────────────────────────────────────────────────
+    // ── Tasklet menu ──────────────────────────────────────────────────────────
     const TASKLET_LIST = Object.values(TASKLETS);
 
     function showTaskletMenu() {
@@ -487,14 +451,14 @@ export function getBlameViewHtml(
       });
     }
 
-    // ── HTML escaper ──────────────────────────────────────────────────
+    // esc() is the browser-side HTML escaper; escapeHtml() in the TS host is its counterpart
     function esc(str) {
       return String(str)
         .replace(/&/g, '&amp;').replace(/</g, '&lt;')
         .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
-    // ── Drag-to-resize ────────────────────────────────────────────────
+    // ── Drag-to-resize ────────────────────────────────────────────────────────
     const handle      = document.getElementById('resize-handle');
     const filePanel   = document.getElementById('file-panel');
     const promptPanel = document.getElementById('prompt-panel');
@@ -516,6 +480,7 @@ export function getBlameViewHtml(
 </html>`;
 }
 
+// Server-side HTML escaper; esc() in the webview script is its browser-side counterpart
 function escapeHtml(str: string): string {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }

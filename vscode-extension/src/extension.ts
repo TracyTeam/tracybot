@@ -152,7 +152,7 @@ export function activate(context: vscode.ExtensionContext) {
         }
       );
 
-      panel.webview.html = getBlameViewHtml(fileContent, fileName, fileMap, panel.webview);
+      panel.webview.html = getBlameViewHtml(fileContent, fileName, fileMap);
     })
   );
 
