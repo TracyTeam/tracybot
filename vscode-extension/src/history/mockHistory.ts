@@ -1,27 +1,7 @@
+import { History } from "./types";
+
 // This function simulates fetching data from git and returning the results
-
-import * as z from "zod";
-
-const mockDataSchema = z.object({
-  id: z.string(),
-  files: z.array(
-    z.object({
-      path: z.string(),
-      tasklets: z.array(
-        z.object({
-          model: z.string(),
-          name: z.string(),
-          prompt: z.string(),
-          lines: z.array(z.number())
-        })
-      )
-    })
-  )
-});
-
-export type MockData = z.infer<typeof mockDataSchema>;
-
-export function getMockData(): MockData {
+export function getMockHistory(): History {
   return {
     id: "mock-id",
     files: [
