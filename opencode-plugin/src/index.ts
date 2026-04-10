@@ -206,7 +206,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         "tool.execute.after": async (input, output) => {
             if (input.tool === "question") {
                 await L.info("The question tool output and input after execution: ", { input, output })
-                const planOutputIndex = (await getPlanOutputs(input.sessionID as string)).length - 1
+                const planOutputIndex = (await getPlanOutputs(input.sessionID as string)).length - 2
 
                 const question: Question = {
                     question: input.args.question,
