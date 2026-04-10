@@ -115,14 +115,16 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
         const storedQuestions = sessionQuestions.get(sessionId) ?? []
         const finalPlanCount = planOutputs.length
+        await L.info(`Processing ${storedQuestions.length} stored questions, finalPlanCount: ${finalPlanCount}`, { storedQuestions })
+        
         for (const question of storedQuestions) {
             const questionText = JSON.stringify(question)
-            
             if (question.planOutputIndex >= finalPlanCount) {
                 continue
             }
             
             const target = planOutputs[question.planOutputIndex]
+            await L.info(`Processing question with index ${question.planOutputIndex}, target exists: ${!!target}`)
             if (target) {
                 target.response = target.response ? `${target.response}\n\n---\n\n${questionText}` : questionText
             }
@@ -217,7 +219,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                 if (callID) {
                     const planOutputIndex = (await getPlanOutputs(sessionId)).length
                     pendingQuestionsIndices.set(`${sessionId}:${callID}`, planOutputIndex)
-                    await L.debug(`Captured planOutputIndex ${planOutputIndex} for question in before hook`)
+                    await L.info(`Pending questions stored: ${sessionId}:${callID} -> ${planOutputIndex}`)
                 }
             }
 
@@ -259,13 +261,14 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                     header: string
                     options: Array<{label: string; description: string}>
                 }>
-
                 let planOutputIndex = pendingQuestionsIndices.get(`${input.sessionID}:${input.callID}`)
+                
                 if (planOutputIndex === undefined) {
                     planOutputIndex = (await getPlanOutputs(input.sessionID as string)).length
                     await L.warn(`Question planOutputIndex is not found in the pending map, using fallback: ${planOutputIndex}`)
                 } else {
                     pendingQuestionsIndices.delete(`${input.sessionID}:${input.callID}`)
+                    await L.info(`Retrieved question planOutputIndex: ${planOutputIndex} for ${input.sessionID}:${input.callID}`)
                 }
 
                 for (let i = 0; i < questionsArg.length; i++) {
