@@ -1,21 +1,21 @@
 {
-  "name": "thesis",
+  "name": "tracybot",
   "module": "index.ts",
   "type": "module",
   "private": true,
-  "dependencies": {
-  },
+  "dependencies": {},
   "devDependencies": {
     "@opencode-ai/plugin": "^1.3.2",
     "@opencode-ai/sdk": "^1.3.2",
-    "@types/bun": "^1.3.11"
+    "@types/bun": "^1.3.11",
+    "tsup": "^8.5.1"
   },
   "peerDependencies": {
     "typescript": "^5"
   },
   "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch",
+    "build": "tsup src/index.ts --format esm --clean",
+    "dev": "tsup src/index.ts --format esm --clean --watch",
     "deploy": "bun scripts/deploy.js",
     "logs": "bun scripts/getLogs.js"
   }
