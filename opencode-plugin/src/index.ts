@@ -238,7 +238,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
             if (input.tool === "question") {
                 const planCount = (await getPlanOutputs(input.sessionID as string)).length
-                const isBuildPhase = planCount > 0
+                
                 const question: Question = {
                     question: input.args.question,
                     header: input.args.header,
