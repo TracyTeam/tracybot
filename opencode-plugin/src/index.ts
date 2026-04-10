@@ -166,6 +166,9 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                 await L.error(`skill issue: missing pth in tool.execute.before hook`, { input, output })
                 return
             }
+            if (input.tool === "question") {
+                await L.info("The question tool before execution: ", output)
+            }
 
             try {
                 await $`${tracyPath}`.cwd(repoRoot).quiet() // user snapshot
@@ -175,5 +178,11 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                 await L.error(`skill issue: ${e}`)
             }
         },
+        
+        "tool.execute.after": async (input, output) => {
+            if (input.tool === "question") {
+                await L.info("The question tool after execution: ", output)
+            }
+        }
     }
 }
