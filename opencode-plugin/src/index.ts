@@ -239,7 +239,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             if (input.tool === "question") {
                 const planOutputIndex = (await getPlanOutputs(input.sessionID as string)).length
                 const question: Question = {
-                    question: input.args.question,
+                    question: input.args.questions,
                     header: input.args.header,
                     options: input.args.options,
                     answer: output.metadata.answers[0][0] as string,
