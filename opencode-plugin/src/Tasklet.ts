@@ -20,7 +20,9 @@ export interface BuildOutput {
 }
 
 export interface Question {
-    questions: { question: string; header: string; options: {label: string; description: string}[] }[]
-    answers: string[]
-    isBuildPhase: boolean
+    question: string
+    header: string
+    options: {label: string; description: string}[]
+    answer: string
+    planOutputIndex: number
 }

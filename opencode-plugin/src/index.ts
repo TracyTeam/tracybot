@@ -4,7 +4,7 @@ import type { Tasklet, PlanOutput, BuildOutput, Question } from "./Tasklet"
 import path from "path"
 import { Logger } from "./Logger"
 
-const EDIT_TOOLS = new Set(["edit", "write", "patch", "multiedit", "apply_patch", "applypatch"])
+const EDIT_TOOLS = new Set(["edit", "write", "patch", "multiedit", "apply_patch", "applypatch", "question"])
 
 export const MyPlugin: Plugin = async (input: PluginInput) => {
     const { client, $, directory } = input
@@ -112,13 +112,10 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         }
 
         const storedQuestions = sessionQuestions.get(sessionId) ?? []
-
-        const planQuestions = storedQuestions.filter(q => !q.isBuildPhase)
         for (const question of storedQuestions) {
             const target = planOutputs[question.planOutputIndex]
             if (target) {
-                const questionTexts = question.questions.map((q, i) => `${q.question}\nA: ${question.answers[i]}`)
-                const questionText = questionTexts.join("\n\n---\n\n")
+                const questionText = `Q: ${question.question}\nA: ${question.answer}`
                 target.response = target.response ? `${target.response}\n\n---\n\n${questionText}` : questionText
             }
         }
@@ -149,10 +146,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
         const buildQuestions = storedQuestions.filter(q => q.planOutputIndex >= planOutputs.length)
         if (buildQuestions.length > 0) {
-            const allQuestionTexts = buildQuestions.flatMap(q => 
-                q.questions.map((ques, i) => `Q: ${ques.question}\nA: ${q.answers[i]}`)
-            )
-            const buildQuestionText = allQuestionTexts.join("\n\n---\n\n")
+            const buildQuestionText = buildQuestions.map(q => `Q: ${q.question}\nA: ${q.answer}`).join("\n\n---\n\n")
             buildOutput.response = buildOutput.response ? `${buildOutput.response}\n\n---\n\n${buildQuestionText}` : buildQuestionText
         }
         
@@ -239,23 +233,18 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         },
 
         "tool.execute.after": async (input, output) => {
-            if (!EDIT_TOOLS.has(input.tool) && input.tool !== "question") return
+            if (!EDIT_TOOLS.has(input.tool)) return
             await L.info(`tool.execute.after`, { input, output })
 
             if (input.tool === "question") {
-                const response = await client.session.messages({ path: { id: input.sessionID}})
-                const allMessages = response.data ?? []
-                const currentUserMsg = [...allMessages].reverse().find(m => m.info.role === "user")
-                const isBuildPhase = currentUserMsg?.info.agent === "build"
-                input.args.agent
-                const planOutputIndex = (await getPlanOutputs(input.sessionID as string)).length
-                
-
-
+                const planCount = (await getPlanOutputs(input.sessionID as string)).length
+                const isBuildPhase = planCount > 0
                 const question: Question = {
-                    questions: input.args.questions,
-                    answers: output.metadata.answers.map((answerArray: string[]) => answerArray[0] as string),
-                    isBuildPhase 
+                    question: input.args.question,
+                    header: input.args.header,
+                    options: input.args.options,
+                    answer: output.metadata.answers.map((answers: string[]) => answers[0] as string),
+                    planOutputIndex: planCount
                 }
 
                 const existing = sessionQuestions.get(input.sessionID) ?? []
