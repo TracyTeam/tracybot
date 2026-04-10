@@ -60,6 +60,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
 
     let sessions = new Set<string>()
+    const snapshotLocks = new Map<string, Promise<void>>()
 
     async function createTasklet(sessionId: string): Promise<Tasklet | undefined> {
         const response = await client.session.messages({
@@ -145,6 +146,9 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
             if (event.type === "session.idle") {
                 const idleSessionId = event.properties.sessionID
+
+                snapshotLocks.delete(idleSessionId)
+
                 if (sessions.has(idleSessionId)) {
                     const tasklet = await createTasklet(idleSessionId) // TODO: CACHE THIS PLEASE FOR THE LOVE OF GOD
                     if (!tasklet) {
@@ -152,28 +156,44 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                         return
                     }
 
-                    const output = await $`${tracyPath} --user-name "opencode" --user-email "opencode" --description "${JSON.stringify(tasklet)}"`.cwd(repoRoot).text()
-                    await L.info(`committed OC changes. tracy.sh: ${output}`, { tasklet })
+                    const output = await $`${tracyPath} --user-name "opencode" --user-email "opencode" --description ${JSON.stringify(tasklet)}`.cwd(repoRoot).text()
+                    await L.info(`committed OC changes. tracy.sh: ${output.trim()}`, { tasklet })
                 }
             }
         },
 
         "tool.execute.before": async (input, output) => {
             if (!EDIT_TOOLS.has(input.tool)) return
+            await L.info(`tool.execute.before`, { input, output })
+
+            const sessionId = input.sessionID
+            if (!sessionId) return
 
             const path = output.args.filePath as string | undefined
             if (!path) {
-                await L.error(`skill issue: missing pth in tool.execute.before hook`, { input, output })
-                return
+                await L.warn(`skill issue: missing pth in tool.execute.before hook`, { input, output })
             }
 
-            try {
-                await $`${tracyPath}`.cwd(repoRoot).quiet() // user snapshot
-                await L.info(`created user snapshot for ${path}`)
+            if (!snapshotLocks.has(sessionId)) {
+                const lockPromise = (async () => {
+                    try {
+                        const output = await $`${tracyPath}`.cwd(repoRoot).text() // user snapshot
+                        await L.info(`created user snapshot for ${path}. tracy.sh: ${output.trim()}`)
+                    }
+                    catch (e: any) {
+                        await L.error(`skill issue: ${e}`)
+                    }
+                })()
+
+                snapshotLocks.set(sessionId, lockPromise)
             }
-            catch (e: any) {
-                await L.error(`skill issue: ${e}`)
-            }
+
+            await snapshotLocks.get(sessionId)
+        },
+
+        "tool.execute.after": async (input, output) => {
+            if (!EDIT_TOOLS.has(input.tool)) return
+            await L.info(`tool.execute.after`, { input, output })
         },
     }
 }

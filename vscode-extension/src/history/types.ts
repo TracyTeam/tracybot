@@ -41,3 +41,10 @@ export interface Change {
   model: string;
   tasklet_messages: TaskletMessage[];
 }
+
+export interface DiffHunk {
+  oldStart: number;
+  oldCount: number;
+  newStart: number;
+  newCount: number;
+}
