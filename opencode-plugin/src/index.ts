@@ -244,7 +244,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                 const planOutputIndex = (await getPlanOutputs(input.sessionID as string)).length
                 const question: Question = {
                     questions: input.args.questions,
-                    answers: output.metadata.answers.map(answerArray => answerArray[0] as string),
+                    answers: output.metadata.answers.map((answerArray: string[]) => answerArray[0] as string),
                     planOutputIndex 
                 }
 
