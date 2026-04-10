@@ -238,8 +238,8 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
             if (input.tool === "question") {
                 const planOutputIndex = (await getPlanOutputs(input.sessionID as string)).length
-                const questionsArray = input.args.questions as Array
-                for (const q in questionsArray) {
+                const questionsArg = input.args.questions as string[]
+                for (const q in questionsArg) {
                     const question: Question = {
                         question: q.question,
                         header: input.args.header,
