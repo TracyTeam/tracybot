@@ -94,7 +94,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                 }
             })
 
-        const buildUserMsg = allMessages.find(
+        const buildUserMsg = [...allMessages].reverse().find(
             (message) => message.info.role === "user" && message.info.agent === "build"
         )
 
@@ -156,7 +156,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                         return
                     }
 
-                    const output = await $`${tracyPath} --user-name "opencode" --user-email "opencode" --description ${JSON.stringify(tasklet)}`.cwd(repoRoot).text()
+                    const output = await $`${tracyPath} --user-name "opencode" --user-email "opencode" --description ${JSON.stringify(tasklet)} --session-id "${tasklet.sessionId}" `.cwd(repoRoot).text()
                     await L.info(`committed OC changes. tracy.sh: ${output.trim()}`, { tasklet })
                 }
             }

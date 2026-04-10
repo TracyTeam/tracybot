@@ -5,6 +5,7 @@ REF_BASE="refs/tracy" # Base Git reference namespace for snapshots
 USER_NAME=""
 USER_EMAIL=""
 DESCRIPTION=""        # Optional description (prompt) for snapshot
+SESSION_ID=""
 RESET_ID=false        # Flag to reset identifier
 DEBUG=true
 
@@ -20,6 +21,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --description)
             DESCRIPTION="$2"
+            shift 2
+            ;;
+        --session-id)
+            SESSION_ID="$2"
             shift 2
             ;;
         --reset)
@@ -39,6 +44,7 @@ done
 
 USER_NAME=${USER_NAME:-$(git config user.name || true)}
 USER_EMAIL=${USER_EMAIL:-$(git config user.email || true)}
+SESSION_ID=${SESSION_ID:-"tracy snapshot"}
 
 if [[ -z "$USER_NAME" || -z "$USER_EMAIL" ]]; then  # Ensure both values exist
     if $DEBUG; then
@@ -130,7 +136,6 @@ fi
 # HIDDEN COMMIT
 # -------------------------------
 
-SESSION_ID=$(echo "$DESCRIPTION" | jq -r '.sessionId // empty' 2>/dev/null || true)
 
 COMMIT=$(GIT_AUTHOR_NAME="$USER_NAME" GIT_AUTHOR_EMAIL="$USER_EMAIL" \
         GIT_COMMITTER_NAME="$USER_NAME" GIT_COMMITTER_EMAIL="$USER_EMAIL" \
