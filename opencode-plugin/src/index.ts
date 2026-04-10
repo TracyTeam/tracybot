@@ -112,6 +112,8 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         }
 
         const storedQuestions = sessionQuestions.get(sessionId) ?? []
+
+        const planQuestions = storedQuestions.filter(q => !q.isBuildPhase)
         for (const question of storedQuestions) {
             const target = planOutputs[question.planOutputIndex]
             if (target) {
