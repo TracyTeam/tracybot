@@ -95,6 +95,8 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
     const snapshotLocks = new Map<string, Promise<void>>()
 
     const sessionQuestions = new Map<string, Question[]>()
+    const pendingQuestionsIndices = new Map<string, number[]>()
+
     async function createTasklet(sessionId: string): Promise<Tasklet | undefined> {
         const planOutputs = await getPlanOutputs(sessionId)
         
@@ -210,6 +212,15 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             const sessionId = input.sessionID
             if (!sessionId) return
 
+            if (input.tool === "question") {
+                const callID = input.callID
+                if (callID) {
+                    const planOutputIndex = (await getPlanOutputs(sessionId)).length
+                    pendingQuestionsIndices.set(`${sessionId}:${callID}:`, planOutputIndex)
+                    await L.debug(`Captured planOutputIndex ${planOutputIndex} for question in before hook`)
+                }
+            }
+
             const path = output.args.filePath as string | undefined
             if (!path) {
                 await L.warn(`skill issue: missing pth in tool.execute.before hook`, { input, output })
@@ -249,7 +260,14 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                     options: Array<{label: string; description: string}>
                 }>
 
-                const planOutputIndex = (await getPlanOutputs(input.sessionID as string)).length
+                let planOutputIndex = pendingQuestionsIndices.get(`${input.sessionID}:${input.callID}`)
+                if (planOutputIndex === undefined) {
+                    planOutputIndex = (await getPlanOutputs(input.sessionID as string)).length
+                    await L.warn(`Question planOutputIndex is not found in the pending map, using fallback: ${planOutputIndex}`)
+                } else {
+                    pendingQuestionsIndices.delete(`${input.sessionID}:${input.callID}`)
+                }
+
                 for (let i = 0; i < questionsArg.length; i++) {
                     const q = questionsArg[i]
                     if (q) {
