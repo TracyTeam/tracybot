@@ -1,6 +1,13 @@
 import { marked } from "marked";
+import { TaskletMessage } from "./history/types";
 // Returns the HTML content for the prompt webview panel
-export function getPromptPanelHtml(prompt: string, message: string, model: string, lines: number[]): string {
+export function getPromptPanelHtml(taskletMessages: TaskletMessage[], title: string, model: string, lines: number[]): string {
+  const promptBoxesHtml = taskletMessages.map(msg => `
+      <div class="message-box ${msg.type} ${msg.stage}">
+        ${marked.parse(msg.message)}
+      </div>
+  `).join('\n');
+
   return `
     <!DOCTYPE html>
     <html lang="en">
@@ -20,15 +27,28 @@ export function getPromptPanelHtml(prompt: string, message: string, model: strin
           color: var(--vscode-textLink-foreground);
           margin-bottom: 16px;
         }
-        .prompt-box {
+        .message-box {
           background-color: var(--vscode-textBlockQuote-background);
-          border-left: 4px solid var(--vscode-textLink-foreground);
           padding: 12px 16px;
           border-radius: 4px;
           white-space: pre-wrap;
           word-break: break-word;
         }
-        .prompt-box p {
+        .prompt {
+          border-left-style: solid;
+          border-left-width: 4px;
+        }
+        .response {
+          border-right-style: solid;
+          border-right-width: 4px;
+        }
+        .build {
+          border-color: var(--vscode-charts-blue);
+        }
+        .plan {
+          border-color: var(--vscode-charts-orange);
+        }
+        .message-box p {
           margin: 0;
           padding: 0;
         }
@@ -50,18 +70,19 @@ export function getPromptPanelHtml(prompt: string, message: string, model: strin
     <body>
       <div class="nav-bar">
         <div class="column">
-          <h2>${message}</h2>
+          <h2>${title}</h2>
         </div>
         <div class="column">
           <button type="button" onclick="openTaskletMenu()">All Tasklets</button>
         </div>
       </div>
 
-      <div class="prompt-box">
-        <p>MODEL: ${model}</p>
-        ${marked.parse(prompt)}
-        <p>LINES: ${lines}</p>
+      <div class="meta-info">
+        <p><strong>MODEL:</strong> ${model}</p>
+        <p><strong>LINES:</strong> ${lines.join(', ')}</p>
       </div>
+
+      ${promptBoxesHtml}
     </body>
     <script>
       const vscode = acquireVsCodeApi();

@@ -4,7 +4,7 @@ import type { Tasklet, PlanOutput, BuildOutput, Question } from "./Tasklet"
 import path from "path"
 import { Logger } from "./Logger"
 
-const EDIT_TOOLS = new Set(["edit", "write", "patch", "multiedit", "apply_patch", "applypatch"])
+const EDIT_TOOLS = new Set(["edit", "write", "patch", "multiedit", "apply_patch", "applypatch", "question"])
 
 export const MyPlugin: Plugin = async (input: PluginInput) => {
     const { client, $, directory } = input
@@ -92,6 +92,8 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
 
     let sessions = new Set<string>()
+    const snapshotLocks = new Map<string, Promise<void>>()
+
     const sessionQuestions = new Map<string, Question[]>()
     async function createTasklet(sessionId: string): Promise<Tasklet | undefined> {
         const planOutputs = await getPlanOutputs(sessionId)
@@ -170,6 +172,9 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
             if (event.type === "session.idle") {
                 const idleSessionId = event.properties.sessionID
+
+                snapshotLocks.delete(idleSessionId)
+
                 if (sessions.has(idleSessionId)) {
                     const tasklet = await createTasklet(idleSessionId) // TODO: CACHE THIS PLEASE FOR THE LOVE OF GOD // No :)
                     
@@ -178,20 +183,36 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                         return
                     }
 
-                    const output = await $`${tracyPath} --user-name "opencode" --user-email "opencode" --description "${JSON.stringify(tasklet)}"`.cwd(repoRoot).quiet().text()
-                    await L.info(`committed OC changes. tracy.sh: ${output}`, { tasklet })
+                    const output = await $`${tracyPath} --user-name "opencode" --user-email "opencode" --description ${JSON.stringify(tasklet)}`.cwd(repoRoot).text()
+                    await L.info(`committed OC changes. tracy.sh: ${output.trim()}`, { tasklet })
                 }
             }
         },
 
         "tool.execute.before": async (input, output) => {
             if (!EDIT_TOOLS.has(input.tool)) return
+            await L.info(`tool.execute.before`, { input, output })
+
+            const sessionId = input.sessionID
+            if (!sessionId) return
 
             const path = output.args.filePath as string | undefined
             if (!path) {
-                await L.error(`skill issue: missing pth in tool.execute.before hook`, { input, output })
-                return
+                await L.warn(`skill issue: missing pth in tool.execute.before hook`, { input, output })
             }
+
+            if (!snapshotLocks.has(sessionId)) {
+                const lockPromise = (async () => {
+                    try {
+                        const output = await $`${tracyPath}`.cwd(repoRoot).text() // user snapshot
+                        await L.info(`created user snapshot for ${path}. tracy.sh: ${output.trim()}`)
+                    }
+                    catch (e: any) {
+                        await L.error(`skill issue: ${e}`)
+                    }
+                })()
+
+                snapshotLocks.set(sessionId, lockPromise)
             try {
                 await $`${tracyPath}`.cwd(repoRoot).quiet() // user snapshot
                 await L.info(`created user snapshot for ${path}`)
@@ -199,9 +220,14 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             catch (e: any) {
                 await L.error(`skill issue: ${e}`)
             }
+                await snapshotLocks.get(sessionId)
+            }
         },
 
         "tool.execute.after": async (input, output) => {
+            if (!EDIT_TOOLS.has(input.tool)) return
+            await L.info(`tool.execute.after`, { input, output })
+
             if (input.tool === "question") {
                 await L.info("The question tool output and input after execution: ", { input, output })
                 const planOutputIndex = (await getPlanOutputs(input.sessionID as string)).length - 2 // Hate this alot, but it works (even when first plan is a question)

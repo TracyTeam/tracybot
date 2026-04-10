@@ -1,5 +1,5 @@
-import { Change, CommitInfo, History } from "./types";
-import { getChangedLines, getCommitTree, getDiff, getTracyRefCommit, groupChangesByFile, runGit } from "./helpers";
+import { Change, CommitInfo, History, TaskletMessage } from "./types";
+import { getChangedLines, getCommitTree, getDiff, getTracyRefCommit, groupChangesByFile, mapLinesToTree, runGit } from "./helpers";
 
 // Get all visible (non-hidden) commits from the user branch
 async function getMainCommits(repoPath: string): Promise<CommitInfo[]> {
@@ -39,7 +39,7 @@ async function getTracyIdNote(repoPath: string, commitHash: string): Promise<str
   try {
     const output = await runGit(repoPath, ["notes", "show", commitHash]);
     const match = output.match(/tracy-id:\s*([a-f0-9-]+)/);
-    
+
     return match ? match[1] : null;
   } catch {
     return null;
@@ -79,11 +79,11 @@ async function getTracyChain(repoPath: string, startCommit: string): Promise<Com
 
   while (queue.length > 0) {
     const currentHash = queue.shift()!;
-    
+
     if (visited.has(currentHash)) {
       continue;
     }
-    
+
     visited.add(currentHash);
 
     try {
@@ -136,6 +136,42 @@ function isAiChange(commit: CommitInfo): boolean {
   return commit.authorEmail.toLowerCase() === "opencode";
 }
 
+function buildTaskletMessages(tasklet_str: string): TaskletMessage[] {
+  let tasklet_obj: any;
+  try {
+    tasklet_obj = JSON.parse(tasklet_str);
+  } catch (e) {
+    console.error(`Could not parse tasklet: ${tasklet_str}`);
+    return [];
+  }
+
+  if (!tasklet_obj) {
+    console.error(`Could not parse tasklet: ${tasklet_str}`);
+    return [];
+  }
+
+  let messages: TaskletMessage[] = [];
+  if (tasklet_obj?.planOutputs && Array.isArray(tasklet_obj.planOutputs)) {
+    tasklet_obj.planOutputs.forEach((plan: any) => {
+      if (plan.prompt) {
+        messages.push({ stage: "plan", type: "prompt", message: plan.prompt });
+      }
+      if (plan.response) {
+        messages.push({ stage: "plan", type: "response", message: plan.response });
+      }
+    });
+  }
+
+  if (!tasklet_obj.buildOutput) {
+    console.warn(`Missing build output in tasklet: ${tasklet_str}`);
+  } else {
+    messages.push({ stage: "build", type: "prompt", message: tasklet_obj.buildOutput?.prompt });
+    messages.push({ stage: "build", type: "response", message: tasklet_obj.buildOutput?.response });
+  }
+
+  return messages;
+}
+
 // AAAAAAAAAAAAAAA
 export async function buildHistory(repoPath: string | undefined): Promise<History | null> {
   if (!repoPath) {
@@ -156,27 +192,37 @@ export async function buildHistory(repoPath: string | undefined): Promise<Histor
       return null;
     }
 
-    const changes: Change[] = [];
-    for (let i = 0; i < mainCommits.length; i++) {
-      const mainCommit = mainCommits[i];
+    const headCommitHash = await runGit(repoPath, ["rev-parse", "HEAD"]);
+    const headTree = await getCommitTree(repoPath, headCommitHash);
       
-      const tracyId = await getTracyIdNote(repoPath, mainCommit.hash);
-      if (tracyId) {
+    if (!headTree) {
+      return null;
+    }
+
+    const changesNested = await Promise.all(
+      mainCommits.map(async (mainCommit, i) => {
+        const tracyId = await getTracyIdNote(repoPath, mainCommit.hash);
+        if (!tracyId) {
+          return [];
+        }
+
         const tracyStartCommit = await getTracyRefCommit(repoPath, tracyId);
         if (!tracyStartCommit) {
-          continue;
+          return [];
         }
-        
-        const tracyChain = await getTracyChain(repoPath, tracyStartCommit);
+
+        const tracyChain: CommitInfo[] = await getTracyChain(repoPath, tracyStartCommit);
         const prevMainTree = i > 0 ? mainCommits[i - 1].treeHash : mainCommit.treeHash;
 
-        for (let j = 0; j < tracyChain.length; j++) {
-          const snapshot = tracyChain[j];
+        const chainChanges = await Promise.all(
+          tracyChain.map(async (snapshot, j) => {
+            if (!isAiChange(snapshot)) {
+              return [];
+            }
 
-          if (isAiChange(snapshot)) {
-            const parentInChain = j > 0 ? tracyChain[j - 1].treeHash : prevMainTree;
-            let diffFromTree = parentInChain;
-            
+            const messages: Array<TaskletMessage> = buildTaskletMessages(snapshot.description);
+            let diffFromTree = j > 0 ? tracyChain[j - 1].treeHash : prevMainTree;
+
             if (snapshot.parentHash) {
               const parentTree = await getCommitTree(repoPath, snapshot.parentHash);
 
@@ -184,26 +230,37 @@ export async function buildHistory(repoPath: string | undefined): Promise<Histor
                 diffFromTree = parentTree;
               }
             }
-            
+
             const fileChangesMap = await getDiff(repoPath, diffFromTree, snapshot.treeHash);
-            for (const filePath of fileChangesMap.keys()) {
-              const lines = await getChangedLines(repoPath, diffFromTree, snapshot.treeHash, filePath);
-              
-              changes.push({
-                filePath,
-                lines,
-                model: snapshot.authorName,
-                prompt: snapshot.description.trim()
-              });
-            }
-          }
-        }
-      }
-    }
+            const fileResults = await Promise.all(
+              Array.from(fileChangesMap.keys()).map(async (filePath) => {
+                const linesAtSnapshot = await getChangedLines(repoPath, diffFromTree, snapshot.treeHash, filePath);
+                const lines = await mapLinesToTree(repoPath, snapshot.treeHash, headTree, filePath, linesAtSnapshot);
+
+                if (lines.length > 0) {
+                  return {
+                    filePath,
+                    lines,
+                    model: snapshot.authorName,
+                    tasklet_messages: messages,
+                  } as Change;
+                }
+
+                return null;
+              })
+            );
+
+            return fileResults.filter((res): res is Change => res !== null);
+          })
+        );
+
+        return chainChanges.flat();
+      })
+    );
 
     return {
-      id: await runGit(repoPath, ["rev-parse", "HEAD"]),
-      files: groupChangesByFile(changes)
+      id: headCommitHash,
+      files: groupChangesByFile(changesNested.flat())
     };
   } catch (error) {
     console.error("Error building history:", error);
