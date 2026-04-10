@@ -1,13 +1,29 @@
 import * as vscode from 'vscode';
 
-// temporary mock data for testing
-const mockData: Record<string, { lines: number[]; message: string; selected: boolean }[]> = {
-  "example.ts": [
-    { lines: [0, 1, 2, 11], message: "Prompt 1", selected: false },
-    { lines: [5, 6, 7], message: "Prompt 2", selected: false },
-    { lines: [10], message: "Prompt 3", selected: false },
-  ]
-};
+import { getMockData } from './mockData';
+
+// Transform MockData into the shape extension.ts works with, adding selected state
+type Entry = { lines: number[]; message: string; selected: boolean };
+type FileEntries = Record<string, Entry[]>;
+
+// Build the initial FileEntries structure from the mock data, and setting selected attribute to false for all entries
+function buildFileEntries(): FileEntries {
+  const data = getMockData();
+  const result: FileEntries = {};
+
+  for (const file of data.files) {
+    result[file.path] = file.tasklets.map(tasklet => ({
+      lines: tasklet.lines,
+      message: tasklet.prompt,
+      selected: false,
+    }));
+  }
+
+  return result;
+}
+
+// Mutable at runtime so toggleAiBlame can update selected state
+const mockData: FileEntries = buildFileEntries();
 
 // Define decoration
 let gutterUnselectedDecoration: vscode.TextEditorDecorationType;
