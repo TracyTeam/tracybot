@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import { buildHistory } from './history/buildHistory';
 import { History, TaskletUI, LineMap } from './history/types';
 import { getBlameViewHtml } from './blameView';
+import { getRepoPath } from './utils';
 
 // History data — populated asynchronously when the extension activates
 let history: History | undefined;
@@ -57,7 +58,7 @@ function getDisplayLineMapForDocument(document: vscode.TextDocument): Map<number
 let statusBarItem: vscode.StatusBarItem;
 
 // Activate function
-export function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext) {
   // Status bar button — always visible, click opens the blame panel
   statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
   statusBarItem.command = 'tracybot-extension.blameAI';
@@ -94,8 +95,7 @@ export function activate(context: vscode.ExtensionContext) {
           cancellable: false,
         },
         async () => {
-          const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-          const result = await buildHistory(workspaceRoot);
+          const result = await buildHistory(await getRepoPath());
 
           if (!result) {
             vscode.window.showErrorMessage('AI Blame: Failed to build history.');
@@ -147,9 +147,8 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   // Warm up history on activation so the first blameAI click is faster
-  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   const time = Date.now();
-  buildHistory(workspaceRoot).then(async (result) => {
+  buildHistory(await getRepoPath()).then(async (result) => {
     console.log(`History build time: ${Date.now() - time}ms`);
     console.log(result);
 
