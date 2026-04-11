@@ -43,11 +43,6 @@ export interface Change {
   snapshotHash: string;
 }
 
-export type FileLineDelta = {
-  consumed: { at: number; oldCount: number }[];
-  shifts: { at: number; delta: number; oldCount: number }[];
-};
-
 // Extends the base Tasklet type from History with runtime-only UI state
 export type TaskletUI = History['files'][number]['tasklets'][number] & { selected: boolean };
 
