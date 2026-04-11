@@ -10,7 +10,7 @@ import {
   isAiChange,
   mapLinesToTree,
   runGit
-} from "./helpers";
+} from "../utils";
 
 const DELIMITER = "||#--TRACY--#||";
 
