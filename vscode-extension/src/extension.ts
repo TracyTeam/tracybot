@@ -2,7 +2,6 @@ import * as vscode from 'vscode';
 
 import { buildHistory } from './history/buildHistory';
 import { History, TaskletUI, LineMap } from './history/types';
-import { getRepoPath, getLineDeltas, applyDiffToLineMap } from './utils';
 import { getBlameViewHtml } from './blameView';
 
 // History data — populated asynchronously when the extension activates
@@ -110,17 +109,8 @@ export function activate(context: vscode.ExtensionContext) {
 
           history = result as unknown as { files: { path: string; tasklets: TaskletUI[] }[] } & History;
 
-          // Rebuild both line maps from the fresh history.
           lineMap = buildLineMap(history);
-
-          const repoPath = await getRepoPath();
-          if (repoPath) {
-            const deltas = await getLineDeltas(repoPath);
-            displayLineMap = applyDiffToLineMap(lineMap, deltas);
-          } else {
-            // No repo / no deltas available — use the raw lineMap as-is.
-            displayLineMap = new Map(lineMap);
-          }
+          displayLineMap = new Map(lineMap);
         }
       );
 
@@ -175,12 +165,7 @@ export function activate(context: vscode.ExtensionContext) {
     history = result as unknown as { files: { path: string; tasklets: TaskletUI[] }[] } & History;
 
     lineMap = buildLineMap(history);
-
-    const repoPath = await getRepoPath();
-    if (!repoPath) { return; }
-
-    const deltas = await getLineDeltas(repoPath);
-    displayLineMap = applyDiffToLineMap(lineMap, deltas);
+    displayLineMap = new Map(lineMap);
   });
 }
 

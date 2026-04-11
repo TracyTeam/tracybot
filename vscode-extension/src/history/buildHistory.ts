@@ -6,7 +6,6 @@ import {
   getCommitTree,
   getDiff,
   getTracyRefCommit,
-  getUserName,
   groupChangesByFile,
   isAiChange,
   mapLinesToTree,
@@ -243,7 +242,8 @@ async function extractSnapshot(
           linesAtSnapshot
         );
       } else {
-        // Map the snapshot to the real commit. Unstaged lines will be treated as deleted and dropped.
+        // Map the snapshot to the real commit
+        // Unstaged lines will be treated as deleted and dropped
         const linesInMainCommit = await mapLinesToTree(
           repoPath,
           snapshot.treeHash,
@@ -276,13 +276,13 @@ async function extractSnapshot(
     })
   );
 
-  return fileResults.filter((res): res is Change => res !== null);
+  return fileResults.filter((result) => result !== null);
 }
 
 async function buildCommittedHistory(
   repoPath: string,
   mainCommits: CommitInfo[],
-  headTree: string
+  lastTracyTip: string
 ): Promise<Change[]> {
   const result = await Promise.all(
     mainCommits.map(async (mainCommit, i) => {
@@ -304,7 +304,7 @@ async function buildCommittedHistory(
         tracyChain,
         prevMainTree,
         mainCommit.treeHash,
-        headTree
+        lastTracyTip  // map all the way to last AI state
       );
     })
   );
@@ -315,26 +315,23 @@ async function buildCommittedHistory(
 async function buildUncommittedChanges(
   repoPath: string,
   headTree: string
-): Promise<{ uncommittedChanges: Change[]; lastTreeForUserDiff: string }> {
-  let uncommittedChanges: Change[] = [];
-  let lastTreeForUserDiff = headTree;
-
+): Promise<{ uncommittedChanges: Change[]; lastTracyTip: string }> {
   const activeTracyId = await getActiveTracyId(repoPath);
   if (!activeTracyId) {
-    return { uncommittedChanges, lastTreeForUserDiff };
+    return { uncommittedChanges: [], lastTracyTip: headTree };
   }
 
   const activeHiddenTip = await getActiveHiddenCommit(repoPath, activeTracyId);
   if (!activeHiddenTip) {
-    return { uncommittedChanges, lastTreeForUserDiff };
+    return { uncommittedChanges: [], lastTracyTip: headTree };
   }
 
   const tracyChain = await getTracyChain(repoPath, activeHiddenTip);
-
-  if (tracyChain.length > 0) {
-    lastTreeForUserDiff = tracyChain[tracyChain.length - 1].treeHash;
+  if (tracyChain.length === 0) {
+    return { uncommittedChanges: [], lastTracyTip: headTree };
   }
 
+  const lastTracyTip = tracyChain[tracyChain.length - 1].treeHash;
   const chainChanges = await Promise.all(
     tracyChain.map((snapshot, index) =>
       extractSnapshot(
@@ -343,51 +340,121 @@ async function buildUncommittedChanges(
         tracyChain,
         headTree,
         index,
-        "WORKING_DIR",
-        "WORKING_DIR"
+        lastTracyTip,
+        lastTracyTip
       )
     )
   );
 
-  uncommittedChanges.push(...chainChanges.flat());
-
-  return { uncommittedChanges, lastTreeForUserDiff };
+  return { uncommittedChanges: chainChanges.flat(), lastTracyTip };
 }
 
-async function buildUserWorkingChanges(
+// For each AI change, drop lines that fall inside a user-modified hunk
+// and shift lines that were only moved by user insertions/deletions
+async function consumeUserChanges(
   repoPath: string,
-  baseTree: string
+  changes: Change[],
+  lastTracyTip: string
 ): Promise<Change[]> {
-  const userName = await getUserName(repoPath);
-  const userDiffMap = await getDiff(repoPath, baseTree, "WORKING_DIR");
+  const byFile = new Map<string, Change[]>();
+  for (const change of changes) {
+    if (!byFile.has(change.filePath)) { 
+      byFile.set(change.filePath, []); 
+    }
 
-  const userChanges = await Promise.all(
-    Array.from(userDiffMap.keys()).map(async (filePath) => {
-      const lines = await getChangedLines(
-        repoPath,
-        baseTree,
-        "WORKING_DIR",
-        filePath
-      );
+    byFile.get(change.filePath)!.push(change);
+  }
 
-      if (lines.length > 0) {
-        return {
-          filePath,
-          lines,
-          model: userName,
-          tasklet_messages: [],
-          snapshotHash: "WORKING_DIR",
-        } as Change;
+  const results = await Promise.all(
+    Array.from(byFile.entries()).map(async ([filePath, fileChanges]) => {
+      const userHunkMap = await getDiff(repoPath, lastTracyTip, "WORKING_DIR", filePath);
+      const userHunks = userHunkMap.get(filePath) || [];
+
+      if (userHunks.length === 0) {
+        return fileChanges;
       }
 
-      return null;
+      return fileChanges
+        .map(change => {
+          const survivingLines: number[] = [];
+
+          for (const line of [...change.lines].sort((a, b) => a - b)) {
+            let currentShift = 0;
+            let mapped = false;
+
+            for (const hunk of userHunks) {
+              // Pure insertions (oldCount === 0) have no old-space range to consume
+              // Their effective start for ordering purposes is oldStart + 1
+              const effectiveOldStart = hunk.oldCount === 0 ? hunk.oldStart + 1 : hunk.oldStart;
+
+              if (line < effectiveOldStart) {
+                survivingLines.push(line + currentShift);
+                mapped = true;
+
+                break;
+              }
+
+              // Line falls inside a user modified or user deleted region
+              if (hunk.oldCount > 0 && line >= hunk.oldStart && line < hunk.oldStart + hunk.oldCount) {
+                mapped = true;
+
+                break;
+              }
+
+              currentShift += (hunk.newCount - hunk.oldCount);
+            }
+
+            if (!mapped) {
+              survivingLines.push(line + currentShift);
+            }
+          }
+
+          return survivingLines.length > 0
+            ? { ...change, lines: survivingLines }
+            : null;
+        })
+        .filter((change) => change !== null);
     })
   );
 
-  return userChanges.filter((res): res is Change => res !== null);
+  return results.flat();
 }
 
-// AAAAAAAAAAAAAAA
+// Strip from each change any line that a later change also claims
+// Changes must be in oldest-first order and uncommitted changes trail after committed ones
+function deduplicateAILines(changes: Change[]): Change[] {
+  const byFile = new Map<string, Change[]>();
+  for (const change of changes) {
+    if (!byFile.has(change.filePath)) { 
+      byFile.set(change.filePath, []); 
+    }
+
+    byFile.get(change.filePath)!.push(change);
+  }
+
+  const result: Change[] = [];
+  // TODO: This is awfully slow -> O(n^4)
+  for (const fileChanges of byFile.values()) {
+    for (let i = 0; i < fileChanges.length; i++) {
+      const laterLines = new Set<number>();
+
+      for (let j = i + 1; j < fileChanges.length; j++) {
+        for (const line of fileChanges[j].lines) {
+          laterLines.add(line);
+        }
+      }
+
+      const filtered = fileChanges[i].lines.filter(l => !laterLines.has(l));
+      if (filtered.length > 0) {
+        result.push({ ...fileChanges[i], lines: filtered });
+      }
+    }
+  }
+
+  return result;
+}
+
+// TODO: CACHE THIS FOR THE LOVE OF GOD!!!
 export async function buildHistory(repoPath: string | undefined): Promise<History | null> {
   if (!repoPath) {
     return null;
@@ -414,17 +481,20 @@ export async function buildHistory(repoPath: string | undefined): Promise<Histor
       return null;
     }
 
-    // TODO: these should contain both AI and user changes
-    // Otherwise, there is no way to detect if an AI line was user changed
-    const committedChanges = await buildCommittedHistory(repoPath, mainCommits, headTree);
-    const { uncommittedChanges, lastTreeForUserDiff } = await buildUncommittedChanges(repoPath, headTree);
-    // FIX: this right now treats user changes as AI changes, 
-    // because the returned object of buildHistory contains only AI changes
-    const userChanges = await buildUserWorkingChanges(repoPath, lastTreeForUserDiff);
+    // Build uncommitted AI changes first
+    const { uncommittedChanges, lastTracyTip } = await buildUncommittedChanges(repoPath, headTree);
+    // Build committed AI changes
+    const committedChanges = await buildCommittedHistory(repoPath, mainCommits, lastTracyTip);
+    // Consume user changes since the last snapshot
+    const userConsumed = await consumeUserChanges(
+      repoPath,
+      [...committedChanges, ...uncommittedChanges],
+      lastTracyTip
+    );
 
     return {
       id: headCommitHash || "WORKING_DIR",
-      files: groupChangesByFile([...committedChanges, ...uncommittedChanges, ...userChanges]),
+      files: groupChangesByFile(deduplicateAILines(userConsumed)),
     };
   } catch (error) {
     console.error("Error building history:", error);
