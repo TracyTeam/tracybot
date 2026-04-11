@@ -1,4 +1,4 @@
-import { Change, CommitInfo, History, TaskletMessage } from "./types";
+import { Change, CommitInfo, DiffHunk, History, TaskletMessage } from "./types";
 import {
   getActiveHiddenCommit,
   getActiveTracyId,
@@ -252,14 +252,11 @@ async function extractSnapshot(
           linesAtSnapshot
         );
 
-        // Map the surviving lines from the real commit to the finalTree
-        lines = await mapLinesToTree(
-          repoPath,
-          targetTree,
-          finalTree,
-          filePath,
-          linesInMainCommit
-        );
+        // Propagate surviving lines from the real commit to finalTree using consume-and-shift
+        // Any line modified or deleted by a commit between targetTree and finalTree 
+		// (whether by a user or a later AI snapshot) is dropped rather than re-attributed to this snapshot
+        const forwardHunks = await getDiff(repoPath, targetTree, finalTree, filePath);
+        lines = consumeAndShift(linesInMainCommit, forwardHunks.get(filePath) ?? []);
       }
 
       if (lines.length > 0) {
@@ -349,6 +346,45 @@ async function buildUncommittedChanges(
   return { uncommittedChanges: chainChanges.flat(), lastTracyTip };
 }
 
+// Drops lines that fall inside a modified or deleted hunk, shifts lines that are before one
+// Pure insertions (oldCount = 0) never consume old lines, only shift subsequent ones
+function consumeAndShift(lines: number[], hunks: DiffHunk[]): number[] {
+  const survivingLines: number[] = [];
+
+  for (const line of [...lines].sort((a, b) => a - b)) {
+    let currentShift = 0;
+    let mapped = false;
+
+    for (const hunk of hunks) {
+	  // Pure insertions (oldCount === 0) have no old-space range to consume
+	  // Their effective start for ordering purposes is oldStart + 1
+      const effectiveOldStart = hunk.oldCount === 0 ? hunk.oldStart + 1 : hunk.oldStart;
+
+      if (line < effectiveOldStart) {
+        survivingLines.push(line + currentShift);
+        mapped = true;
+		
+        break;
+      }
+
+	  // Line falls inside a user modified or user deleted region
+      if (hunk.oldCount > 0 && line >= hunk.oldStart && line < hunk.oldStart + hunk.oldCount) {
+        mapped = true;
+		
+        break;
+      }
+
+      currentShift += (hunk.newCount - hunk.oldCount);
+    }
+
+    if (!mapped) {
+      survivingLines.push(line + currentShift);
+    }
+  }
+
+  return survivingLines;
+}
+
 // For each AI change, drop lines that fall inside a user-modified hunk
 // and shift lines that were only moved by user insertions/deletions
 async function consumeUserChanges(
@@ -358,8 +394,8 @@ async function consumeUserChanges(
 ): Promise<Change[]> {
   const byFile = new Map<string, Change[]>();
   for (const change of changes) {
-    if (!byFile.has(change.filePath)) { 
-      byFile.set(change.filePath, []); 
+    if (!byFile.has(change.filePath)) {
+      byFile.set(change.filePath, []);
     }
 
     byFile.get(change.filePath)!.push(change);
@@ -376,42 +412,10 @@ async function consumeUserChanges(
 
       return fileChanges
         .map(change => {
-          const survivingLines: number[] = [];
-
-          for (const line of [...change.lines].sort((a, b) => a - b)) {
-            let currentShift = 0;
-            let mapped = false;
-
-            for (const hunk of userHunks) {
-              // Pure insertions (oldCount === 0) have no old-space range to consume
-              // Their effective start for ordering purposes is oldStart + 1
-              const effectiveOldStart = hunk.oldCount === 0 ? hunk.oldStart + 1 : hunk.oldStart;
-
-              if (line < effectiveOldStart) {
-                survivingLines.push(line + currentShift);
-                mapped = true;
-
-                break;
-              }
-
-              // Line falls inside a user modified or user deleted region
-              if (hunk.oldCount > 0 && line >= hunk.oldStart && line < hunk.oldStart + hunk.oldCount) {
-                mapped = true;
-
-                break;
-              }
-
-              currentShift += (hunk.newCount - hunk.oldCount);
-            }
-
-            if (!mapped) {
-              survivingLines.push(line + currentShift);
-            }
-          }
-
-          return survivingLines.length > 0
-            ? { ...change, lines: survivingLines }
-            : null;
+          const survivingLines = consumeAndShift(change.lines, userHunks);
+		  return survivingLines.length > 0
+			? { ...change, lines: survivingLines }
+		    : null;
         })
         .filter((change) => change !== null);
     })
