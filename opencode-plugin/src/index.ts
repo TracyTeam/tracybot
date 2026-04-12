@@ -119,7 +119,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         
         for (const question of storedQuestions) {
             const questionText = JSON.stringify(question)
-            if (question.planOutputIndex >= finalPlanCount) {
+            if (question.planOutputIndex > finalPlanCount) {
                 continue
             }
             
@@ -217,7 +217,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             if (input.tool === "question") {
                 const callID = input.callID
                 if (callID) {
-                    const planOutputIndex = (await getPlanOutputs(sessionId)).length
+                    const planOutputIndex = (await getPlanOutputs(sessionId)).length - 1
                     pendingQuestionsIndices.set(`${sessionId}:${callID}`, planOutputIndex)
                     await L.info(`Pending questions stored: ${sessionId}:${callID} -> ${planOutputIndex}`)
                 }
@@ -264,7 +264,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                 let planOutputIndex = pendingQuestionsIndices.get(`${input.sessionID}:${input.callID}`)
                 
                 if (planOutputIndex === undefined) {
-                    planOutputIndex = (await getPlanOutputs(input.sessionID as string)).length
+                    planOutputIndex = (await getPlanOutputs(input.sessionID as string)).length - 1
                     await L.warn(`Question planOutputIndex is not found in the pending map, using fallback: ${planOutputIndex}`)
                 } else {
                     pendingQuestionsIndices.delete(`${input.sessionID}:${input.callID}`)
