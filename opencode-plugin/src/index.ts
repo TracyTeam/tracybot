@@ -210,59 +210,60 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         },
 
         "tool.execute.before": async (input, output) => {
-            if (!EDIT_TOOLS.has(input.tool) && input.tool !== "question") return
-            await L.info(`tool.execute.before`, { input, output })
-
             const sessionId = input.sessionID
             if (!sessionId) return
 
-            if (input.tool === "question") {
+            if (EDIT_TOOLS.has(input.tool)) {    
+                const path = output.args.filePath as string | undefined
+                if (!path) {
+                    await L.warn(`skill issue: missing pth in tool.execute.before hook`, { input, output })
+                }
+    
+                if (!snapshotLocks.has(sessionId)) {
+                    const lockPromise = (async () => {
+                        try {
+                            const output = await $`${tracyPath}`.cwd(repoRoot).text() // user snapshot
+                            await L.info(`created user snapshot for ${path}. tracy.sh: ${output.trim()}`)
+                        }
+                        catch (e: any) {
+                            await L.error(`skill issue: ${e}`)
+                        }
+                    })()
+    
+                    snapshotLocks.set(sessionId, lockPromise)
+                try {
+                    await $`${tracyPath}`.cwd(repoRoot).quiet() // user snapshot
+                    await L.info(`created user snapshot for ${path}`)
+                }
+                catch (e: any) {
+                    await L.error(`skill issue: ${e}`)
+                }
+                    await snapshotLocks.get(sessionId)
+                }
+                
+            } else if (input.tool == "question") {
                 const callID = input.callID
                 if (callID) {
                     const messages = await client.session.messages({ path: { id: sessionId}})
                     const planCount = messages.data?.filter(m => m.info.role === "user" && m.info.agent !== "build").length ?? 0
                     const hasBuild = messages.data?.some(m => m.info.role === "user" && m.info.agent === "build") 
-
+    
                     const outputId = hasBuild ? `build_${planCount}` : `plan_${planCount === 0 ? 0 : planCount - 1}`
-
+    
                     const existing = pendingQuestionsIndices.get(`${sessionId}:${callID}`) ?? []
                     pendingQuestionsIndices.set(`${sessionId}:${callID}`, [...existing, outputId])
-                    await L.info(`Pending questions stored: ${sessionId}:${callID} -> ${outputId}`)
+                    await L.debug(`Pending questions stored: ${sessionId}:${callID} -> ${outputId}`)
                 }
+            } else {
+                return
             }
 
-            const path = output.args.filePath as string | undefined
-            if (!path) {
-                await L.warn(`skill issue: missing pth in tool.execute.before hook`, { input, output })
+            if (input.tool === "question") {
             }
 
-            if (!snapshotLocks.has(sessionId)) {
-                const lockPromise = (async () => {
-                    try {
-                        const output = await $`${tracyPath}`.cwd(repoRoot).text() // user snapshot
-                        await L.info(`created user snapshot for ${path}. tracy.sh: ${output.trim()}`)
-                    }
-                    catch (e: any) {
-                        await L.error(`skill issue: ${e}`)
-                    }
-                })()
-
-                snapshotLocks.set(sessionId, lockPromise)
-            try {
-                await $`${tracyPath}`.cwd(repoRoot).quiet() // user snapshot
-                await L.info(`created user snapshot for ${path}`)
-            }
-            catch (e: any) {
-                await L.error(`skill issue: ${e}`)
-            }
-                await snapshotLocks.get(sessionId)
-            }
         },
 
-        "tool.execute.after": async (input, output) => {
-            if (!EDIT_TOOLS.has(input.tool) && input.tool !== "question") return
-            await L.info(`tool.execute.after`, { input, output })
-            
+        "tool.execute.after": async (input, output) => { 
             if (input.tool === "question") {
                 const questionsArg = input.args.questions as Array<{
                     question: string
@@ -304,6 +305,8 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                     }
                 }
 
+            } else {
+                return
             }
         }
     }
