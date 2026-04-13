@@ -95,7 +95,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
     const snapshotLocks = new Map<string, Promise<void>>()
 
     const sessionQuestions = new Map<string, Question[]>()
-    const pendingQuestionsIndices = new Map<string, number>()
+    const pendingQuestionsIndices = new Map<string, number[]>()
 
     async function createTasklet(sessionId: string): Promise<Tasklet | undefined> {
         const planOutputs = await getPlanOutputs(sessionId)
@@ -203,7 +203,8 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                     const planUserMessages = (await messages).data?.filter(m => m.info.role === "user" && m.info.agent !== "build") ?? []
                     const planOutputIndex = planUserMessages.length - 1
 
-                    pendingQuestionsIndices.set(`${sessionId}:${callID}`, planOutputIndex)
+                    const existing = pendingQuestionsIndices.get(`${sessionId}:${callID}`) ?? []
+                    pendingQuestionsIndices.set(`${sessionId}:${callID}`, [...existing, planOutputIndex])
                     await L.info(`Pending questions stored: ${sessionId}:${callID} -> ${planOutputIndex}`)
                 }
             }
@@ -247,7 +248,8 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                     options: Array<{label: string; description: string}>
                 }>
 
-                let outputIndex = pendingQuestionsIndices.get(`${input.sessionID}:${input.callID}`)
+                const indices = pendingQuestionsIndices.get(`${input.sessionID}:${input.callID}`) ?? []
+                let outputIndex = indices.shift()
                 
                 if (outputIndex === undefined) {
                     const messages = client.session.messages({ path: { id: input.sessionID}})
