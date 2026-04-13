@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 
-import { buildHistory } from './history/buildHistory';
-import { History, TaskletUI, LineMap } from './history/types';
+import { buildHistory, hydrateCache, getSerializedCache } from './history/buildHistory';
+import { History, TaskletUI, LineMap, Change } from './history/types';
 import { getBlameViewHtml } from './blameView';
 import { getRepoPath } from './utils';
 
@@ -67,6 +67,9 @@ export async function activate(context: vscode.ExtensionContext) {
   statusBarItem.show();
   context.subscriptions.push(statusBarItem);
 
+  // get cache from the workspaceState
+  hydrateCache(context.workspaceState.get<Record<string, Change[]>>('tracybot.buildHistoryCache'));
+
   // blameAI — rebuilds history fresh then opens the read-only blame panel
   context.subscriptions.push(
     vscode.commands.registerCommand('tracybot-extension.blameAI', async () => {
@@ -111,6 +114,8 @@ export async function activate(context: vscode.ExtensionContext) {
 
           lineMap = buildLineMap(history);
           displayLineMap = new Map(lineMap);
+
+          await context.workspaceState.update('tracybot.buildHistoryCache', getSerializedCache());
         }
       );
 

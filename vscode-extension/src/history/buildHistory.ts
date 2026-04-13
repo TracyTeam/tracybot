@@ -15,7 +15,19 @@ import {
 const DELIMITER = "||#--TRACY--#||";
 
 // Key: git commit hash
-const commitHistoryCache = new Map<string, Change[]>();
+let commitHistoryCache: Map<string, Change[]> = new Map();
+
+export function hydrateCache(serialized: Record<string, Change[]> | undefined) {
+  if (!serialized) {
+    return;
+  }
+
+  commitHistoryCache = new Map(Object.entries(serialized));
+}
+
+export function getSerializedCache(): Record<string, Change[]> {
+  return Object.fromEntries(commitHistoryCache);
+}
 
 async function getMainCommits(repoPath: string): Promise<CommitInfo[]> {
   // Commit info in format: hash|email|name|subject|body|parent|tree
