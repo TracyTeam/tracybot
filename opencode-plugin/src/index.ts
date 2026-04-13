@@ -66,6 +66,10 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         const response = await client.session.messages({
             path: { id: sessionId }
         })
+
+        const title = (await client.session.get({ path: { id: sessionId } }))
+            .data?.title.trim()
+
         const allMessages = response.data ?? []
 
         const getTextFromParts = (parts: Part[] | undefined): string => {
@@ -89,6 +93,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
                 return {
                     id: `plan_${idx}`,
+                    title: title,
                     prompt: userText,
                     response: combinedResponse,
                 }
@@ -119,6 +124,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         const tasklet: Tasklet = {
             id: `tasklet_${sessionId}_${Date.now()}`,
             sessionId,
+            title,
             planOutputs,
             buildOutput
         }

@@ -159,22 +159,25 @@ async function getTracyChain(repoPath: string, startCommit: string): Promise<Com
   return commits.reverse();
 }
 
-function buildTaskletMessages(tasklet_str: string): TaskletMessage[] {
+function buildTaskletMessages(tasklet_str: string): { messages: TaskletMessage[], title: string } {
   let tasklet_obj: any;
+  let messages: TaskletMessage[] = [];
+  let title = "skill issue";
+
   try {
     tasklet_obj = JSON.parse(tasklet_str);
   } catch (e) {
     console.error(`Could not parse tasklet: ${tasklet_str}`);
-
-    return [];
+    return { messages, title };
   }
 
   if (!tasklet_obj) {
     console.error(`Could not parse tasklet: ${tasklet_str}`);
-    return [];
+    return { messages, title };
   }
 
-  let messages: TaskletMessage[] = [];
+  title = tasklet_obj.title ?? "skill issue";
+
   if (tasklet_obj?.planOutputs && Array.isArray(tasklet_obj.planOutputs)) {
     tasklet_obj.planOutputs.forEach((plan: any) => {
       if (plan.prompt) {
@@ -194,7 +197,7 @@ function buildTaskletMessages(tasklet_str: string): TaskletMessage[] {
     messages.push({ stage: "build", type: "response", message: tasklet_obj.buildOutput?.response });
   }
 
-  return messages;
+  return { messages, title };
 }
 
 async function extractChangesFromSnapshotChain(
@@ -224,12 +227,12 @@ async function extractSnapshot(
     return [];
   }
 
-  const messages: Array<TaskletMessage> = buildTaskletMessages(snapshot.description);
+  const { messages, title } = buildTaskletMessages(snapshot.description);
   let diffFromTree = index > 0 ? chain[index - 1].treeHash : baseTree;
 
   if (snapshot.parentHash) {
     const parentTree = await getCommitTree(repoPath, snapshot.parentHash);
-    
+
     if (parentTree) {
       diffFromTree = parentTree;
     }
@@ -239,7 +242,7 @@ async function extractSnapshot(
   const fileResults = await Promise.all(
     Array.from(fileChangesMap.keys()).map(async (filePath) => {
       const linesAtSnapshot = await getChangedLines(repoPath, diffFromTree, snapshot.treeHash, filePath);
-      
+
       const lines = await mapLinesToTree(
         repoPath,
         snapshot.treeHash,
@@ -253,6 +256,7 @@ async function extractSnapshot(
           filePath,
           lines,
           model: snapshot.authorName,
+          name: title,
           tasklet_messages: messages,
           snapshotHash: snapshot.hash,
         } as Change;
@@ -327,7 +331,7 @@ async function buildCommittedHistory(
   for (let index = startIndex; index < mainCommits.length; index++) {
     const mainCommit = mainCommits[index];
     const prevTree = index > 0
-      ? mainCommits[index - 1].treeHash 
+      ? mainCommits[index - 1].treeHash
       : mainCommit.treeHash;
 
     if (accumulatedChanges.length > 0 && prevTree !== mainCommit.treeHash) {
@@ -340,7 +344,7 @@ async function buildCommittedHistory(
 
       if (tracyStartCommit) {
         const tracyChain = await getTracyChain(repoPath, tracyStartCommit);
-        
+
         const newChanges = await extractChangesFromSnapshotChain(
           repoPath,
           tracyChain,
@@ -411,20 +415,20 @@ function consumeAndShift(lines: number[], hunks: DiffHunk[]): number[] {
       if (line < effectiveOldStart) {
         survivingLines.push(line + currentShift);
         mapped = true;
-		
+
         break;
       }
 
-	    // Line falls inside a user modified or user deleted region
+      // Line falls inside a user modified or user deleted region
       if (hunk.oldCount > 0 && line >= hunk.oldStart && line < hunk.oldStart + hunk.oldCount) {
         mapped = true;
-		
+
         break;
       }
 
       currentShift += (hunk.newCount - hunk.oldCount);
     }
-    
+
     if (!mapped) {
       survivingLines.push(line + currentShift);
     }
@@ -461,9 +465,9 @@ async function consumeUserChanges(
       return fileChanges
         .map(change => {
           const survivingLines = consumeAndShift(change.lines, userHunks);
-		  return survivingLines.length > 0
-			? { ...change, lines: survivingLines }
-		    : null;
+          return survivingLines.length > 0
+            ? { ...change, lines: survivingLines }
+            : null;
         })
         .filter((change) => change !== null);
     })
@@ -477,8 +481,8 @@ async function consumeUserChanges(
 function deduplicateAILines(changes: Change[]): Change[] {
   const byFile = new Map<string, Change[]>();
   for (const change of changes) {
-    if (!byFile.has(change.filePath)) { 
-      byFile.set(change.filePath, []); 
+    if (!byFile.has(change.filePath)) {
+      byFile.set(change.filePath, []);
     }
 
     byFile.get(change.filePath)!.push(change);
@@ -527,7 +531,7 @@ export async function buildHistory(repoPath: string | undefined): Promise<Histor
 
     const headCommitHash = await runGit(repoPath, ["rev-parse", "HEAD"]);
     const headTree = await getCommitTree(repoPath, headCommitHash);
-      
+
     if (!headTree) {
       return null;
     }
