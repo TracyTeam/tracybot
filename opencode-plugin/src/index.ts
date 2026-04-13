@@ -215,7 +215,10 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             if (input.tool === "question") {
                 const callID = input.callID
                 if (callID) {
-                    const planOutputIndex = (await getPlanOutputs(sessionId)).length - 1
+                    const messages = client.session.messages({ path: { id: sessionId}})
+                    const planUserMessages = (await messages).data?.filter(m => m.info.role === "user" && m.info.agent !== "build") ?? []
+                    const planOutputIndex = planUserMessages.length - 1
+
                     pendingQuestionsIndices.set(`${sessionId}:${callID}`, planOutputIndex)
                     await L.info(`Pending questions stored: ${sessionId}:${callID} -> ${planOutputIndex}`)
                 }
@@ -262,7 +265,10 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                 let outputIndex = pendingQuestionsIndices.get(`${input.sessionID}:${input.callID}`)
                 
                 if (outputIndex === undefined) {
-                    outputIndex = (await getPlanOutputs(input.sessionID as string)).length - 1
+                    const messages = client.session.messages({ path: { id: input.sessionID}})
+                    const planUserMessages = (await messages).data?.filter(m => m.info.role === "user" && m.info.agent !== "build") ?? []
+                    outputIndex = planUserMessages.length - 1
+
                     await L.warn(`Question planOutputIndex is not found in the pending map, using fallback: ${outputIndex}`)
                 } else {
                     pendingQuestionsIndices.delete(`${input.sessionID}:${input.callID}`)
