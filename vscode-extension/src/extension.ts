@@ -90,6 +90,11 @@ export async function activate(context: vscode.ExtensionContext) {
       // reflects exactly what the user sees at the moment they clicked.
       const fileContent = document.getText();
 
+      const saved = await document.save();
+      if (!saved) {
+        vscode.window.showWarningMessage('AI Blame: Could not save file. Results may be inaccurate.');
+      }
+
       // Rebuild history fresh on every invocation
       await vscode.window.withProgress(
         {
