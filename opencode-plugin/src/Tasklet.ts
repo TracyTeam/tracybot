@@ -24,5 +24,5 @@ export interface Question {
     header: string
     options: {label: string; description: string}[]
     answer: string
-    outputIndex: number
+    outputId: string
 }
