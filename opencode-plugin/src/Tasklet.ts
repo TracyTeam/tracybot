@@ -3,7 +3,7 @@ export interface Tasklet {
     sessionId: string
     planOutputs: PlanOutput[]
     buildOutput: BuildOutput
-
+    questions: Question[]
 }
 
 export interface PlanOutput {
@@ -24,5 +24,5 @@ export interface Question {
     header: string
     options: {label: string; description: string}[]
     answer: string
-    planOutputIndex: number
+    outputId: string
 }

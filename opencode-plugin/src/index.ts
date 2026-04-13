@@ -95,7 +95,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
     const snapshotLocks = new Map<string, Promise<void>>()
 
     const sessionQuestions = new Map<string, Question[]>()
-    const pendingQuestionsIndices = new Map<string, number>()
+    const pendingQuestionsIndices = new Map<string, string[]>()
 
     async function createTasklet(sessionId: string): Promise<Tasklet | undefined> {
         const planOutputs = await getPlanOutputs(sessionId)
@@ -116,21 +116,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         const storedQuestions = sessionQuestions.get(sessionId) ?? []
         const finalPlanCount = planOutputs.length
         await L.info(`Processing ${storedQuestions.length} stored questions, finalPlanCount: ${finalPlanCount}`, { storedQuestions })
-        
-        for (const question of storedQuestions) {
-            const questionText = JSON.stringify(question)
-            if (question.planOutputIndex > finalPlanCount) {
-                continue
-            }
-            
-            const target = planOutputs[question.planOutputIndex]
-            await L.info(`Processing question with index ${question.planOutputIndex}, target exists: ${!!target}`)
-            if (target) {
-                target.response = target.response ? `${target.response}\n\n---\n\n${questionText}` : questionText
-            }
-        }
 
-        sessionQuestions.delete(sessionId)
         
         const buildUserMsg = allMessages.find(
             (message) => message.info.role === "user" && message.info.agent === "build"
@@ -153,21 +139,17 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             .filter(text => text)
             .join("\n\n---\n\n"),
         }
-
-        const buildQuestions = storedQuestions.filter(q => q.planOutputIndex >= planOutputs.length)
-        if (buildQuestions.length > 0) {
-            const buildQuestionText = buildQuestions.map(q => JSON.stringify(q)).join("\n\n---\n\n")
-            buildOutput.response = buildOutput.response ? `${buildOutput.response}\n\n---\n\n${buildQuestionText}` : buildQuestionText
-        }
         
         const tasklet: Tasklet = {
             id: `tasklet_${sessionId}_${Date.now()}`,
             sessionId,
             planOutputs,
-            buildOutput
+            buildOutput,
+            questions: storedQuestions
         }
-
+        
         await L.debug(`Created tasklet: ${tasklet.id}`, { tasklet })
+        sessionQuestions.delete(sessionId)
         return tasklet
     }
 
@@ -217,9 +199,15 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             if (input.tool === "question") {
                 const callID = input.callID
                 if (callID) {
-                    const planOutputIndex = (await getPlanOutputs(sessionId)).length - 1
-                    pendingQuestionsIndices.set(`${sessionId}:${callID}`, planOutputIndex)
-                    await L.info(`Pending questions stored: ${sessionId}:${callID} -> ${planOutputIndex}`)
+                    const messages = await client.session.messages({ path: { id: sessionId}})
+                    const planCount = messages.data?.filter(m => m.info.role === "user" && m.info.agent !== "build").length ?? 0
+                    const hasBuild = messages.data?.some(m => m.info.role === "user" && m.info.agent === "build") 
+
+                    const outputId = hasBuild ? `build_${planCount}` : `plan_${planCount === 0 ? 0 : planCount - 1}`
+
+                    const existing = pendingQuestionsIndices.get(`${sessionId}:${callID}`) ?? []
+                    pendingQuestionsIndices.set(`${sessionId}:${callID}`, [...existing, outputId])
+                    await L.info(`Pending questions stored: ${sessionId}:${callID} -> ${outputId}`)
                 }
             }
 
@@ -261,14 +249,21 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                     header: string
                     options: Array<{label: string; description: string}>
                 }>
-                let planOutputIndex = pendingQuestionsIndices.get(`${input.sessionID}:${input.callID}`)
+
+                const outputIds = pendingQuestionsIndices.get(`${input.sessionID}:${input.callID}`) ?? []
+                let outputId = outputIds.shift()
                 
-                if (planOutputIndex === undefined) {
-                    planOutputIndex = (await getPlanOutputs(input.sessionID as string)).length - 1
-                    await L.warn(`Question planOutputIndex is not found in the pending map, using fallback: ${planOutputIndex}`)
+                if (outputId === undefined) {
+                    const messages = await client.session.messages({ path: { id: input.sessionID}})
+                    const planCount = messages.data?.filter(m => m.info.role === "user" && m.info.agent !== "build").length ?? 0
+                    const hasBuild = messages.data?.some(m => m.info.role === "user" && m.info.agent === "build") 
+
+                    outputId = hasBuild ? `build_${planCount}` : `plan_${planCount === 0 ? 0 : planCount - 1}`
+
+                    await L.warn(`Question planOutputIndex is not found in the pending map, using fallback: ${outputId}`)
                 } else {
                     pendingQuestionsIndices.delete(`${input.sessionID}:${input.callID}`)
-                    await L.info(`Retrieved question planOutputIndex: ${planOutputIndex} for ${input.sessionID}:${input.callID}`)
+                    await L.info(`Retrieved question planOutputIndex: ${outputId} for ${input.sessionID}:${input.callID}`)
                 }
 
                 for (let i = 0; i < questionsArg.length; i++) {
@@ -279,7 +274,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                             header: q.header,
                             options: q.options,
                             answer: output.metadata.answers[i]?.[0] as string ?? "",
-                            planOutputIndex
+                            outputId
                         }
 
                         const existing = sessionQuestions.get(input.sessionID) ?? []
