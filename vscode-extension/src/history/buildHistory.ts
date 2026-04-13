@@ -145,21 +145,25 @@ async function getTracyChain(repoPath: string, startCommit: string): Promise<Com
   return commits.reverse();
 }
 
-function buildTaskletMessages(tasklet_str: string): TaskletMessage[] {
+function buildTaskletMessages(tasklet_str: string): { messages: TaskletMessage[], title: string } {
   let tasklet_obj: any;
+  let messages: TaskletMessage[] = [];
+  let title = "skill issue";
+
   try {
     tasklet_obj = JSON.parse(tasklet_str);
   } catch (e) {
     console.error(`Could not parse tasklet: ${tasklet_str}`);
-    return [];
+    return { messages, title };
   }
 
   if (!tasklet_obj) {
     console.error(`Could not parse tasklet: ${tasklet_str}`);
-    return [];
+    return { messages, title };
   }
 
-  let messages: TaskletMessage[] = [];
+  title = tasklet_obj.title ?? "skill issue";
+
   if (tasklet_obj?.planOutputs && Array.isArray(tasklet_obj.planOutputs)) {
     tasklet_obj.planOutputs.forEach((plan: any) => {
       if (plan.prompt) {
@@ -178,7 +182,7 @@ function buildTaskletMessages(tasklet_str: string): TaskletMessage[] {
     messages.push({ stage: "build", type: "response", message: tasklet_obj.buildOutput?.response });
   }
 
-  return messages;
+  return { messages, title };
 }
 
 async function extractChangesFromSnapshotChain(
@@ -210,12 +214,12 @@ async function extractSnapshot(
     return [];
   }
 
-  const messages: Array<TaskletMessage> = buildTaskletMessages(snapshot.description);
+  const { messages, title } = buildTaskletMessages(snapshot.description);
   let diffFromTree = index > 0 ? chain[index - 1].treeHash : baseTree;
 
   if (snapshot.parentHash) {
     const parentTree = await getCommitTree(repoPath, snapshot.parentHash);
-    
+
     if (parentTree) {
       diffFromTree = parentTree;
     }
@@ -254,7 +258,7 @@ async function extractSnapshot(
 
         // Propagate surviving lines from the real commit to finalTree using consume-and-shift
         // Any line modified or deleted by a commit between targetTree and finalTree 
-		// (whether by a user or a later AI snapshot) is dropped rather than re-attributed to this snapshot
+        // (whether by a user or a later AI snapshot) is dropped rather than re-attributed to this snapshot
         const forwardHunks = await getDiff(repoPath, targetTree, finalTree, filePath);
         lines = consumeAndShift(linesInMainCommit, forwardHunks.get(filePath) ?? []);
       }
@@ -264,6 +268,7 @@ async function extractSnapshot(
           filePath,
           lines,
           model: snapshot.authorName,
+          name: title,
           tasklet_messages: messages,
           snapshotHash: snapshot.hash,
         } as Change;
@@ -356,21 +361,21 @@ function consumeAndShift(lines: number[], hunks: DiffHunk[]): number[] {
     let mapped = false;
 
     for (const hunk of hunks) {
-	  // Pure insertions (oldCount === 0) have no old-space range to consume
-	  // Their effective start for ordering purposes is oldStart + 1
+      // Pure insertions (oldCount === 0) have no old-space range to consume
+      // Their effective start for ordering purposes is oldStart + 1
       const effectiveOldStart = hunk.oldCount === 0 ? hunk.oldStart + 1 : hunk.oldStart;
 
       if (line < effectiveOldStart) {
         survivingLines.push(line + currentShift);
         mapped = true;
-		
+
         break;
       }
 
-	  // Line falls inside a user modified or user deleted region
+      // Line falls inside a user modified or user deleted region
       if (hunk.oldCount > 0 && line >= hunk.oldStart && line < hunk.oldStart + hunk.oldCount) {
         mapped = true;
-		
+
         break;
       }
 
@@ -413,9 +418,9 @@ async function consumeUserChanges(
       return fileChanges
         .map(change => {
           const survivingLines = consumeAndShift(change.lines, userHunks);
-		  return survivingLines.length > 0
-			? { ...change, lines: survivingLines }
-		    : null;
+          return survivingLines.length > 0
+            ? { ...change, lines: survivingLines }
+            : null;
         })
         .filter((change) => change !== null);
     })
@@ -429,8 +434,8 @@ async function consumeUserChanges(
 function deduplicateAILines(changes: Change[]): Change[] {
   const byFile = new Map<string, Change[]>();
   for (const change of changes) {
-    if (!byFile.has(change.filePath)) { 
-      byFile.set(change.filePath, []); 
+    if (!byFile.has(change.filePath)) {
+      byFile.set(change.filePath, []);
     }
 
     byFile.get(change.filePath)!.push(change);
@@ -480,7 +485,7 @@ export async function buildHistory(repoPath: string | undefined): Promise<Histor
 
     const headCommitHash = await runGit(repoPath, ["rev-parse", "HEAD"]);
     const headTree = await getCommitTree(repoPath, headCommitHash);
-      
+
     if (!headTree) {
       return null;
     }

@@ -39,6 +39,7 @@ export interface Change {
   filePath: string;
   lines: number[];
   model: string;
+  name: string;
   tasklet_messages: TaskletMessage[];
   snapshotHash: string;
 }
