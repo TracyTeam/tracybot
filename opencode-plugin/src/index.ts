@@ -121,21 +121,6 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         const finalPlanCount = planOutputs.length
         await L.info(`Processing ${storedQuestions.length} stored questions, finalPlanCount: ${finalPlanCount}`, { storedQuestions })
 
-        
-        const buildUserMsg = allMessages.find(
-                const userText = getTextFromParts(userMsg.parts)
-                const combinedResponse = assistantMsgs
-                    .map(msg => getTextFromParts(msg.parts))
-                    .filter(text => text)
-                    .join("\n\n---\n\n")
-
-                return {
-                    id: `plan_${idx}`,
-                    title: title,
-                    prompt: userText,
-                    response: combinedResponse,
-                }
-            })
 
         const buildUserMsg = [...allMessages].reverse().find(
             (message) => message.info.role === "user" && message.info.agent === "build"
@@ -257,10 +242,6 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             } else {
                 return
             }
-
-            if (input.tool === "question") {
-            }
-
         },
 
         "tool.execute.after": async (input, output) => { 
