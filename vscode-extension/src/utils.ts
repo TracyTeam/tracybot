@@ -261,7 +261,7 @@ export function groupChangesByFile(changes: Change[]): History["files"] {
       path,
       tasklets: fileChanges.map(change => ({
         model: change.model,
-        name: "", // TODO
+        name: change.name,
         messages: change.tasklet_messages,
         lines: change.lines
       }))

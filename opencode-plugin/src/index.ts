@@ -104,6 +104,10 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             path: { id: sessionId }
         })
        
+
+        const title = (await client.session.get({ path: { id: sessionId } }))
+            .data?.title.trim()
+
         const allMessages = response.data ?? []
 
         const getTextFromParts = (parts: Part[] | undefined): string => {
@@ -119,6 +123,21 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
         
         const buildUserMsg = allMessages.find(
+                const userText = getTextFromParts(userMsg.parts)
+                const combinedResponse = assistantMsgs
+                    .map(msg => getTextFromParts(msg.parts))
+                    .filter(text => text)
+                    .join("\n\n---\n\n")
+
+                return {
+                    id: `plan_${idx}`,
+                    title: title,
+                    prompt: userText,
+                    response: combinedResponse,
+                }
+            })
+
+        const buildUserMsg = [...allMessages].reverse().find(
             (message) => message.info.role === "user" && message.info.agent === "build"
         )
         
@@ -143,6 +162,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         const tasklet: Tasklet = {
             id: `tasklet_${sessionId}_${Date.now()}`,
             sessionId,
+            title,
             planOutputs,
             buildOutput,
             questions: storedQuestions

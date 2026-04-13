@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 
-import { buildHistory } from './history/buildHistory';
-import { History, TaskletUI, LineMap } from './history/types';
+import { buildHistory, hydrateCache, getSerializedCache } from './history/buildHistory';
+import { History, TaskletUI, LineMap, Change } from './history/types';
 import { getBlameViewHtml } from './blameView';
 import { getRepoPath } from './utils';
 
@@ -67,6 +67,9 @@ export async function activate(context: vscode.ExtensionContext) {
   statusBarItem.show();
   context.subscriptions.push(statusBarItem);
 
+  // get cache from the workspaceState
+  hydrateCache(context.workspaceState.get<Record<string, Change[]>>('tracybot.buildHistoryCache'));
+
   // blameAI — rebuilds history fresh then opens the read-only blame panel
   context.subscriptions.push(
     vscode.commands.registerCommand('tracybot-extension.blameAI', async () => {
@@ -86,6 +89,11 @@ export async function activate(context: vscode.ExtensionContext) {
       // Snapshot file content immediately before the async work so the webview
       // reflects exactly what the user sees at the moment they clicked.
       const fileContent = document.getText();
+
+      const saved = await document.save();
+      if (!saved) {
+        vscode.window.showWarningMessage('AI Blame: Could not save file. Results may be inaccurate.');
+      }
 
       // Rebuild history fresh on every invocation
       await vscode.window.withProgress(
@@ -111,6 +119,8 @@ export async function activate(context: vscode.ExtensionContext) {
 
           lineMap = buildLineMap(history);
           displayLineMap = new Map(lineMap);
+
+          await context.workspaceState.update('tracybot.buildHistoryCache', getSerializedCache());
         }
       );
 
