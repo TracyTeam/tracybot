@@ -117,7 +117,6 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         const finalPlanCount = planOutputs.length
         await L.info(`Processing ${storedQuestions.length} stored questions, finalPlanCount: ${finalPlanCount}`, { storedQuestions })
 
-        sessionQuestions.delete(sessionId)
         
         const buildUserMsg = allMessages.find(
             (message) => message.info.role === "user" && message.info.agent === "build"
@@ -148,8 +147,9 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             buildOutput,
             questions: storedQuestions
         }
-
+        
         await L.debug(`Created tasklet: ${tasklet.id}`, { tasklet })
+        sessionQuestions.delete(sessionId)
         return tasklet
     }
 
