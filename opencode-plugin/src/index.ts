@@ -119,15 +119,12 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         
         for (const question of storedQuestions) {
             const questionText = JSON.stringify(question)
-            if (question.planOutputIndex > finalPlanCount) {
+            if (question.outputIndex > finalPlanCount) {
                 continue
             }
             
-            const target = planOutputs[question.planOutputIndex]
-            await L.info(`Processing question with index ${question.planOutputIndex}, target exists: ${!!target}`)
-            if (target) {
-                target.response = target.response ? `${target.response}\n\n---\n\n${questionText}` : questionText
-            }
+            const target = planOutputs[question.outputIndex]
+
         }
 
         sessionQuestions.delete(sessionId)
@@ -154,7 +151,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             .join("\n\n---\n\n"),
         }
 
-        const buildQuestions = storedQuestions.filter(q => q.planOutputIndex >= planOutputs.length)
+        const buildQuestions = storedQuestions.filter(q => q.outputIndex >= planOutputs.length)
         if (buildQuestions.length > 0) {
             const buildQuestionText = buildQuestions.map(q => JSON.stringify(q)).join("\n\n---\n\n")
             buildOutput.response = buildOutput.response ? `${buildOutput.response}\n\n---\n\n${buildQuestionText}` : buildQuestionText
@@ -164,7 +161,8 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             id: `tasklet_${sessionId}_${Date.now()}`,
             sessionId,
             planOutputs,
-            buildOutput
+            buildOutput,
+            questions: storedQuestions
         }
 
         await L.debug(`Created tasklet: ${tasklet.id}`, { tasklet })
@@ -261,14 +259,14 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                     header: string
                     options: Array<{label: string; description: string}>
                 }>
-                let planOutputIndex = pendingQuestionsIndices.get(`${input.sessionID}:${input.callID}`)
+                let outputIndex = pendingQuestionsIndices.get(`${input.sessionID}:${input.callID}`)
                 
-                if (planOutputIndex === undefined) {
-                    planOutputIndex = (await getPlanOutputs(input.sessionID as string)).length - 1
-                    await L.warn(`Question planOutputIndex is not found in the pending map, using fallback: ${planOutputIndex}`)
+                if (outputIndex === undefined) {
+                    outputIndex = (await getPlanOutputs(input.sessionID as string)).length - 1
+                    await L.warn(`Question planOutputIndex is not found in the pending map, using fallback: ${outputIndex}`)
                 } else {
                     pendingQuestionsIndices.delete(`${input.sessionID}:${input.callID}`)
-                    await L.info(`Retrieved question planOutputIndex: ${planOutputIndex} for ${input.sessionID}:${input.callID}`)
+                    await L.info(`Retrieved question planOutputIndex: ${outputIndex} for ${input.sessionID}:${input.callID}`)
                 }
 
                 for (let i = 0; i < questionsArg.length; i++) {
@@ -279,7 +277,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                             header: q.header,
                             options: q.options,
                             answer: output.metadata.answers[i]?.[0] as string ?? "",
-                            planOutputIndex
+                            outputIndex
                         }
 
                         const existing = sessionQuestions.get(input.sessionID) ?? []
