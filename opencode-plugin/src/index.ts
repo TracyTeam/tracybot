@@ -116,16 +116,6 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         const storedQuestions = sessionQuestions.get(sessionId) ?? []
         const finalPlanCount = planOutputs.length
         await L.info(`Processing ${storedQuestions.length} stored questions, finalPlanCount: ${finalPlanCount}`, { storedQuestions })
-        
-        for (const question of storedQuestions) {
-            const questionText = JSON.stringify(question)
-            if (question.outputIndex > finalPlanCount) {
-                continue
-            }
-            
-            const target = planOutputs[question.outputIndex]
-
-        }
 
         sessionQuestions.delete(sessionId)
         
@@ -149,12 +139,6 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             .map(message => getTextFromParts(message.parts))
             .filter(text => text)
             .join("\n\n---\n\n"),
-        }
-
-        const buildQuestions = storedQuestions.filter(q => q.outputIndex >= planOutputs.length)
-        if (buildQuestions.length > 0) {
-            const buildQuestionText = buildQuestions.map(q => JSON.stringify(q)).join("\n\n---\n\n")
-            buildOutput.response = buildOutput.response ? `${buildOutput.response}\n\n---\n\n${buildQuestionText}` : buildQuestionText
         }
         
         const tasklet: Tasklet = {
@@ -262,6 +246,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                     header: string
                     options: Array<{label: string; description: string}>
                 }>
+
                 let outputIndex = pendingQuestionsIndices.get(`${input.sessionID}:${input.callID}`)
                 
                 if (outputIndex === undefined) {
