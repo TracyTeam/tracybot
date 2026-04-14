@@ -1,6 +1,6 @@
 import type { Plugin, PluginInput } from "@opencode-ai/plugin"
 import type { Part } from "@opencode-ai/sdk"
-import type { Tasklet, PlanOutput, BuildOutput } from "./Tasklet"
+import type { Tasklet, PlanOutput, BuildOutput, Question } from "./Tasklet"
 import path from "path"
 import { Logger } from "./Logger"
 
@@ -23,6 +23,38 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
     if (!repoRoot) {
         await L.error("Not a git repo")
         return {} // No-op
+    }
+
+    async function getPlanOutputs(sessionId: string): Promise<PlanOutput[]> {
+        const response = await client.session.messages({
+            path: { id: sessionId }
+        })
+
+        const allMessages = response.data ?? []
+
+        const getTextFromParts = (parts: Part[] | undefined): string => {
+            if (!parts) return ""
+            return parts
+                .flatMap(part => part.type === "text" && part.text ? [part.text] : [])
+                .join("\n\n---\n\n")
+        }
+
+        return allMessages
+            .filter((message) => message.info.role === "user" && message.info.agent !== "build")
+            .map((userMsg, idx) => {
+                const assistantMsgs = allMessages.filter((message) =>
+                    message.info.role === "assistant" && message.info.parentID === userMsg.info.id)
+
+                return {
+                    id: `plan_${idx}`,
+                    prompt: getTextFromParts(userMsg.parts),
+                    response: assistantMsgs
+                        .map(msg => getTextFromParts(msg.parts))
+                        .filter(text => text)
+                        .join("\n\n---\n\n"),
+                }
+            })
+
     }
 
     async function resolveTracyPath(repoRoot: string): Promise<string | undefined> {
@@ -62,10 +94,16 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
     let sessions = new Set<string>()
     const snapshotLocks = new Map<string, Promise<void>>()
 
+    const sessionQuestions = new Map<string, Question[]>()
+    const pendingQuestionsIndices = new Map<string, string[]>()
+
     async function createTasklet(sessionId: string): Promise<Tasklet | undefined> {
+        const planOutputs = await getPlanOutputs(sessionId)
+
         const response = await client.session.messages({
             path: { id: sessionId }
         })
+
 
         const title = (await client.session.get({ path: { id: sessionId } }))
             .data?.title.trim()
@@ -79,25 +117,10 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                 .join("\n\n---\n\n")
         }
 
-        const planOutputs: PlanOutput[] = allMessages
-            .filter((message) => message.info.role === "user" && message.info.agent !== "build")
-            .map((userMsg, idx) => {
-                const assistantMsgs = allMessages.filter((message) =>
-                    message.info.role === "assistant" && message.info.parentID === userMsg.info.id)
+        const storedQuestions = sessionQuestions.get(sessionId) ?? []
+        const finalPlanCount = planOutputs.length
+        await L.info(`Processing ${storedQuestions.length} stored questions, finalPlanCount: ${finalPlanCount}`, { storedQuestions })
 
-                const userText = getTextFromParts(userMsg.parts)
-                const combinedResponse = assistantMsgs
-                    .map(msg => getTextFromParts(msg.parts))
-                    .filter(text => text)
-                    .join("\n\n---\n\n")
-
-                return {
-                    id: `plan_${idx}`,
-                    title: title,
-                    prompt: userText,
-                    response: combinedResponse,
-                }
-            })
 
         const buildUserMsg = [...allMessages].reverse().find(
             (message) => message.info.role === "user" && message.info.agent === "build"
@@ -126,10 +149,12 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             sessionId,
             title,
             planOutputs,
-            buildOutput
+            buildOutput,
+            questions: storedQuestions
         }
 
         await L.debug(`Created tasklet: ${tasklet.id}`, { tasklet })
+        sessionQuestions.delete(sessionId)
         return tasklet
     }
 
@@ -148,6 +173,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                 if (sessionId) {
                     sessions.delete(sessionId)
                 }
+                return
             }
 
             if (event.type === "session.idle") {
@@ -156,7 +182,8 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                 snapshotLocks.delete(idleSessionId)
 
                 if (sessions.has(idleSessionId)) {
-                    const tasklet = await createTasklet(idleSessionId) // TODO: CACHE THIS PLEASE FOR THE LOVE OF GOD
+                    const tasklet = await createTasklet(idleSessionId) // TODO: CACHE THIS PLEASE FOR THE LOVE OF GOD // No :)
+
                     if (!tasklet) {
                         await L.debug("Skipping tasklet creation: no build user message found")
                         return
@@ -165,41 +192,102 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                     const output = await $`${tracyPath} --user-name "opencode" --user-email "opencode" --description ${JSON.stringify(tasklet)} --session-id "${tasklet.sessionId}" `.cwd(repoRoot).text()
                     await L.info(`committed OC changes. tracy.sh: ${output.trim()}`, { tasklet })
                 }
+                return
             }
         },
 
         "tool.execute.before": async (input, output) => {
-            if (!EDIT_TOOLS.has(input.tool)) return
-            await L.info(`tool.execute.before`, { input, output })
+            // Edit tool -> create user snapshot before the file is edited
+            if (EDIT_TOOLS.has(input.tool)) {
+                const sessionId = input.sessionID
+                if (!sessionId) return
 
-            const sessionId = input.sessionID
-            if (!sessionId) return
+                const path = output.args.filePath as string | undefined
+                if (!path) {
+                    await L.warn(`skill issue: missing pth in tool.execute.before hook`, { input, output })
+                }
 
-            const path = output.args.filePath as string | undefined
-            if (!path) {
-                await L.warn(`skill issue: missing pth in tool.execute.before hook`, { input, output })
+                if (!snapshotLocks.has(sessionId)) {
+                    const lockPromise = (async () => {
+                        try {
+                            const output = await $`${tracyPath}`.cwd(repoRoot).text() // user snapshot
+                            await L.info(`created user snapshot for ${path}. tracy.sh: ${output.trim()}`)
+                        }
+                        catch (e: any) {
+                            await L.error(`skill issue: ${e}`)
+                        }
+                    })()
+
+                    snapshotLocks.set(sessionId, lockPromise)
+                }
+
+                await snapshotLocks.get(sessionId)
             }
+            // Question tool -> save the question
+            else if (input.tool == "question") {
+                const sessionId = input.sessionID
 
-            if (!snapshotLocks.has(sessionId)) {
-                const lockPromise = (async () => {
-                    try {
-                        const output = await $`${tracyPath}`.cwd(repoRoot).text() // user snapshot
-                        await L.info(`created user snapshot for ${path}. tracy.sh: ${output.trim()}`)
-                    }
-                    catch (e: any) {
-                        await L.error(`skill issue: ${e}`)
-                    }
-                })()
+                const callID = input.callID
+                if (!sessionId || !callID) return
 
-                snapshotLocks.set(sessionId, lockPromise)
+                const messages = await client.session.messages({ path: { id: sessionId } })
+                const planCount = messages.data?.filter(m => m.info.role === "user" && m.info.agent !== "build").length ?? 0
+                const hasBuild = messages.data?.some(m => m.info.role === "user" && m.info.agent === "build")
+
+                const outputId = hasBuild ? `build_${planCount}` : `plan_${planCount === 0 ? 0 : planCount - 1}`
+
+                const existing = pendingQuestionsIndices.get(`${sessionId}:${callID}`) ?? []
+                pendingQuestionsIndices.set(`${sessionId}:${callID}`, [...existing, outputId])
+                await L.debug(`Pending questions stored: ${sessionId}:${callID} -> ${outputId}`)
             }
-
-            await snapshotLocks.get(sessionId)
         },
+
 
         "tool.execute.after": async (input, output) => {
-            if (!EDIT_TOOLS.has(input.tool)) return
-            await L.info(`tool.execute.after`, { input, output })
-        },
+            if (input.tool === "question") {
+                const questionsArg = input.args.questions as Array<{
+                    question: string
+                    header: string
+                    options: Array<{ label: string; description: string }>
+                }>
+
+                const outputIds = pendingQuestionsIndices.get(`${input.sessionID}:${input.callID}`) ?? []
+                let outputId = outputIds.shift()
+
+                if (outputId === undefined) {
+                    const messages = await client.session.messages({ path: { id: input.sessionID } })
+                    const planCount = messages.data?.filter(m => m.info.role === "user" && m.info.agent !== "build").length ?? 0
+                    const hasBuild = messages.data?.some(m => m.info.role === "user" && m.info.agent === "build")
+
+                    outputId = hasBuild ? `build_${planCount}` : `plan_${planCount === 0 ? 0 : planCount - 1}`
+
+                    await L.warn(`Question planOutputIndex is not found in the pending map, using fallback: ${outputId}`)
+                } else {
+                    pendingQuestionsIndices.delete(`${input.sessionID}:${input.callID}`)
+                    await L.info(`Retrieved question planOutputIndex: ${outputId} for ${input.sessionID}:${input.callID}`)
+                }
+
+                for (let i = 0; i < questionsArg.length; i++) {
+                    const q = questionsArg[i]
+                    if (q) {
+                        const question: Question = {
+                            question: q.question,
+                            header: q.header,
+                            options: q.options,
+                            answer: output.metadata.answers[i] ?? [],
+                            outputId
+                        }
+
+                        const existing = sessionQuestions.get(input.sessionID) ?? []
+                        sessionQuestions.set(input.sessionID, [...existing, question])
+                    } else {
+                        await L.error("Question not found when tool was called")
+                    }
+                }
+
+            } else {
+                return
+            }
+        }
     }
 }

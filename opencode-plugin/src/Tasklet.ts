@@ -4,6 +4,7 @@ export interface Tasklet {
     title?: string
     planOutputs: PlanOutput[]
     buildOutput: BuildOutput
+    questions: Question[]
 }
 
 export interface PlanOutput {
@@ -16,4 +17,12 @@ export interface BuildOutput {
     id: string
     prompt: string
     response: string
+}
+
+export interface Question {
+    question: string
+    header: string
+    options: {label: string; description: string}[]
+    answer: string[]
+    outputId: string
 }

@@ -178,6 +178,24 @@ function buildTaskletMessages(tasklet_str: string): { messages: TaskletMessage[]
 
   title = tasklet_obj.title ?? "skill issue";
 
+  // Handle questions and answers
+  const allQuestions: any[] = Array.isArray(tasklet_obj.questions) ? tasklet_obj.questions : [];
+  const questionsByOutputId = new Map<string, any[]>();
+  for (const q of allQuestions) {
+    if (!questionsByOutputId.has(q.outputId)) {
+      questionsByOutputId.set(q.outputId, []);
+    }
+    questionsByOutputId.get(q.outputId)!.push(q);
+  }
+
+  // Append questions and answers to the corresponding response message based on outputId
+  const appendQuestions = (response: string, outputId: string): string => {
+    const questions = questionsByOutputId.get(outputId);
+    if (!questions?.length) { return response; }
+    const formatted = questions.map((q: any) => `Q: ${q.question}\n\nA: ${q.answer.join(", ")}`).join("\n\n");
+    return response + "\n\n---\n\n" + formatted;
+  };
+
   if (tasklet_obj?.planOutputs && Array.isArray(tasklet_obj.planOutputs)) {
     tasklet_obj.planOutputs.forEach((plan: any) => {
       if (plan.prompt) {
@@ -185,7 +203,7 @@ function buildTaskletMessages(tasklet_str: string): { messages: TaskletMessage[]
       }
 
       if (plan.response) {
-        messages.push({ stage: "plan", type: "response", message: plan.response });
+        messages.push({ stage: "plan", type: "response", message: appendQuestions(plan.response, plan.id) });
       }
     });
   }
@@ -194,7 +212,7 @@ function buildTaskletMessages(tasklet_str: string): { messages: TaskletMessage[]
     console.warn(`Missing build output in tasklet: ${tasklet_str}`);
   } else {
     messages.push({ stage: "build", type: "prompt", message: tasklet_obj.buildOutput?.prompt });
-    messages.push({ stage: "build", type: "response", message: tasklet_obj.buildOutput?.response });
+    messages.push({ stage: "build", type: "response", message: appendQuestions(tasklet_obj.buildOutput?.response ?? "", tasklet_obj.buildOutput?.id) });
   }
 
   return { messages, title };
