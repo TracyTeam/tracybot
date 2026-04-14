@@ -25,9 +25,9 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         return {} // No-op
     }
 
-    async function getPlanOutputs(sessionId: string): Promise<PlanOutput[]>{
+    async function getPlanOutputs(sessionId: string): Promise<PlanOutput[]> {
         const response = await client.session.messages({
-            path: {id: sessionId}
+            path: { id: sessionId }
         })
 
         const allMessages = response.data ?? []
@@ -49,12 +49,12 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                     id: `plan_${idx}`,
                     prompt: getTextFromParts(userMsg.parts),
                     response: assistantMsgs
-                    .map(msg => getTextFromParts(msg.parts))
-                    .filter(text => text)
-                    .join("\n\n---\n\n"),
+                        .map(msg => getTextFromParts(msg.parts))
+                        .filter(text => text)
+                        .join("\n\n---\n\n"),
                 }
             })
- 
+
     }
 
     async function resolveTracyPath(repoRoot: string): Promise<string | undefined> {
@@ -99,11 +99,11 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
     async function createTasklet(sessionId: string): Promise<Tasklet | undefined> {
         const planOutputs = await getPlanOutputs(sessionId)
-        
+
         const response = await client.session.messages({
             path: { id: sessionId }
         })
-       
+
 
         const title = (await client.session.get({ path: { id: sessionId } }))
             .data?.title.trim()
@@ -125,25 +125,25 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         const buildUserMsg = [...allMessages].reverse().find(
             (message) => message.info.role === "user" && message.info.agent === "build"
         )
-        
+
         if (!buildUserMsg) {
             return
         }
-        
+
         const buildAssistantMsgs = allMessages.filter(
             (message) => message.info.role === "assistant" &&
-            message.info.parentID === buildUserMsg.info.id
+                message.info.parentID === buildUserMsg.info.id
         )
-        
+
         const buildOutput: BuildOutput = {
             id: `build_${planOutputs.length}`,
             prompt: getTextFromParts(buildUserMsg.parts),
             response: buildAssistantMsgs
-            .map(message => getTextFromParts(message.parts))
-            .filter(text => text)
-            .join("\n\n---\n\n"),
+                .map(message => getTextFromParts(message.parts))
+                .filter(text => text)
+                .join("\n\n---\n\n"),
         }
-        
+
         const tasklet: Tasklet = {
             id: `tasklet_${sessionId}_${Date.now()}`,
             sessionId,
@@ -152,7 +152,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             buildOutput,
             questions: storedQuestions
         }
-        
+
         await L.debug(`Created tasklet: ${tasklet.id}`, { tasklet })
         sessionQuestions.delete(sessionId)
         return tasklet
@@ -173,6 +173,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                 if (sessionId) {
                     sessions.delete(sessionId)
                 }
+                return
             }
 
             if (event.type === "session.idle") {
@@ -182,7 +183,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
                 if (sessions.has(idleSessionId)) {
                     const tasklet = await createTasklet(idleSessionId) // TODO: CACHE THIS PLEASE FOR THE LOVE OF GOD // No :)
-                    
+
                     if (!tasklet) {
                         await L.debug("Skipping tasklet creation: no build user message found")
                         return
@@ -191,19 +192,21 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                     const output = await $`${tracyPath} --user-name "opencode" --user-email "opencode" --description ${JSON.stringify(tasklet)} --session-id "${tasklet.sessionId}" `.cwd(repoRoot).text()
                     await L.info(`committed OC changes. tracy.sh: ${output.trim()}`, { tasklet })
                 }
+                return
             }
         },
 
         "tool.execute.before": async (input, output) => {
-            const sessionId = input.sessionID
-            if (!sessionId) return
+            // Edit tool -> create user snapshot before the file is edited
+            if (EDIT_TOOLS.has(input.tool)) {
+                const sessionId = input.sessionID
+                if (!sessionId) return
 
-            if (EDIT_TOOLS.has(input.tool)) {    
                 const path = output.args.filePath as string | undefined
                 if (!path) {
                     await L.warn(`skill issue: missing pth in tool.execute.before hook`, { input, output })
                 }
-    
+
                 if (!snapshotLocks.has(sessionId)) {
                     const lockPromise = (async () => {
                         try {
@@ -214,51 +217,47 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                             await L.error(`skill issue: ${e}`)
                         }
                     })()
-    
+
                     snapshotLocks.set(sessionId, lockPromise)
-                try {
-                    await $`${tracyPath}`.cwd(repoRoot).quiet() // user snapshot
-                    await L.info(`created user snapshot for ${path}`)
                 }
-                catch (e: any) {
-                    await L.error(`skill issue: ${e}`)
-                }
-                    await snapshotLocks.get(sessionId)
-                }
-                
-            } else if (input.tool == "question") {
+
+                await snapshotLocks.get(sessionId)
+            }
+            // Question tool -> save the question
+            else if (input.tool == "question") {
+                const sessionId = input.sessionID
+
                 const callID = input.callID
-                if (callID) {
-                    const messages = await client.session.messages({ path: { id: sessionId}})
-                    const planCount = messages.data?.filter(m => m.info.role === "user" && m.info.agent !== "build").length ?? 0
-                    const hasBuild = messages.data?.some(m => m.info.role === "user" && m.info.agent === "build") 
-    
-                    const outputId = hasBuild ? `build_${planCount}` : `plan_${planCount === 0 ? 0 : planCount - 1}`
-    
-                    const existing = pendingQuestionsIndices.get(`${sessionId}:${callID}`) ?? []
-                    pendingQuestionsIndices.set(`${sessionId}:${callID}`, [...existing, outputId])
-                    await L.debug(`Pending questions stored: ${sessionId}:${callID} -> ${outputId}`)
-                }
-            } else {
-                return
+                if (!sessionId || !callID) return
+
+                const messages = await client.session.messages({ path: { id: sessionId } })
+                const planCount = messages.data?.filter(m => m.info.role === "user" && m.info.agent !== "build").length ?? 0
+                const hasBuild = messages.data?.some(m => m.info.role === "user" && m.info.agent === "build")
+
+                const outputId = hasBuild ? `build_${planCount}` : `plan_${planCount === 0 ? 0 : planCount - 1}`
+
+                const existing = pendingQuestionsIndices.get(`${sessionId}:${callID}`) ?? []
+                pendingQuestionsIndices.set(`${sessionId}:${callID}`, [...existing, outputId])
+                await L.debug(`Pending questions stored: ${sessionId}:${callID} -> ${outputId}`)
             }
         },
 
-        "tool.execute.after": async (input, output) => { 
+
+        "tool.execute.after": async (input, output) => {
             if (input.tool === "question") {
                 const questionsArg = input.args.questions as Array<{
                     question: string
                     header: string
-                    options: Array<{label: string; description: string}>
+                    options: Array<{ label: string; description: string }>
                 }>
 
                 const outputIds = pendingQuestionsIndices.get(`${input.sessionID}:${input.callID}`) ?? []
                 let outputId = outputIds.shift()
-                
+
                 if (outputId === undefined) {
-                    const messages = await client.session.messages({ path: { id: input.sessionID}})
+                    const messages = await client.session.messages({ path: { id: input.sessionID } })
                     const planCount = messages.data?.filter(m => m.info.role === "user" && m.info.agent !== "build").length ?? 0
-                    const hasBuild = messages.data?.some(m => m.info.role === "user" && m.info.agent === "build") 
+                    const hasBuild = messages.data?.some(m => m.info.role === "user" && m.info.agent === "build")
 
                     outputId = hasBuild ? `build_${planCount}` : `plan_${planCount === 0 ? 0 : planCount - 1}`
 
