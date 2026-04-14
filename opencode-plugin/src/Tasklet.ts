@@ -23,6 +23,6 @@ export interface Question {
     question: string
     header: string
     options: {label: string; description: string}[]
-    answer: string
+    answer: string[]
     outputId: string
 }
