@@ -11,7 +11,7 @@ export const taskletMessage = z.object({
       label: z.string(),
       description: z.string()
     })),
-    answer: z.string(),
+    answer: z.array(z.string()),
     outputId: z.string()
   })).optional()
 });

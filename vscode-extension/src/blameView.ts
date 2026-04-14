@@ -391,7 +391,7 @@ export function getBlameViewHtml(
 
     function renderMd(text) {
       if (!text) { return ''; }
-      return (typeof marked !== 'undefined') ? marked.parse(text) : \`<p>\${esc(text)}</p>\`;
+      return (typeof marked !== 'undefined') ? marked.parse(text, { breaks: true }) : \`<p>\${esc(text)}</p>\`;
     }
 
     function showPrompt(taskletId) {
