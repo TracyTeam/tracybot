@@ -72,11 +72,24 @@ fi
 # -------------------------------
 # SKIP IF NO FILE CHANGES
 # -------------------------------
-if git rev-parse --verify HEAD >/dev/null 2>&1; then
-    if git diff --quiet HEAD -- && git diff --cached --quiet; then
-        if $DEBUG; then
-            echo "No repository changes detected. Skipping Tracy snapshot."
+if $INDEX_ONLY; then
+    # If index-only, we only care about staged changes
+    if git rev-parse --verify HEAD >/dev/null 2>&1; then
+        if git diff --cached --quiet; then
+            if $DEBUG; then echo "No staged changes detected. Skipping Tracy snapshot."; fi
+            exit 0
         fi
+    else
+        # Fresh repo with no commits yet
+        if [[ -z "$(git ls-files --cached)" ]]; then
+            if $DEBUG; then echo "No staged changes detected. Skipping Tracy snapshot."; fi
+            exit 0
+        fi
+    fi
+else
+    # Check for all changes: staged, unstaged, AND untracked
+    if [[ -z "$(git status --porcelain)" ]]; then
+        if $DEBUG; then echo "No repository changes detected. Skipping Tracy snapshot."; fi
         exit 0
     fi
 fi

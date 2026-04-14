@@ -4,7 +4,16 @@ export const taskletMessage = z.object({
   stage: z.enum(["plan", "build"]),
   type: z.enum(["prompt", "response"]),
   message: z.string(),
-  questions: z.string()
+  questions: z.array(z.object({
+    question: z.string(),
+    header: z.string(),
+    options: z.array(z.object({
+      label: z.string(),
+      description: z.string()
+    })),
+    answer: z.string(),
+    outputId: z.string()
+  })).optional()
 });
 
 const historySchema = z.object({
