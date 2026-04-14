@@ -274,7 +274,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                             question: q.question,
                             header: q.header,
                             options: q.options,
-                            answer: output.metadata.answers[i]?.[0] as string ?? "",
+                            answer: output.metadata.answers[i] ?? "",
                             outputId
                         }
 
