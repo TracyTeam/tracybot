@@ -219,7 +219,28 @@ export function getBlameViewHtml(
     .message-box pre                { background: rgba(255,255,255,0.06); padding: 10px 12px; border-radius: 4px; overflow-x: auto; margin: 8px 0; }
     .message-box pre code           { background: none; padding: 0; }
     .message-box ul, .message-box ol { padding-left: 20px; margin: 6px 0; }
-
+    
+    .questions-section { margin-top: 12px; }
+    .question-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 12px;
+      margin-bottom: 8px;
+    }
+    .question-item:last-child { margin-bottom: 0; }
+    .question-header {
+      font-size: 10px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-bottom: 6px;
+    }
+    .question-text {
+      font-size: 12px;
+      color: var(--text);
+      line-height: 1.5;
+    }
     /* ── Chunk chips ── */
     .lines-section { margin-bottom: 24px; }
     .lines-chips   { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -384,13 +405,23 @@ export function getBlameViewHtml(
         return \`<span class="line-chip" data-first="\${first}" data-last="\${last}">\${label}</span>\`;
       }).join('');
 
-      const messagesHtml = (t.messages && t.messages.length > 0)
-        ? t.messages.map(msg => \`
-            <div>
-              <div class="message-label \${esc(msg.stage)}">\${esc(msg.stage)} · \${esc(msg.type)}</div>
-              <div class="message-box \${esc(msg.type)} \${esc(msg.stage)}">\${renderMd(msg.message)}</div>
-            </div>\`
-          ).join('')
+    const messagesHtml = (t.messages && t.messages.length > 0)
+        ? t.messages.map(msg => {
+            const questionsHtml = (msg.questions && msg.questions.length > 0)
+              ? msg.questions.map(q => \`
+                  <div class="question-item">
+                    <div class="question-header">\${esc(q.header)}</div>
+                    <div class="question-text">\${esc(q.question)}</div>
+                  </div>
+                \`).join('')
+              : '';
+            return \`
+              <div>
+                <div class="message-label \${esc(msg.stage)}">\${esc(msg.stage)} · \${esc(msg.type)}</div>
+                <div class="message-box \${esc(msg.type)} \${esc(msg.stage)}">\${renderMd(msg.message)}</div>
+                \${questionsHtml ? \`<div class="questions-section">\${questionsHtml}</div>\` : ''}
+              </div>\`;
+          }).join('')
         : \`<div class="message-box prompt build"><p><em>No messages recorded for this tasklet.</em></p></div>\`;
 
       promptContent.innerHTML = \`
