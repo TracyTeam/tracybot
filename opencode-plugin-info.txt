@@ -1,0 +1,195 @@
+# Tracybot OpenCode Plugin
+
+## Overview
+
+The tracybot project is a multi-component system for tracking AI-assisted code changes in Git repositories. The OpenCode plugin integrates with OpenCode AI to track sessions, capture snapshots, and create hidden Git commits.
+
+## Project Structure
+
+```
+tracybot/
+├── opencode-plugin/           # The OpenCode plugin (main focus)
+│   ├── src/
+│   │   ├── index.ts          # Main plugin entry point
+│   │   ├── Tasklet.ts        # Type definitions for Tasklet data structures
+│   │   └── Logger.ts         # Logging utility
+│   ├── scripts/
+│   │   ├── deploy.js         # Build and deployment script
+│   │   └── getLogs.js        # Log retrieval script
+│   ├── dist/                 # Compiled output
+│   ├── package.json          # Dependencies (uses Bun)
+│   ├── tsconfig.json         # TypeScript configuration
+│   ├── CLAUDE.md             # Development guidelines
+│   └── README.md             # Basic project readme
+│
+├── tracking/                 # Git tracking infrastructure
+│   ├── tracy.sh             # Main tracking script (creates hidden commits)
+│   └── hooks/               # Git hooks for tracking
+│       ├── pre-commit       # Runs tracy.sh before commits
+│       ├── post-commit      # Adds tracy notes to commits
+│       └── post-rewrite     # Preserves chains during rebase/squash
+│
+├── vscode-extension/        # VS Code extension for blame view
+│   └── src/
+│       └── extension.ts     # VS Code extension entry
+│
+├── init.sh                  # Project initialization script
+└── README.md
+```
+
+## OpenCode Plugin Files
+
+### src/index.ts - Main Plugin Entry Point
+
+This is the core plugin file that implements the OpenCode Plugin interface.
+
+**Purpose:** Integrates tracybot tracking with OpenCode AI sessions
+
+**Key Features:**
+- **Session Management:** Tracks OpenCode sessions (`session.created`, `session.deleted`, `session.idle`)
+- **Tool Hooks:** Intercepts file editing tools to create snapshots before changes
+- **Question Tracking:** Captures user questions and answers during sessions
+- **Tasklet Creation:** Aggregates session data (plans, builds, questions) into a Tasklet object
+- **Integration with tracy.sh:** Calls the tracking script with tasklet data
+
+**Main Flow:**
+1. On plugin init: Validates git repo, locates tracy.sh
+2. On `session.idle`: Creates a Tasklet and calls tracy.sh with session data
+3. On `tool.execute.before` (for edit tools): Creates user snapshot before file modifications
+4. On `tool.execute.after` (for question tool): Captures user questions and answers
+
+**Key Constants:**
+- `EDIT_TOOLS`: Set of tools that trigger snapshots: `["edit", "write", "patch", "multiedit", "apply_patch", "applypatch"]`
+
+### src/Tasklet.ts - Data Type Definitions
+
+Defines the core data structures used by the plugin:
+
+```typescript
+interface Tasklet {
+    id: string
+    sessionId: string
+    title?: string
+    planOutputs: PlanOutput[]
+    buildOutput: BuildOutput
+    questions: Question[]
+}
+
+interface PlanOutput {
+    id: string
+    prompt: string
+    response: string
+}
+
+interface BuildOutput {
+    id: string
+    prompt: string
+    response: string
+}
+
+interface Question {
+    question: string
+    header: string
+    options: {label: string; description: string}[]
+    answer: string[]
+    outputId: string
+}
+```
+
+### src/Logger.ts - Logging Utility
+
+Provides structured logging through the OpenCode SDK:
+- Service name: `"tracybot-plugin"`
+- Log levels: `debug`, `info`, `warn`, `error`
+- Uses OpenCode's `client.app.log()` API
+
+## Configuration & Scripts
+
+### scripts/deploy.js - Deployment Script
+
+Builds and installs the plugin:
+1. Runs `bun run build` to compile TypeScript
+2. Copies `dist/index.js` to platform-specific location:
+   - Linux: `~/.config/opencode/plugin/tracybot.js`
+   - macOS: `~/.config/opencode/plugin/tracybot.js`
+   - Windows: `%APPDATA%/opencode/plugin/tracybot.js`
+
+**Usage:**
+```bash
+bun run deploy        # Build and install
+bun run deploy -b     # Build only
+bun run deploy -i     # Install only
+```
+
+### scripts/getLogs.js - Log Retrieval Script
+
+Retrieves plugin logs from OpenCode's log directory (`~/.local/share/opencode/log`):
+- Filters for entries with `service=tracybot-plugin`
+- Parses and formats log entries as JSON
+
+## Package Configuration
+
+**package.json key details:**
+```json
+{
+  "name": "tracybot",
+  "type": "module",
+  "dependencies": {},
+  "devDependencies": {
+    "@opencode-ai/plugin": "^1.3.2",
+    "@opencode-ai/sdk": "^1.3.2",
+    "@types/bun": "^1.3.11",
+    "tsup": "^8.5.1"
+  }
+}
+```
+
+## How the Plugin Works Together
+
+1. **Plugin Initialization:**
+   - Validates the working directory is a Git repository
+   - Locates `tracy.sh` via environment variable or `.git/tracybot/config` file
+   - Logs initialization status
+
+2. **Session Tracking:**
+   - Tracks active sessions in a `Set<string>`
+   - Listens for `session.created` and `session.deleted` events
+
+3. **Snapshot Creation (Before File Edits):**
+   - Intercepts edit tool calls (edit, write, patch, etc.)
+   - Runs `tracy.sh` to create a snapshot before changes
+   - Uses `snapshotLocks` to prevent duplicate snapshots
+
+4. **Question Tracking:**
+   - Captures user questions during plan phase
+   - Associates questions with the appropriate output ID (plan or build)
+
+5. **Session Idle Handling:**
+   - When a session goes idle, creates a `Tasklet` containing:
+     - All plan outputs and responses
+     - Build output
+     - Captured questions
+   - Calls `tracy.sh` with the tasklet JSON as description
+   - Creates a hidden Git commit with the session data
+
+## Integration with tracy.sh
+
+The plugin interacts with `tracy.sh` (in the `tracking/` directory), which:
+- Creates hidden Git commits under `refs/tracy/<TRACY_ID>`
+- Stores snapshots without polluting visible commit history
+- Uses Git notes to link user commits to their AI sessions
+- Handles rebase/amend scenarios via post-rewrite hook
+
+## Key Files Summary
+
+| File | Purpose |
+|------|---------|
+| `opencode-plugin/src/index.ts` | Main plugin implementation, event handlers, tool hooks |
+| `opencode-plugin/src/Tasklet.ts` | TypeScript interfaces for Tasklet, PlanOutput, Question |
+| `opencode-plugin/src/Logger.ts` | Structured logging wrapper |
+| `opencode-plugin/package.json` | Dependencies and build scripts |
+| `opencode-plugin/scripts/deploy.js` | Build and installation script |
+| `opencode-plugin/scripts/getLogs.js` | Log retrieval utility |
+| `tracking/tracy.sh` | Git tracking script (creates hidden commits) |
+| `tracking/hooks/*` | Git hooks for preserving chains |
+| `init.sh` | Project initialization script |
