@@ -79,10 +79,21 @@ git -C "$repo_path" config notes.rewrite.rebase true
 git -C "$repo_path" config notes.rewrite.merge true
 git -C "$repo_path" config notes.rewriteRef refs/notes/commits
 
-git -C "$repo_path" config --add remote.origin.push "refs/tracy/*:refs/tracy/*"
-git -C "$repo_path" config --add remote.origin.push "refs/notes/commits:refs/notes/commits"
-git -C "$repo_path" config --add remote.origin.fetch "+refs/tracy/*:refs/remotes/origin/tracy/*"
-git -C "$repo_path" config --add remote.origin.fetch "+refs/notes/commits:refs/notes/commits"
+add_config_if_missing() {
+  local key="$1"
+  local value="$2"
+
+  git -C "$repo_path" config --get-all "$key" | grep -Fxq "$value" && return 0
+  git -C "$repo_path" config --add "$key" "$value"
+}
+
+add_config_if_missing remote.origin.push "HEAD"
+add_config_if_missing remote.origin.push "refs/tracy/*:refs/tracy/*"
+add_config_if_missing remote.origin.push "refs/notes/commits:refs/notes/commits"
+
+add_config_if_missing remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
+add_config_if_missing remote.origin.fetch "+refs/tracy/*:refs/tracy/*"
+add_config_if_missing remote.origin.fetch "+refs/notes/commits:refs/notes/commits"
 
 printf "+----------------------------------------------------+\n"
 printf "| [DONE] Git notes rewriting configured              |\n"
@@ -198,9 +209,11 @@ echo ""
 printf "${Y}Note:${NC} If the ${B}origin${NC} remote is changed or replaced,\n"
 printf "you must re-run this initialization script, or manually reconfigure:\n\n"
 
+printf "  git config --add remote.origin.push \"HEAD\"\n"
 printf "  git config --add remote.origin.push \"refs/tracy/*:refs/tracy/*\"\n"
 printf "  git config --add remote.origin.push \"refs/notes/commits:refs/notes/commits\"\n"
-printf "  git config --add remote.origin.fetch \"+refs/tracy/*:refs/remotes/origin/tracy/*\"\n"
+printf "  git config --add remote.origin.fetch \"+refs/heads/*:refs/remotes/origin/*\"\n"
+printf "  git config --add remote.origin.fetch \"+refs/tracy/*:refs/tracy/*\"\n"
 printf "  git config --add remote.origin.fetch \"+refs/notes/commits:refs/notes/commits\"\n"
 echo ""
 
