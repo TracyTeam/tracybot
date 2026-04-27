@@ -58,17 +58,15 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
     }
 
     async function resolveTracyPath(repoRoot: string): Promise<string | undefined> {
-        // support passing from shell instead of file
-        if (process.env.TRACY_SCRIPT) {
-            return process.env.TRACY_SCRIPT
+        if (process.env.TRACY_SNAPSHOT_SCRIPT) {
+            return path.resolve(repoRoot, process.env.TRACY_SNAPSHOT_SCRIPT)
         }
 
         const configPath = path.join(repoRoot, ".git", "tracybot", "config")
         const configFile = Bun.file(configPath)
 
-        if (!(await configFile.exists())) return // no env and no config = bye
+        if (!(await configFile.exists())) return
 
-        // cannot use dotenv, so enjoy this handrolled env parsing
         const text = await configFile.text()
         for (const line of text.split("\n")) {
             const match = line.match(/^([^=]+)=(.*)$/)
@@ -77,7 +75,8 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             }
         }
 
-        return process.env.TRACY_SCRIPT
+        if (!process.env.TRACY_SNAPSHOT_SCRIPT) return
+        return path.resolve(repoRoot, process.env.TRACY_SNAPSHOT_SCRIPT)
     }
 
     const tracyPath = await resolveTracyPath(repoRoot)

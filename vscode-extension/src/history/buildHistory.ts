@@ -5,6 +5,7 @@ import {
   getChangedLines,
   getCommitTree,
   getDiff,
+  getTracyLocalRefCommit,
   getTracyRefCommit,
   groupChangesByFile,
   isAiChange,
@@ -413,7 +414,12 @@ async function buildUncommittedChanges(
     return { uncommittedChanges: [], lastTracyTip: headTree };
   }
 
-  const activeHiddenTip = await getActiveHiddenCommit(repoPath, activeTracyId);
+  let activeHiddenTip = await getTracyLocalRefCommit(repoPath, activeTracyId);
+  
+  if (!activeHiddenTip) {
+    activeHiddenTip = await getActiveHiddenCommit(repoPath, activeTracyId);
+  }
+  
   if (!activeHiddenTip) {
     return { uncommittedChanges: [], lastTracyTip: headTree };
   }
