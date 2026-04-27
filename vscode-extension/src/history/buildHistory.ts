@@ -258,27 +258,51 @@ async function extractSnapshot(
 
   const fileChangesMap = await getDiff(repoPath, diffFromTree, snapshot.treeHash);
   const fileResults = await Promise.all(
-    Array.from(fileChangesMap.keys()).map(async (filePath) => {
-      const linesAtSnapshot = await getChangedLines(repoPath, diffFromTree, snapshot.treeHash, filePath);
+  Array.from(fileChangesMap.keys()).map(async (filePath) => {
+    const linesAtSnapshot = await getChangedLines(
+      repoPath,
+      diffFromTree,
+      snapshot.treeHash,
+      filePath
+    );
 
-      const lines = await mapLinesToTree(
-        repoPath,
-        snapshot.treeHash,
-        targetTree,
+    const lines = await mapLinesToTree(
+      repoPath,
+      snapshot.treeHash,
+      targetTree,
+      filePath,
+      linesAtSnapshot
+    );
+
+    const userDiffMap = await getDiff(
+      repoPath,
+      snapshot.treeHash,
+      targetTree,
+      filePath
+    );
+
+    const userHunks = userDiffMap.get(filePath) || [];
+
+    const filteredLines = lines.filter((line) => {
+      return !userHunks.some((hunk) => {
+        return (
+          hunk.oldCount > 0 && // ignore pure insertions
+          line >= hunk.oldStart &&
+          line < hunk.oldStart + hunk.oldCount
+        );
+      });
+    });
+
+    if (filteredLines.length > 0) {
+      return {
         filePath,
-        linesAtSnapshot
-      );
-
-      if (lines.length > 0) {
-        return {
-          filePath,
-          lines,
-          model: snapshot.authorName,
-          name: title,
-          tasklet_messages: messages,
-          snapshotHash: snapshot.hash,
-        } as Change;
-      }
+        lines: filteredLines,
+        model: snapshot.authorName,
+        name: title,
+        tasklet_messages: messages,
+        snapshotHash: snapshot.hash,
+      } as Change;
+    }
 
       return null;
     })
@@ -556,7 +580,7 @@ export async function buildHistory(repoPath: string | undefined): Promise<Histor
 
     // Build committed AI changes first
     const committedChanges = await buildCommittedHistory(repoPath, mainCommits);
-    // Build committed AI changes
+    // Build uncommitted AI changes
     const { uncommittedChanges, lastTracyTip } = await buildUncommittedChanges(repoPath, headTree);
     // Align committed changes to lastTracyTip
     let alignedCommitted = committedChanges;
