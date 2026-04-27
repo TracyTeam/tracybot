@@ -9,7 +9,7 @@ The plugin intercepts AI responses and invokes the Tracy tracking system to crea
 ## How It Works
 
 1. After each AI response, the plugin calls `tracy.sh` from the tracking component
-2. `tracy.sh` creates a hidden commit using Git's ref namespace (`refs/tracy/*`)
+2. `tracy.sh` creates a hidden commit using Git's ref namespace (`refs/tracy-local/*`)
 3. These commits are never visible in normal Git history but can be queried by the VS Code extension
 
 ## Usage

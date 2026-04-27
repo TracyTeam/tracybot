@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BASE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 MOCK_DIR="$BASE_DIR/test/mock-repository"
 REMOTE_DIR="$BASE_DIR/test/mock-remote.git"
-TRACY_SCRIPT="$BASE_DIR/tracking/tracy.sh"
+TRACY_SNAPSHOT_SCRIPT="$BASE_DIR/tracking/tracy.sh"
 INIT_SCRIPT="$BASE_DIR/init.sh"
 
 AI_NAME="big-pickle"
@@ -47,7 +47,7 @@ ai_snapshot() {
     mkdir -p "$(dirname "$file")"
     echo -e "$content" >> "$file"
     
-    bash "$TRACY_SCRIPT" --user-name "$AI_NAME" --user-email "$AI_EMAIL" --description "$prompt"
+    bash "$TRACY_SNAPSHOT_SCRIPT" --user-name "$AI_NAME" --user-email "$AI_EMAIL" --description "$prompt"
 }
 
 user_commit() {
@@ -70,7 +70,7 @@ user_snapshot() {
     mkdir -p "$(dirname "$file")"
     echo -e "$content" >> "$file"
 
-    bash "$TRACY_SCRIPT"
+    bash "$TRACY_SNAPSHOT_SCRIPT"
 }
 
 echo
