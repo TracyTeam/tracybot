@@ -14,17 +14,17 @@ Tracybot consists of three components that work together:
 - **[tracking](./tracking/README.md)** - Git hooks and scripts for state tracking using hidden commits
 
 ```
-┌──────────────────┐     ┌──────────────────┐     ┌───────────────────┐
-│  opencode-plugin │────▶│  tracking/hooks  │◀────│  vscode-extension │
-│  (snapshots AI)  │     │    + tracy.sh    │     │  (displays blame) │
-│  (interactions)  │     │  (stores state)  │     │                   │
-└──────────────────┘     └──────────────────┘     └───────────────────┘
+┌───────────────────┐     ┌──────────────────┐     ┌────────────────────┐
+│  opencode-plugin  │────▶│  tracking/hooks  │◀────│  vscode-extension  │
+│  (snapshots AI)   │     │     tracy.sh     │     │  (displays blame)  │
+│  (interactions)   │     │  (stores state)  │     │                    │
+└───────────────────┘     └──────────────────┘     └────────────────────┘
 ```
 
 ### How Components Communicate
 
 1. **opencode-plugin** invokes **`tracy.sh`** (from `tracking/`) after each AI interaction to create a snapshot
-2. **`tracy.sh`** stores snapshots as hidden commits in the Git repository (using `refs/tracy/*` namespace)
+2. **`tracy.sh`** stores snapshots as hidden commits in the Git repository (using `refs/tracy-local/*` namespace)
 3. **vscode-extension** queries Git to build a history timeline and displays blame information in VS Code
 
 ## Quick Getting Started

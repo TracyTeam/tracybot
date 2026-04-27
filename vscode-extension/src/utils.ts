@@ -58,6 +58,15 @@ export async function getTracyRefCommit(repoPath: string, tracyId: string): Prom
   }
 }
 
+export async function getTracyLocalRefCommit(repoPath: string, tracyId: string): Promise<string | null> {
+  const refPath = path.join(repoPath, ".git", "refs", "tracy-local", tracyId);
+  try {
+    return fs.readFileSync(refPath, "utf-8").trim();
+  } catch {
+    return null;
+  }
+}
+
 // Returns a map of all files that changed between two trees
 // Computes per-hunk significance using BLEU similarity
 export async function getDiff(

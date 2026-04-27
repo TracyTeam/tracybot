@@ -117,7 +117,7 @@ fi
 echo ""
 
 cat > "$tracy_dir/config" << EOF
-TRACY_SCRIPT=$script_source
+TRACY_SNAPSHOT_SCRIPT=$script_source
 EOF
 
 hooks_source="$(dirname "${BASH_SOURCE[0]}")/tracking/hooks"
@@ -187,9 +187,10 @@ EOF
 
     cp "$source_hook" "$tracy_hook"
     chmod +x "$tracy_hook"
-
+    
     rows+=("$(printf "| %-16s | %-40b |" "$hook" "$status")")
 done
+
 
 printf "+------------------+---------------------------------+\n"
 printf "| %-16s | %-31s |\n" "Hook" "Status"

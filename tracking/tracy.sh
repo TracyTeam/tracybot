@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REF_BASE="refs/tracy" # Base Git reference namespace for snapshots
+# Base Git reference namespace for snapshots
+REF_BASE="refs/tracy-local"
 USER_NAME=""
 USER_EMAIL=""
 DESCRIPTION=""        # Optional description (prompt) for snapshot
