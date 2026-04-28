@@ -80,11 +80,16 @@ build_chain_from_commits() {
         local msg
         msg=$(git log -1 --format='%B' "$commit" 2>/dev/null || true)
 
-        local author_name author_email author_date committer_name committer_email committer_date
+        local meta_str
+        meta_str=$(git log -1 --format='%an%n%ae%n%aI%n%cn%n%ce%n%cI' "$commit" 2>/dev/null || true)
 
-        IFS=$'\n' read -r author_name author_email author_date \
-                          committer_name committer_email committer_date \
-            < <(git log -1 --format='%an%n%ae%n%aI%n%cn%n%ce%n%cI' "$commit" 2>/dev/null) || true
+        local author_name author_email author_date committer_name committer_email committer_date
+        author_name=$(printf '%s\n' "$meta_str" | sed -n '1p')
+        author_email=$(printf '%s\n' "$meta_str" | sed -n '2p')
+        author_date=$(printf '%s\n' "$meta_str" | sed -n '3p')
+        committer_name=$(printf '%s\n' "$meta_str" | sed -n '4p')
+        committer_email=$(printf '%s\n' "$meta_str" | sed -n '5p')
+        committer_date=$(printf '%s\n' "$meta_str" | sed -n '6p')
 
         local new_commit
         if [[ -n "$author_date" && -n "$committer_date" ]]; then
@@ -224,21 +229,32 @@ handle_squash() {
     publish_chain "$all_commits" "$new_sha"
 }
 
-declare -a new_shas_ordered=()
-declare -A new_to_old_map=()
-
+# Buffer all pairs as "old:new" strings
+declare -a all_pairs=()
 while read -r old_sha new_sha; do
     [[ -z "$old_sha" || -z "$new_sha" ]] && continue
-    if [[ -z "${new_to_old_map[$new_sha]+x}" ]]; then
-        new_shas_ordered+=("$new_sha")
-        new_to_old_map["$new_sha"]="$old_sha"
-    else
-        new_to_old_map["$new_sha"]+=$'\n'"$old_sha"
-    fi
+    all_pairs+=("$old_sha:$new_sha")
 done
 
-for new_sha in "${new_shas_ordered[@]}"; do
-    old_shas_str="${new_to_old_map[$new_sha]}"
+# Collect unique new_shas in insertion order.
+declare -a new_shas_ordered=()
+for pair in ${all_pairs[@]+"${all_pairs[@]}"}; do
+    new_sha="${pair#*:}"
+    already_seen=false
+    for seen in ${new_shas_ordered[@]+"${new_shas_ordered[@]}"}; do
+        [[ "$seen" == "$new_sha" ]] && already_seen=true && break
+    done
+    $already_seen || new_shas_ordered+=("$new_sha")
+done
+
+for new_sha in ${new_shas_ordered[@]+"${new_shas_ordered[@]}"}; do
+    old_shas_str=""
+    for pair in ${all_pairs[@]+"${all_pairs[@]}"}; do
+        [[ "${pair#*:}" != "$new_sha" ]] && continue
+        [[ -n "$old_shas_str" ]] && old_shas_str+=$'\n'
+        old_shas_str+="${pair%:*}"
+    done
+
     old_count=$(printf '%s\n' "$old_shas_str" | grep -c '[^[:space:]]' || true)
 
     if [[ "$old_count" -gt 1 ]]; then
