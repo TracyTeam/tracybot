@@ -12,7 +12,7 @@ REF_BASE_PUSHED="refs/tracy"
 
 get_tracy_ids_from_note() {
     local note="$1"
-    echo "$note" | grep -oE 'tracy-id: [a-f0-9-]+' | cut -d' ' -f2 || true
+    echo "$note" | grep -oE 'tracy-id: [a-f0-9@-]+' | cut -d' ' -f2 || true
 }
 
 get_chain_commits_oldest_first() {
@@ -218,10 +218,6 @@ handle_squash() {
         delete_chains_for_ids "$old_ids"
     done <<< "$old_shas_str"
 
-    # Include any chain post-commit already attached to the squash target
-    local new_commits
-    new_commits=$(collect_commits_for_ids "$new_ids")
-    [[ -n "$new_commits" ]] && all_commits+="$new_commits"$'\n'
     delete_chains_for_ids "$new_ids"
 
     all_commits="${all_commits%$'\n'}"
