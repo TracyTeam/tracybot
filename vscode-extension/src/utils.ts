@@ -226,13 +226,6 @@ export async function getActiveTracyId(repoPath: string): Promise<string | null>
   }
 }
 
-export async function getActiveHiddenCommit(repoPath: string, tracyId: string): Promise<string | null> {
-  try {
-    return await runGit(repoPath, ["config", "--get", `tracy.${tracyId}.hidden`]);
-  } catch {
-    return null;
-  }
-}
 
 export async function getUserName(repoPath: string): Promise<string> {
   try {

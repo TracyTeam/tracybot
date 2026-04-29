@@ -1,6 +1,5 @@
 import { Change, CommitInfo, DiffHunk, History, TaskletMessage } from "./types";
 import {
-  getActiveHiddenCommit,
   getActiveTracyId,
   getChangedLines,
   getCommitTree,
@@ -66,7 +65,7 @@ async function getMainCommits(repoPath: string): Promise<CommitInfo[]> {
 async function getTracyIdNote(repoPath: string, commitHash: string): Promise<string | null> {
   try {
     const output = await runGit(repoPath, ["notes", "show", commitHash]);
-    const match = output.match(/tracy-id:\s*([a-f0-9-]+)/);
+    const match = output.match(/tracy-id:\s*([a-f0-9@-]+)/);
 
     return match ? match[1] : null;
   } catch {
@@ -414,12 +413,8 @@ async function buildUncommittedChanges(
     return { uncommittedChanges: [], lastTracyTip: headTree };
   }
 
-  let activeHiddenTip = await getTracyLocalRefCommit(repoPath, activeTracyId);
-  
-  if (!activeHiddenTip) {
-    activeHiddenTip = await getActiveHiddenCommit(repoPath, activeTracyId);
-  }
-  
+  const activeHiddenTip = await getTracyLocalRefCommit(repoPath, activeTracyId);
+
   if (!activeHiddenTip) {
     return { uncommittedChanges: [], lastTracyTip: headTree };
   }
