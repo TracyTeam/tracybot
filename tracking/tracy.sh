@@ -148,8 +148,11 @@ fi
 # CHECK FOR PARENT & REDUNDANCY
 # -------------------------------
 
-# Get last hidden commit for this HEAD
-LATEST_HIDDEN=$(git config --get tracy."$TRACY_ID".hidden || true)
+if git rev-parse --verify "$REF" >/dev/null 2>&1; then
+    LATEST_HIDDEN=$(git rev-parse "$REF")
+else
+    LATEST_HIDDEN=""
+fi
 
 # Prevent creating identical, empty snapshots
 if [[ -n "$LATEST_HIDDEN" ]]; then
@@ -181,9 +184,6 @@ fi
 COMMIT=$(GIT_AUTHOR_NAME="$USER_NAME" GIT_AUTHOR_EMAIL="$USER_EMAIL" \
         GIT_COMMITTER_NAME="$USER_NAME" GIT_COMMITTER_EMAIL="$USER_EMAIL" \
         git commit-tree "$TREE" $PARENT_FLAG -m "$SESSION_ID" ${DESCRIPTION:+-m "$DESCRIPTION"})
-
-# Store hidden commit reference
-git config tracy."$TRACY_ID".hidden "$COMMIT" 
 
 # -------------------------------
 # UPDATE HIDDEN BRANCH REF

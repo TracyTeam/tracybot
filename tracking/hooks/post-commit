@@ -2,6 +2,7 @@
 set -euo pipefail
 
 USER_COMMIT=$(git rev-parse HEAD)
+SHORT_HASH=$(git rev-parse --short=8 HEAD)
 
 TRACY_ID=$(git config --get tracy.current-id || true)
 if [[ -z "$TRACY_ID" ]]; then
@@ -9,7 +10,8 @@ if [[ -z "$TRACY_ID" ]]; then
 fi
 
 REF_LOCAL="refs/tracy-local/$TRACY_ID"
-REF_FINAL="refs/tracy/$TRACY_ID"
+FINAL_TRACY_ID="$TRACY_ID@$SHORT_HASH"
+REF_FINAL="refs/tracy/$FINAL_TRACY_ID"
 
 if ! git rev-parse --verify "$REF_LOCAL" >/dev/null 2>&1; then
     exit 0
@@ -80,11 +82,13 @@ build_filtered_chain() {
         git rm -rf --cached . >/dev/null 2>&1 || true
 
         for file in "${filtered_files[@]}"; do
-            local blob_hash mode
-            blob_hash=$(git cat-file blob "$commit_tree:$file" 2>/dev/null | git hash-object -w --stdin 2>/dev/null || true)
-            if [[ -n "$blob_hash" ]]; then
-                mode=$(git ls-tree "$commit_tree" -- "$file" 2>/dev/null | awk '{print $1}')
-                mode="${mode:-100644}"
+            local ls_out mode blob_hash
+
+            ls_out=$(git ls-tree "$commit_tree" -- "$file" 2>/dev/null || true)
+            if [[ -n "$ls_out" ]]; then
+                mode=$(printf '%s' "$ls_out" | awk '{print $1}')
+                blob_hash=$(printf '%s' "$ls_out" | awk '{print $3}')
+
                 git update-index --add --cacheinfo "$mode","$blob_hash","$file" 2>/dev/null || true
             fi
         done
@@ -133,13 +137,12 @@ FINAL_CHAIN=$(build_filtered_chain "$REF_LOCAL")
 
 if [[ -n "$FINAL_CHAIN" ]]; then
     git update-ref "$REF_FINAL" "$FINAL_CHAIN"
-    git config "tracy.$TRACY_ID.hidden" "$FINAL_CHAIN"
-    
-    git notes add -f -m "tracy-id: $TRACY_ID" "$USER_COMMIT"
-    
-    git update-ref -d "$REF_LOCAL" 2>/dev/null || true
+    git config "tracy.$FINAL_TRACY_ID.hidden" "$FINAL_CHAIN"
+
+    git notes add -f -m "tracy-id: $FINAL_TRACY_ID" "$USER_COMMIT"
 
     if git diff --quiet; then
+        git update-ref -d "$REF_LOCAL" 2>/dev/null || true
         git config --unset tracy.current-id 2>/dev/null || true
     fi
 fi
