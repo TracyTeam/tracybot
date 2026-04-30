@@ -5,11 +5,7 @@ import { readFileSync, rmSync, existsSync, mkdirSync, copyFileSync, readdirSync,
 import { join } from 'path'
 import { homedir } from 'os'
 
-const PLUGINS_DIR = {
-    linux: join(homedir(), '.config', 'opencode', 'plugin'),
-    darwin: join(homedir(), '.config', 'opencode', 'plugin'),
-    win32: join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'opencode', 'plugin')
-}
+const PLUGINS_DIR = join(homedir(), '.config', 'opencode', 'plugin')
 
 function getPluginsDir() {
     const dir = PLUGINS_DIR[process.platform]
