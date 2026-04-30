@@ -102,7 +102,7 @@ export function getBlameViewHtml(
     #file-scroll::-webkit-scrollbar       { width: 6px; height: 6px; }
     #file-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
-    table.code-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: var(--vscode-editor-font-size, 12.5px); line-height: 1.65; table-layout: fixed; }
+    table.code-table { min-width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: var(--vscode-editor-font-size, 12.5px); line-height: 1.65; table-layout: fixed; }
     col.col-num  { width: 52px; }
     tr { transition: background 80ms ease; }
     td.line-num  { width: 52px; min-width: 52px; text-align: right; padding: 0 12px 0 0; color: var(--line-num); user-select: none; vertical-align: top; font-size: 11px; }
