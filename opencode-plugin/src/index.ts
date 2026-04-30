@@ -181,17 +181,70 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
                 snapshotLocks.delete(idleSessionId)
 
-                if (sessions.has(idleSessionId)) {
-                    const tasklet = await createTasklet(idleSessionId) // TODO: CACHE THIS PLEASE FOR THE LOVE OF GOD // No :)
+                if (!sessions.has(idleSessionId)) return
 
-                    if (!tasklet) {
-                        await L.debug("Skipping tasklet creation: no build user message found")
-                        return
-                    }
-
-                    const output = await $`${tracyPath} --user-name "opencode" --user-email "opencode" --description ${JSON.stringify(tasklet)} --session-id "${tasklet.sessionId}" `.cwd(repoRoot).text()
-                    await L.info(`committed OC changes. tracy.sh: ${output.trim()}`, { tasklet })
+                const tasklet = await createTasklet(idleSessionId)
+                if (!tasklet) {
+                    await L.debug("Skipping tasklet creation: no build user message found")
+                    return
                 }
+
+                // STEP 1: current tree
+                const currentTree = (await $`git write-tree`.cwd(repoRoot).text()).trim()
+
+                // STEP 2: last tracy snapshot
+                const lastCommit = (await $`git config --get tracy.${idleSessionId}.hidden`
+                    .cwd(repoRoot)
+                    .quiet()
+                    .text()).trim()
+
+                let lastTree = ""
+                if (lastCommit) {
+                    lastTree = (await $`git rev-parse ${lastCommit}^{tree}`
+                        .cwd(repoRoot)
+                        .quiet()
+                        .text()).trim()
+                }
+
+                // STEP 3: snapshot user changes if needed
+                if (currentTree !== lastTree) {
+                    await L.info("Detected unsnapshotted changes → creating user snapshot")
+
+                    const output = await $`${tracyPath}`.cwd(repoRoot).text()
+                    await L.info(`User snapshot created. tracy.sh: ${output.trim()}`)
+
+                    // refresh lastTree
+                    const newCommit = (await $`git config --get tracy.${idleSessionId}.hidden`
+                        .cwd(repoRoot)
+                        .quiet()
+                        .text()).trim()
+
+                    if (newCommit) {
+                        lastTree = (await $`git rev-parse ${newCommit}^{tree}`
+                            .cwd(repoRoot)
+                            .quiet()
+                            .text()).trim()
+                    }
+                }
+
+                // STEP 4: check if AI actually changed anything
+                const afterUserSnapshotTree = (await $`git write-tree`.cwd(repoRoot).text()).trim()
+
+                if (afterUserSnapshotTree === lastTree) {
+                    await L.info("No AI changes detected → skipping AI snapshot")
+                    return
+                }
+
+                // STEP 5: create AI snapshot
+                const output = await $`${tracyPath}
+                    --user-name "opencode"
+                    --user-email "opencode"
+                    --description ${JSON.stringify(tasklet)}
+                    --session-id "${tasklet.sessionId}"
+                `.cwd(repoRoot).text()
+
+                await L.info(`Committed AI changes. tracy.sh: ${output.trim()}`, { tasklet })
+
                 return
             }
         },
