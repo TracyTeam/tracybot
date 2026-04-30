@@ -93,6 +93,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
     let sessions = new Set<string>()
     const snapshotLocks = new Map<string, Promise<void>>()
+    const taskletToolCounter = new Map<string, number>()
 
     const sessionQuestions = new Map<string, Question[]>()
     const pendingQuestionsIndices = new Map<string, string[]>()
@@ -164,6 +165,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                 const sessionId = event.properties.info.id
                 if (sessionId) {
                     sessions.add(sessionId)
+                    taskletToolCounter.set(sessionId, 0)
                 }
                 return
             }
@@ -182,6 +184,15 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                 snapshotLocks.delete(idleSessionId)
 
                 if (sessions.has(idleSessionId)) {
+
+                    const toolCount = taskletToolCounter.get(idleSessionId) ?? 0
+                    await L.info(`Tool count for session ${idleSessionId}: ${toolCount}`)
+
+                    if (toolCount === 0) {
+                        await L.info("No tool activity → skipping tracy.sh")
+                        return
+                    }
+
                     const tasklet = await createTasklet(idleSessionId) // TODO: CACHE THIS PLEASE FOR THE LOVE OF GOD // No :)
 
                     if (!tasklet) {
@@ -191,12 +202,21 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
                     const output = await $`${tracyPath} --user-name "opencode" --user-email "opencode" --description ${JSON.stringify(tasklet)} --session-id "${tasklet.sessionId}" `.cwd(repoRoot).text()
                     await L.info(`committed OC changes. tracy.sh: ${output.trim()}`, { tasklet })
+
+                    taskletToolCounter.set(idleSessionId, 0)
                 }
                 return
             }
         },
 
         "tool.execute.before": async (input, output) => {
+
+            const sessionId = input.sessionID
+            if (sessionId) {
+                const current = taskletToolCounter.get(sessionId) ?? 0
+                taskletToolCounter.set(sessionId, current + 1)
+            }
+
             // Edit tool -> create user snapshot before the file is edited
             if (EDIT_TOOLS.has(input.tool)) {
                 const sessionId = input.sessionID
