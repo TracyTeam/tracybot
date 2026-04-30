@@ -42,6 +42,7 @@ export function getBlameViewHtml(
   const linesJson    = JSON.stringify(fileContent.split('\n'));
   const lineMapJson  = JSON.stringify(lineToTaskletId);
   const taskletsJson = JSON.stringify(tasklets);
+  const fileNameJson = JSON.stringify(fileName);
 
   return /* html */`<!DOCTYPE html>
 <html lang="en">
@@ -49,26 +50,30 @@ export function getBlameViewHtml(
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AI Blame — ${escapeHtml(fileName)}</title>
+  <link id="hljs-theme" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:            #0d0f14;
-      --surface:       #13161e;
-      --border:        #1e2330;
-      --text:          #c9d1e0;
-      --text-dim:      #5a6480;
-      --text-bright:   #e8edf5;
+      --bg:            var(--vscode-editor-background);
+      --surface:       var(--vscode-sideBar-background, var(--vscode-editorGroupHeader-tabsBackground, var(--vscode-editor-background)));
+      --border:        var(--vscode-panel-border, var(--vscode-editorGroup-border, rgba(128,128,128,0.35)));
+      --text:          var(--vscode-editor-foreground);
+      --text-dim:      var(--vscode-descriptionForeground);
+      --text-bright:   var(--vscode-foreground);
       --accent:        #8040ff;
       --accent-dim:    rgba(128, 0, 255, 0.18);
       --accent-glow:   rgba(128, 0, 255, 0.55);
       --selected-bg:   rgba(128, 0, 255, 0.55);
       --unselected-bg: rgba(128, 0, 255, 0.18);
-      --line-num:      #3a4060;
-      --font-mono:     'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
-      --font-ui:       'Inter', 'Segoe UI', system-ui, sans-serif;
+      --line-num:      var(--vscode-editorLineNumber-foreground);
+      --font-mono:     var(--vscode-editor-font-family);
+      --font-ui:       var(--vscode-font-family);
       --radius:        6px;
     }
+
+    /* Let hljs token colours show through without overriding our background */
+    .hljs { background: transparent !important; padding: 0 !important; }
 
     html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--font-ui); overflow: hidden; }
 
@@ -82,7 +87,7 @@ export function getBlameViewHtml(
       flex-shrink: 0;
     }
     #header .icon     { width: 18px; height: 18px; opacity: .7; }
-    #header .filename { font-family: var(--font-mono); font-size: 12px; color: var(--text-bright); letter-spacing: .02em; }
+    #header .filename { font-family: var(--font-mono); font-size: var(--vscode-editor-font-size, 12px); color: var(--text-bright); letter-spacing: .02em; }
     #header .badge    {
       margin-left: auto; font-size: 10px; padding: 2px 8px; border-radius: 20px;
       background: var(--accent-dim); color: var(--accent); border: 1px solid var(--accent);
@@ -97,11 +102,11 @@ export function getBlameViewHtml(
     #file-scroll::-webkit-scrollbar       { width: 6px; height: 6px; }
     #file-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
-    table.code-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.65; table-layout: fixed; }
+    table.code-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: var(--vscode-editor-font-size, 12.5px); line-height: 1.65; table-layout: fixed; }
     col.col-num  { width: 52px; }
     tr { transition: background 80ms ease; }
     td.line-num  { width: 52px; min-width: 52px; text-align: right; padding: 0 12px 0 0; color: var(--line-num); user-select: none; vertical-align: top; font-size: 11px; }
-    td.line-code { padding: 0 16px 0 8px; white-space: pre; color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+    td.line-code { padding: 0 16px 0 8px; white-space: pre; color: var(--text); overflow: hidden; }
 
     tr.ai-line td              { background: var(--unselected-bg); }
     tr.ai-line td.line-num     { color: var(--accent); opacity: .7; }
@@ -215,11 +220,11 @@ export function getBlameViewHtml(
     /* markdown content inside message boxes */
     .message-box p                  { margin: 0 0 8px; }
     .message-box p:last-child       { margin-bottom: 0; }
-    .message-box code               { font-family: var(--font-mono); font-size: 11.5px; background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 3px; }
-    .message-box pre                { background: rgba(255,255,255,0.06); padding: 10px 12px; border-radius: 4px; overflow-x: auto; margin: 8px 0; }
+    .message-box code               { font-family: var(--font-mono); font-size: 11.5px; background: var(--vscode-textCodeBlock-background, rgba(255,255,255,0.08)); padding: 1px 5px; border-radius: 3px; }
+    .message-box pre                { background: var(--vscode-textCodeBlock-background, rgba(255,255,255,0.06)); padding: 10px 12px; border-radius: 4px; overflow-x: auto; margin: 8px 0; }
     .message-box pre code           { background: none; padding: 0; }
     .message-box ul, .message-box ol { padding-left: 20px; margin: 6px 0; }
-    
+
     .questions-section { margin-top: 12px; }
     .question-item {
       background: var(--surface);
@@ -272,6 +277,7 @@ export function getBlameViewHtml(
     #resize-handle:hover, #resize-handle.dragging { background: var(--accent); }
   </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 </head>
 <body>
 <div id="root">
@@ -320,6 +326,7 @@ export function getBlameViewHtml(
     const LINES    = ${linesJson};
     const LINE_MAP = ${lineMapJson};
     const TASKLETS = ${taskletsJson};
+    const FILE_NAME = ${fileNameJson};
 
     let selectedTaskletId = null;
 
@@ -345,6 +352,79 @@ export function getBlameViewHtml(
 
       if (isAi) { tr.addEventListener('click', () => handleLineClick(idx)); }
     });
+
+    // ── Syntax highlighting ───────────────────────────────────────────────────
+
+    const HLJS_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/';
+
+    function getHljsThemeUrl() {
+      const isLight = document.body.classList.contains('vscode-light');
+      return HLJS_CDN + (isLight ? 'atom-one-light.min.css' : 'atom-one-dark.min.css');
+    }
+
+    function applyHljsTheme() {
+      document.getElementById('hljs-theme').href = getHljsThemeUrl();
+    }
+
+    // Re-apply theme whenever VS Code switches between light/dark/high-contrast
+    new MutationObserver(applyHljsTheme).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    applyHljsTheme();
+
+    function getLanguage(name) {
+      const ext = name.split('.').pop().toLowerCase();
+      return hljs.getLanguage(ext) ? ext : null;
+      return map[ext] ?? null;
+    }
+
+    // Split highlight.js HTML output into per-line strings, preserving open spans across newlines
+    function splitHighlightedHtml(html) {
+      const rawLines = html.split('\\n');
+      const result = [];
+      let openTags = [];
+
+      for (const rawLine of rawLines) {
+        const lineHtml = openTags.join('') + rawLine;
+
+        // Walk tags to track unclosed spans
+        const stack = [];
+        const tagRe = /<span[^>]*>|<\\/span>/g;
+        let m;
+        while ((m = tagRe.exec(lineHtml)) !== null) {
+          if (m[0].startsWith('</')) { stack.pop(); }
+          else { stack.push(m[0]); }
+        }
+
+        openTags = stack.slice();
+        result.push(lineHtml + '<\\/span>'.repeat(stack.length));
+      }
+
+      return result;
+    }
+
+    function applyHighlighting() {
+      if (typeof hljs === 'undefined') { return; }
+      const lang = getLanguage(FILE_NAME);
+      const fullCode = LINES.join('\\n');
+
+      let highlighted;
+      try {
+        highlighted = lang
+          ? hljs.highlight(fullCode, { language: lang, ignoreIllegals: true }).value
+          : hljs.highlightAuto(fullCode).value;
+      } catch (_) { return; }
+
+      const highlightedLines = splitHighlightedHtml(highlighted);
+      const tds = tbody.querySelectorAll('td.line-code');
+      tds.forEach((td, i) => {
+        if (highlightedLines[i] !== undefined) {
+          td.innerHTML = highlightedLines[i];
+        }
+      });
+    }
+
+    applyHighlighting();
+
+    // ── Line selection ────────────────────────────────────────────────────────
 
     function handleLineClick(lineIdx) {
       const taskletId = LINE_MAP[String(lineIdx)];
