@@ -73,6 +73,15 @@ async function getTracyIdNote(repoPath: string, commitHash: string): Promise<str
   }
 }
 
+async function isOnAnyBranch(repoPath: string, hash: string): Promise<boolean> {
+  try {
+    const result = await runGit(repoPath, ["branch", "--contains", hash, "--no-color"]);
+    return result.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
 // When you squash multiple commits in git, the original commits are 
 // replaced by a new single commit. However, each original commit may have 
 // its own hidden chain containing AI snapshots.
@@ -137,8 +146,14 @@ async function getTracyChain(repoPath: string, startCommit: string): Promise<Com
         treeHash: treeHash
       });
 
-      // Check for multiple parents (merge commit)
-      // Merge commits have parents separated by space: "parent1 parent2 parent3"
+      // Stop traversal at commits reachable from refs/heads — those are origin
+      // commits that anchor the diff baseline, not part of the hidden chain.
+      const onBranch = await isOnAnyBranch(repoPath, hash);
+      if (onBranch) {
+        continue;
+      }
+
+      // Follow parents of hidden chain commits. Merge commits have space-separated parents.
       if (parentHash && parentHash.includes(" ")) {
         const allParents = parentHash.split(" ");
 
