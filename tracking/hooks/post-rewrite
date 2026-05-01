@@ -18,13 +18,27 @@ get_tracy_ids_from_note() {
 get_chain_commits_oldest_first() {
     local tracy_id="$1"
     local ref="$REF_BASE_PUSHED/$tracy_id"
-    
+
     if ! git rev-parse --verify "$ref" >/dev/null 2>&1; then
         return
     fi
 
+    # When the tracy_id carries a commit hash (uuid@hash), use the parent of
+    # that commit as the hard stop.  This stays correct even after a squash
+    # rebase where the old user commits are no longer reachable from any
+    # branch and therefore not excluded by --not --branches.
+    local exclude_ref=""
+    if [[ "$tracy_id" == *"@"* ]]; then
+        local short_hash="${tracy_id##*@}"
+        exclude_ref=$(git rev-parse --verify "${short_hash}^" 2>/dev/null || true)
+    fi
+
     local commits
-    commits=$(git log --format="%H" "$ref" --not --branches --not --tags 2>/dev/null || true)
+    if [[ -n "$exclude_ref" ]]; then
+        commits=$(git log --format="%H" "$ref" --not "$exclude_ref" 2>/dev/null || true)
+    else
+        commits=$(git log --format="%H" "$ref" --not --branches --not --tags 2>/dev/null || true)
+    fi
 
     local reversed=""
     while IFS= read -r line; do
@@ -64,8 +78,12 @@ delete_chains_for_ids() {
 
 build_chain_from_commits() {
     local commits_list="$1"
+    local origin_commit="${2:-}"
+    local deduped_commits
+    local parent="$origin_commit" 
+    local new_tip=""
 
-    local parent="" new_tip="" previous_tree=""
+    deduped_commits=$(printf '%s\n' "$commits_list" | awk 'NF && !seen[$0]++')
 
     while IFS= read -r commit; do
         [[ -z "$commit" ]] && continue
@@ -73,9 +91,6 @@ build_chain_from_commits() {
         local commit_tree
         commit_tree=$(git rev-parse "$commit^{tree}" 2>/dev/null || true)
         [[ -z "$commit_tree" ]] && continue
-
-        [[ "$commit_tree" == "$previous_tree" ]] && continue
-        previous_tree="$commit_tree"
 
         local msg
         msg=$(git log -1 --format='%B' "$commit" 2>/dev/null || true)
@@ -118,7 +133,7 @@ build_chain_from_commits() {
             parent="$new_commit"
             new_tip="$new_commit"
         fi
-    done <<< "$commits_list"
+    done <<< "$deduped_commits"
 
     echo "$new_tip"
 }
@@ -130,21 +145,31 @@ publish_chain() {
 
     [[ -z "$all_commits" ]] && return
 
-    local NEW_ID
-    NEW_ID=$(uuidgen | tr '[:upper:]' '[:lower:]')
+    local NEW_UUID
+    NEW_UUID=$(uuidgen | tr '[:upper:]' '[:lower:]')
+
+    local SHORT_HASH
+    SHORT_HASH=$(git rev-parse --short=8 "$target_sha" 2>/dev/null || true)
+
+    local FINAL_ID="$NEW_UUID"
+    [[ -n "$SHORT_HASH" ]] && FINAL_ID="$NEW_UUID@$SHORT_HASH"
+
+    local new_origin
+    new_origin=$(git rev-parse --verify "$target_sha^" 2>/dev/null || true)
 
     local new_tip
-    new_tip=$(build_chain_from_commits "$all_commits")
+    new_tip=$(build_chain_from_commits "$all_commits" "$new_origin")
 
     if [[ -n "$new_tip" ]]; then
-        git update-ref "$REF_BASE_PUSHED/$NEW_ID" "$new_tip"
-        git config "tracy.$NEW_ID.hidden" "$new_tip"
-        git notes add -f -m "tracy-id: $NEW_ID" "$target_sha" 2>/dev/null || true
+        git update-ref "$REF_BASE_PUSHED/$FINAL_ID" "$new_tip"
+        git config "tracy.$FINAL_ID.hidden" "$new_tip"
+        git notes add -f -m "tracy-id: $FINAL_ID" "$target_sha" 2>/dev/null || true
     fi
 }
 
 # amend: post-commit already created a new chain on new_sha; prepend the old
-# chain (pre-amend history) to it, then replace both with one combined chain.
+# chain (pre-amend history) to it, then publish a single combined chain.
+# Old chains are intentionally kept so the user can reset to them.
 handle_amend() {
     local old_sha="$1"
     local new_sha="$2"
@@ -164,14 +189,11 @@ handle_amend() {
     [[ -n "$new_commits" ]] && all_commits+="$new_commits"$'\n'
     all_commits="${all_commits%$'\n'}"
 
-    # Delete superseded chains before publishing to avoid stale refs
-    delete_chains_for_ids "$old_ids"
-    delete_chains_for_ids "$new_ids"
-
     publish_chain "$all_commits" "$new_sha"
 }
 
-# rebase (one-to-one): recreate the chain under a fresh ID for the new SHA.
+# rebase (one-to-one): publish the old chain under a fresh ID for the new SHA.
+# Old chain is intentionally kept so the user can reset to it.
 handle_rebase() {
     local old_sha="$1"
     local new_sha="$2"
@@ -186,23 +208,29 @@ handle_rebase() {
     local all_commits
     all_commits=$(collect_commits_for_ids "$old_ids")
 
-    delete_chains_for_ids "$old_ids"
-
     publish_chain "$all_commits" "$new_sha"
 }
 
-# squash: merge chains from all old SHAs (and any chain already on new_sha
-# from post-commit) into a single chain attached to new_sha.
+# squash: merge chains from all old SHAs into a single chain attached to new_sha.
+# Old chains are intentionally kept so the user can reset to them.
+# The chain post-commit may have placed on new_sha during the rebase is ignored:
+# it is always a duplicate of one of the old chains (rebase fires post-commit
+# for intermediate squash steps using whatever session was active at the time).
 handle_squash() {
     local new_sha="$1"
-    local old_shas_str="$2"  # newline-separated, oldest-first
-
-    local new_note
-    new_note=$(git notes show "$new_sha" 2>/dev/null || true)
-    local new_ids
-    new_ids=$(get_tracy_ids_from_note "$new_note")
+    local old_shas_str="$2"
 
     local all_commits=""
+
+    # git may report rewrite pairs in any order; sort by author timestamp so
+    # chains are concatenated chronologically (oldest commit first).
+    local sorted_old_shas
+    sorted_old_shas=$(while IFS= read -r sha; do
+        [[ -z "$sha" ]] && continue
+        local ts
+        ts=$(git log -1 --format='%at' "$sha" 2>/dev/null || echo 0)
+        printf '%s %s\n' "$ts" "$sha"
+    done <<< "$old_shas_str" | sort -n | awk '{print $2}')
 
     while IFS= read -r old_sha; do
         [[ -z "$old_sha" ]] && continue
@@ -214,11 +242,7 @@ handle_squash() {
         local old_commits
         old_commits=$(collect_commits_for_ids "$old_ids")
         [[ -n "$old_commits" ]] && all_commits+="$old_commits"$'\n'
-
-        delete_chains_for_ids "$old_ids"
-    done <<< "$old_shas_str"
-
-    delete_chains_for_ids "$new_ids"
+    done <<< "$sorted_old_shas"
 
     all_commits="${all_commits%$'\n'}"
 

@@ -3,6 +3,7 @@ set -euo pipefail
 
 USER_COMMIT=$(git rev-parse HEAD)
 SHORT_HASH=$(git rev-parse --short=8 HEAD)
+ORIGIN_COMMIT=$(git rev-parse --verify HEAD^ 2>/dev/null || true)
 
 TRACY_ID=$(git config --get tracy.current-id || true)
 if [[ -z "$TRACY_ID" ]]; then
@@ -22,10 +23,17 @@ FILES_IN_COMMIT=$(git diff-tree --root --no-commit-id -r --name-only "$USER_COMM
 
 build_filtered_chain() {
     local local_ref="$1"
+    local origin_commit="${2:-}"
 
-    # Walk only the hidden snapshot commits, not the full visible-branch history
+    # Walk only the hidden snapshot commits, not the full visible-branch history.
+    # After an amend the pre-amend HEAD is no longer on any branch, so
+    # --not --branches misses it.  ORIG_HEAD is set to that commit by git
+    # during git commit --amend, so we exclude it explicitly.
+    local orig_head
+    orig_head=$(git rev-parse ORIG_HEAD 2>/dev/null || true)
     local commits
-    commits=$(git log --format="%H" "$local_ref" --not --branches --not --tags 2>/dev/null || true)
+    commits=$(git log --format="%H" "$local_ref" --not --branches --not --tags \
+        ${orig_head:+--not "$orig_head"} 2>/dev/null || true)
     if [[ -z "$commits" ]]; then
         return
     fi
@@ -41,6 +49,15 @@ build_filtered_chain() {
     
     while IFS= read -r commit; do
         [[ -z "$commit" ]] && continue
+
+        # User commits have a tracy-id note; hidden snapshot commits have none.
+        # After git commit --amend the pre-amend HEAD is reachable from the
+        # local ref but is no longer on any branch, so --not --branches above
+        # does not exclude it. Skipping noted commits here catches that case
+        # reliably regardless of how ORIG_HEAD is set.
+        if git notes show "$commit" >/dev/null 2>&1; then
+            continue
+        fi
 
         local commit_tree
         commit_tree=$(git rev-parse "$commit^{tree}" 2>/dev/null || true)
@@ -106,6 +123,8 @@ build_filtered_chain() {
         local PARENT_FLAG=""
         if [[ -n "$new_chain_head" ]]; then
             PARENT_FLAG="-p $new_chain_head"
+        elif [[ -n "$origin_commit" ]]; then
+            PARENT_FLAG="-p $origin_commit"
         fi
 
         local author_name author_email
@@ -133,7 +152,7 @@ build_filtered_chain() {
     fi
 }
 
-FINAL_CHAIN=$(build_filtered_chain "$REF_LOCAL")
+FINAL_CHAIN=$(build_filtered_chain "$REF_LOCAL" "$ORIGIN_COMMIT")
 
 if [[ -n "$FINAL_CHAIN" ]]; then
     git update-ref "$REF_FINAL" "$FINAL_CHAIN"
