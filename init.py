@@ -145,7 +145,7 @@ def main():
     # CONFIG FILE
     # -------------------------------
     with open(tracy_dir / "config", "w") as f:
-        f.write(f"TRACY_SCRIPT={script_source}\n")
+        f.write(f"TRACY_SCRIPT={script_source.as_posix()}\n")
 
     # -------------------------------
     # HOOKS
@@ -159,13 +159,13 @@ def main():
     rows = []
 
     for hook in ["pre-commit", "post-commit", "post-rewrite"]:
-        source_hook = hooks_source / hook
+        source_hook = hooks_source / f"{hook}.py"
         tracy_hook = hooks_dir / f"{hook}.tracy"
         dest_hook = hooks_dir / hook
 
         tracy_block = f"""# --- TRACYBOT START ---
 if [ -x "$(dirname "$0")/{hook}.tracy" ]; then
-    "$(dirname "$0")/{hook}.tracy" "$@"
+    python "$(dirname "$0")/{hook}.tracy" "$@"
 fi
 # --- TRACYBOT END ---
 """

@@ -7,15 +7,6 @@ import { homedir } from 'os'
 
 const PLUGINS_DIR = join(homedir(), '.config', 'opencode', 'plugin')
 
-function getPluginsDir() {
-    const dir = PLUGINS_DIR[process.platform]
-    if (!dir) {
-        console.error(`Unsupported platform: ${process.platform}`)
-        process.exit(1)
-    }
-    return dir
-}
-
 function build() {
     console.log('Building plugin...')
     try {
@@ -28,7 +19,7 @@ function build() {
 }
 
 function install() {
-    const pluginsDir = getPluginsDir()
+    const pluginsDir = PLUGINS_DIR
     console.log(`Installing to ${pluginsDir}...`)
 
     const distDir = 'dist'

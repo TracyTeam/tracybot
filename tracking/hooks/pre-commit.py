@@ -51,7 +51,7 @@ def main():
     # -------------------------------
     try:
         result = subprocess.run(
-            [str(tracy_path), "--index-only"]
+            [sys.executable, str(tracy_path), "--index-only"]
         )
         sys.exit(result.returncode)
     except Exception as e:

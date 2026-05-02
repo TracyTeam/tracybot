@@ -8,8 +8,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 BASE_DIR = SCRIPT_DIR.parent
 MOCK_DIR = BASE_DIR / "test/mock-repository"
 REMOTE_DIR = BASE_DIR / "test/mock-remote.git"
-TRACY_SCRIPT = BASE_DIR / "tracking/tracy.sh"
-INIT_SCRIPT = BASE_DIR / "init.sh"
+TRACY_SCRIPT = BASE_DIR / "tracking/tracy.py"
+INIT_SCRIPT = BASE_DIR / "init.py"
 
 AI_NAME = "big-pickle"
 AI_EMAIL = "OpenCode"
@@ -57,7 +57,7 @@ run(["git", "remote", "add", "origin", str(REMOTE_DIR)], cwd=MOCK_DIR)
 # 2. INIT TRACYBOT
 # -------------------------------
 echo_section("Initializing Tracybot", 2)
-run(["bash", str(INIT_SCRIPT), "."], cwd=MOCK_DIR)
+run(["python", str(INIT_SCRIPT), "."], cwd=MOCK_DIR)
 
 # -------------------------------
 # HELPERS
@@ -73,7 +73,7 @@ def ai_snapshot(prompt, file, content):
     ensure_file(file_path, content)
 
     run([
-        "bash", str(TRACY_SCRIPT),
+        "python", str(TRACY_SCRIPT),
         "--user-name", AI_NAME,
         "--user-email", AI_EMAIL,
         "--description", prompt
@@ -92,7 +92,7 @@ def user_snapshot(file, content):
     file_path = MOCK_DIR / file
     ensure_file(file_path, content)
 
-    run(["bash", str(TRACY_SCRIPT)], cwd=MOCK_DIR)
+    run(["python", str(TRACY_SCRIPT)], cwd=MOCK_DIR)
 
 
 # -------------------------------
@@ -184,7 +184,8 @@ print("-------------------------------------\n")
 
 visible = run(["git", "rev-list", "--count", "HEAD"], cwd=MOCK_DIR, capture=True)
 branches = run(["git", "branch"], cwd=MOCK_DIR, capture=True)
-tracy_refs = run(["bash", "-c", "git show-ref | grep refs/tracy | wc -l"], cwd=MOCK_DIR, capture=True)
+tracy_output = run(["git", "for-each-ref", "refs/tracy", "--format=%(refname)"], cwd=MOCK_DIR, capture=True, check=False)
+tracy_refs = len([line for line in tracy_output.splitlines() if line.strip()]) if tracy_output else 0
 
 print(f"Visible Commits: {visible}")
 print(f"Active Branches:\n{branches}")
