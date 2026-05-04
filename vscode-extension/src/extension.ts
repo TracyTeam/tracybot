@@ -149,10 +149,11 @@ export async function activate(context: vscode.ExtensionContext) {
         {
           enableScripts: true,
           retainContextWhenHidden: true,
+          localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'media')],
         }
       );
 
-      panel.webview.html = getBlameViewHtml(fileContent, fileName, fileMap);
+      panel.webview.html = getBlameViewHtml(fileContent, fileName, fileMap, panel.webview, context.extensionUri);
     })
   );
 
