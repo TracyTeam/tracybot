@@ -16,7 +16,8 @@ export function getBlameViewHtml(
   fileName: string,
   fileMap: Map<number, TaskletUI>,
   webview: vscode.Webview,
-  extensionUri: vscode.Uri
+  extensionUri: vscode.Uri,
+  initialLine?: number
 ): string {
   const tasklets: Record<string, TaskletData> = {};
   const lineToTaskletId: Record<string, string> = {};
@@ -41,10 +42,11 @@ export function getBlameViewHtml(
     lineToTaskletId[String(line)] = id;
   }
 
-  const linesJson    = JSON.stringify(fileContent.split('\n'));
-  const lineMapJson  = JSON.stringify(lineToTaskletId);
-  const taskletsJson = JSON.stringify(tasklets);
-  const fileNameJson = JSON.stringify(fileName);
+  const linesJson       = JSON.stringify(fileContent.split('\n'));
+  const lineMapJson     = JSON.stringify(lineToTaskletId);
+  const taskletsJson    = JSON.stringify(tasklets);
+  const fileNameJson    = JSON.stringify(fileName);
+  const initialLineJson = JSON.stringify(initialLine ?? null);
 
   const mediaUri = (file: string) =>
     webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', file));
@@ -105,10 +107,11 @@ export function getBlameViewHtml(
 
 <script>
   // global constants for the webview script; these are populated by the server based on the file being viewed and the blame data we have for it
-  const LINES    = ${linesJson};
-  const LINE_MAP = ${lineMapJson};
-  const TASKLETS = ${taskletsJson};
-  const FILE_NAME = ${fileNameJson};
+  const LINES        = ${linesJson};
+  const LINE_MAP     = ${lineMapJson};
+  const TASKLETS     = ${taskletsJson};
+  const FILE_NAME    = ${fileNameJson};
+  const INITIAL_LINE = ${initialLineJson};
 </script>
 <script src="${jsUri}"></script>
 </body>

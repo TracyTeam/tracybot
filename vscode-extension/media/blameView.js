@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  // LINES, LINE_MAP, TASKLETS, FILE_NAME are injected as globals by blameView.ts
+  // LINES, LINE_MAP, TASKLETS, FILE_NAME, INITIAL_LINE are injected as globals by blameView.ts
 
   let selectedTaskletId = null;
 
@@ -130,6 +130,22 @@
 
   const promptContent = document.getElementById('prompt-content');
 
+  // Auto-select initial line
+  if (INITIAL_LINE !== null) {
+
+    // If the line is part of the tasklet, select the whole tasklet and show its prompt
+    const taskletId = LINE_MAP[String(INITIAL_LINE)];
+    if (taskletId !== undefined) {
+      selectedTaskletId = taskletId;
+      applySelection(taskletId);
+      showPrompt(taskletId);
+    }
+
+    // In any case (even if there is no tasklet assosiated with the selected line), scroll the line into view
+    const tr = tbody.querySelector(`tr[data-line="${INITIAL_LINE}"]`);
+    if (tr) { tr.scrollIntoView({ block: 'center', behavior: 'instant' }); }
+  }
+
   function showBlank() {
     promptContent.innerHTML = `
       <div id="blank-state">
@@ -206,6 +222,8 @@
 
     document.getElementById('all-tasklets-btn').addEventListener('click', () => {
       showTaskletMenu();
+      clearSelection();
+      selectedTaskletId = null;
     });
   }
 
