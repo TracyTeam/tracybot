@@ -1,9 +1,7 @@
-#!/usr/bin/env python3
-import os
 import sys
+import re
 import subprocess
 import shutil
-import tempfile
 from pathlib import Path
 
 # Colors
@@ -40,7 +38,7 @@ def find_repo(start: Path):
 def confirm():
     print("  Confirm initialization? (y/n) ", end="", flush=True)
     ch = sys.stdin.read(1)
-    print("\n")
+    print()
     return ch.lower() == "y"
 
 
@@ -65,9 +63,9 @@ def main():
             print(f"{R}******************************************************{NC}\n")
             sys.exit(1)
 
-        print(f"\n{B}+------------------------+{NC}")
+        print(f"\n{B}+-----------------------+{NC}")
         print(f"{B}| INITIALIZING TRACYBOT |{NC}")
-        print(f"{B}+-----------------------+{NC}")
+        print(f"{B}+-----------------------+{NC}\n")
         print(f"  {BOLD}Target Path:{NC} {repo}\n")
 
         if not confirm():
@@ -87,7 +85,7 @@ def main():
     # -------------------------------
     # CHECK ORIGIN
     # -------------------------------
-    if not run_git(repo, ["remote", "get-url", "origin"]):
+    if not run_git(repo, ["remote", "get-url", "origin"], capture=True):
         print(f"\n{R}******************************************************{NC}")
         print(f"{R}* ERROR: Tracybot requires an 'origin' remote        *{NC}")
         print(f"{R}******************************************************{NC}\n")
@@ -145,7 +143,7 @@ def main():
     # CONFIG FILE
     # -------------------------------
     with open(tracy_dir / "config", "w") as f:
-        f.write(f"TRACY_SCRIPT={script_source.as_posix()}\n")
+        f.write(f"TRACY_SNAPSHOT_SCRIPT={script_source.as_posix()}\n")
 
     # -------------------------------
     # HOOKS
@@ -163,17 +161,49 @@ def main():
         tracy_hook = hooks_dir / f"{hook}.tracy"
         dest_hook = hooks_dir / hook
 
-        tracy_block = f"""# --- TRACYBOT START ---
-if [ -x "$(dirname "$0")/{hook}.tracy" ]; then
-    python "$(dirname "$0")/{hook}.tracy" "$@"
+        start_marker = "# --- TRACYBOT START ---"
+        end_marker = "# --- TRACYBOT END ---"
+
+        tracy_block = f"""{start_marker}
+#
+# !!! WARNING: DO NOT MODIFY OR REMOVE THIS BLOCK !!!
+#
+# This section is managed automatically by Tracybot.
+# Any manual changes inside these markers may be overwritten.
+# You may safely edit anything outside this block
+
+TRACY_FILE="$(git rev-parse --git-path hooks)/{hook}.tracy"
+
+if [ -e "$TRACY_FILE" ]; then
+    if command -v python3 >/dev/null 2>&1 && python3 -c "import sys" >/dev/null 2>&1; then
+        PYTHON_CMD="python3"
+    elif command -v python >/dev/null 2>&1 && python -c "import sys" >/dev/null 2>&1; then
+        PYTHON_CMD="python"
+    else
+        echo "Error: Python is not installed or not working." >&2
+        exit 1
+    fi
+
+    "$PYTHON_CMD" "$TRACY_FILE" "$@"
 fi
-# --- TRACYBOT END ---
+{end_marker}
 """
 
         if dest_hook.exists():
             content = dest_hook.read_text()
 
-            if "TRACYBOT START" in content:
+            if start_marker in content and end_marker in content:
+                start_idx = content.find(start_marker)
+                end_idx = content.find(end_marker)
+
+                if start_idx != -1 and end_idx != -1:
+                    end_idx += len(end_marker)
+                    new_content = content[:start_idx] + tracy_block + content[end_idx:]
+                else:
+                    new_content = content + "\n" + tracy_block
+
+                dest_hook.write_text(new_content)
+                dest_hook.chmod(0o755)
                 status = f"{G}Updated{NC}"
             else:
                 print(f"{Y}WARNING: {hook} hook already exists.{NC}")
@@ -200,7 +230,8 @@ fi
         shutil.copy(source_hook, tracy_hook)
         tracy_hook.chmod(0o755)
 
-        rows.append(f"| {hook:<16} | {status:<25} |")
+        status_clean = re.sub(r'\033\[[0-9;]*m', '', status)
+        rows.append(f"| {hook:<16} | {status}{' ' * (31 - len(status_clean))} |")
 
     print("+------------------+---------------------------------+")
     print(f"| {'Hook':<16} | {'Status':<31} |")
