@@ -126,8 +126,6 @@
       const tr = tbody.querySelector(`tr[data-line="${li}"]`);
       if (tr) { tr.classList.add('ai-selected'); }
     });
-    const first = tbody.querySelector('tr.ai-selected');
-    if (first) { first.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
   }
 
   const promptContent = document.getElementById('prompt-content');
@@ -230,6 +228,9 @@
         const id = li.dataset.id;
         selectedTaskletId = id;
         applySelection(id);
+        const first = tbody.querySelector('tr.ai-selected');
+        // Scroll to the first line of the selected tasklet
+        if (first) { first.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
         showPrompt(id);
       });
     });
