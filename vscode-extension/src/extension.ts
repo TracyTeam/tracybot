@@ -153,7 +153,8 @@ export async function activate(context: vscode.ExtensionContext) {
         }
       );
 
-      panel.webview.html = getBlameViewHtml(fileContent, fileName, fileMap, panel.webview, context.extensionUri);
+      const initialLine = editor.selection.active.line;
+      panel.webview.html = getBlameViewHtml(fileContent, fileName, fileMap, panel.webview, context.extensionUri, initialLine);
     })
   );
 
