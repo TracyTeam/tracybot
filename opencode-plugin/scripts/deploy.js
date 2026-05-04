@@ -19,8 +19,7 @@ function build() {
 }
 
 function install() {
-    const pluginsDir = PLUGINS_DIR
-    console.log(`Installing to ${pluginsDir}...`)
+    console.log(`Installing to ${PLUGINS_DIR}...`)
 
     const distDir = 'dist'
 
@@ -30,7 +29,7 @@ function install() {
     }
 
     const srcPath = join(distDir, 'index.js')
-    const destPath = join(pluginsDir, 'tracybot.js')
+    const destPath = join(PLUGINS_DIR, 'tracybot.js')
 
     if (existsSync(destPath)) {
         const stat = statSync(destPath)

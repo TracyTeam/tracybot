@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import os
 import sys
 import subprocess
@@ -31,19 +30,19 @@ def main():
 
     config = load_config(config_file)
 
-    tracy_script = config.get("TRACY_SCRIPT", "")
+    tracy_script = config.get("TRACY_SNAPSHOT_SCRIPT", "")
 
     # -------------------------------
     # VALIDATE TRACY_SCRIPT
     # -------------------------------
     if not tracy_script:
-        print("Error: TRACY_SCRIPT is not set in the config file.", file=sys.stderr)
+        print("Error: TRACY_SNAPSHOT_SCRIPT is not set in the config file.", file=sys.stderr)
         sys.exit(1)
 
     tracy_path = Path(tracy_script)
 
     if not tracy_path.exists():
-        print(f"Error: TRACY_SCRIPT is set to '{tracy_script}' but the file does not exist.", file=sys.stderr)
+        print(f"Error: TRACY_SNAPSHOT_SCRIPT is set to '{tracy_script}' but the file does not exist.", file=sys.stderr)
         sys.exit(1)
 
     # -------------------------------
@@ -51,7 +50,9 @@ def main():
     # -------------------------------
     try:
         result = subprocess.run(
-            [sys.executable, str(tracy_path), "--index-only"]
+            [sys.executable, str(tracy_path), "--index-only"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
         )
         sys.exit(result.returncode)
     except Exception as e:

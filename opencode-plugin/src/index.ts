@@ -103,6 +103,19 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
     await L.info("Plugin initialized", { repoRoot, tracyPath })
 
+    let pythonCmd;
+    if ((await $`python3 --version`.quiet()).exitCode === 0) {
+        pythonCmd = 'python3'
+        await L.info("Detected python command: python3")
+    } else {
+        if ((await $`python --version`.quiet()).exitCode === 0) {
+            pythonCmd = 'python'
+            await L.info("Detected python command: python")
+        } else {
+            await L.error("Neither python nor python3 is available")
+            return {}
+        }
+    }
 
     let sessions = new Set<string>()
     const snapshotLocks = new Map<string, Promise<void>>()
@@ -213,7 +226,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                         return
                     }
 
-                    const output = await $`python ${tracyPath} --user-name "opencode" --user-email "opencode" --description ${JSON.stringify(tasklet)} --session-id "${tasklet.sessionId}" `.cwd(repoRoot).text()
+                    const output = await $`${pythonCmd} ${tracyPath} --user-name "opencode" --user-email "opencode" --description ${JSON.stringify(tasklet)} --session-id "${tasklet.sessionId}" `.cwd(repoRoot).text()
                     await L.info(`committed OC changes. tracy.py: ${output.trim()}`, { tasklet })
 
                     taskletToolCounter.set(idleSessionId, 0)
@@ -242,7 +255,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
                 if (!snapshotLocks.has(sessionId)) {
                     const lockPromise = (async () => {
-                        const result = await $`python "${tracyPath}"`
+                        const result = await $`${pythonCmd} "${tracyPath}"`
                             .cwd(repoRoot)
                             .quiet()
 
