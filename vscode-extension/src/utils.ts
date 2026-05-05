@@ -177,38 +177,6 @@ function computeHunkSignificance(oldLines: string[], newLines: string[]): boolea
   return score <= SIMILARITY_THRESHOLD;
 }
 
-export async function getChangedLines(repoPath: string, fromTree: string, toTree: string, filePath: string): Promise<number[]> {
-  const fileHunks = await getDiff(repoPath, fromTree, toTree, filePath);
-  const hunks = fileHunks.get(filePath) || [];
-  const lines: number[] = [];
-
-  for (const hunk of hunks) {
-    for (let i = 0; i < hunk.newCount; i++) {
-      lines.push(hunk.newStart + i);
-    }
-  }
-
-  return lines;
-}
-
-export async function fileExists(
-  repoPath: string,
-  treeHash: string,
-  filePath: string
-): Promise<boolean> {
-  try {
-    await runGit(repoPath, [
-      "cat-file",
-      "-e",
-      `${treeHash}:${filePath}`,
-    ]);
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 // Map line numbers from an old tree to their 
 // corresponding line numbers on a new tree
 export async function mapLinesToTree(
