@@ -168,7 +168,7 @@ else:
 # CHECK FOR PARENT & REDUNDANCY
 # -------------------------------
 
-# Use --verify to check if ref exists, like bash does (tracy.sh lines 151-155)
+# Use --verify to check if ref exists
 if run_git(["rev-parse", "--verify", REF]):
     LATEST_HIDDEN = run_git(["rev-parse", REF], capture_output=True)
 else:

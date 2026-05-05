@@ -12,7 +12,7 @@ The tracking component uses Git's internal mechanisms to store snapshots without
 
 ## How It Works
 
-### `tracy.sh`
+### `tracy.py`
 
 Invoked by the opencode-plugin after each AI interaction. It:
 1. Captures the current working tree (or staged index with `--index-only`) into a temporary Git index
@@ -21,9 +21,9 @@ Invoked by the opencode-plugin after each AI interaction. It:
 
 ### Git Hooks
 
-`init.sh` installs three hooks:
+`init.py` installs three hooks:
 
-- **`pre-commit`** — calls `tracy.sh --index-only` to snapshot exactly what is staged before the commit lands
+- **`pre-commit`** — calls `tracy.py --index-only` to snapshot exactly what is staged before the commit lands
 - **`post-commit`** — promotes the local snapshot chain to `refs/tracy/<UUID>`, keeping only files that were actually in the commit; attaches a `tracy-id` note to the commit; cleans up the local ref
 - **`post-rewrite`** — handles commit rewrites:
   - **amend**: combines the pre-amend chain with the newly created post-commit chain into one
@@ -34,11 +34,11 @@ Invoked by the opencode-plugin after each AI interaction. It:
 
 Typically, you don't run tracking components directly. Instead:
 
-1. Run `./init.sh` in your target repository to install hooks and configure Git
-2. The opencode-plugin will invoke `tracy.sh` automatically during AI interactions
+1. Run `init.py` in your target repository to install hooks and configure Git
+2. The opencode-plugin will invoke `tracy.py` automatically during AI interactions
 3. The VS Code extension will query the tracking data
 
 ## Requirements
 
 - Git repository with an origin remote configured
-- Git hooks must be installed via `./init.sh`
+- Git hooks must be installed via `init.py`

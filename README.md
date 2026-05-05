@@ -16,15 +16,15 @@ Tracybot consists of three components that work together:
 ```
 ┌───────────────────┐     ┌──────────────────┐     ┌────────────────────┐
 │  opencode-plugin  │────▶│  tracking/hooks  │◀────│  vscode-extension  │
-│  (snapshots AI)   │     │     tracy.sh     │     │  (displays blame)  │
+│  (snapshots AI)   │     │     tracy.py     │     │  (displays blame)  │
 │  (interactions)   │     │  (stores state)  │     │                    │
 └───────────────────┘     └──────────────────┘     └────────────────────┘
 ```
 
 ### How Components Communicate
 
-1. **opencode-plugin** invokes **`tracy.sh`** (from `tracking/`) after each AI interaction to create a snapshot
-2. **`tracy.sh`** stores snapshots as hidden commits in the Git repository (using `refs/tracy-local/*` namespace)
+1. **opencode-plugin** invokes **`tracy.py`** (from `tracking/`) after each AI interaction to create a snapshot
+2. **`tracy.py`** stores snapshots as hidden commits in the Git repository (using `refs/tracy-local/*` namespace)
 3. **vscode-extension** queries Git to build a history timeline and displays blame information in VS Code
 
 ## Quick Getting Started
@@ -33,7 +33,7 @@ Tracybot consists of three components that work together:
 
 ```bash
 cd your-target-repository
-/path/to/tracybot/init.sh
+python /path/to/tracybot/init.py
 ```
 
 This requires:
