@@ -8,8 +8,8 @@ The plugin intercepts AI responses and invokes the Tracy tracking system to crea
 
 ## How It Works
 
-1. After each AI response, the plugin calls `tracy.sh` from the tracking component
-2. `tracy.sh` creates a hidden commit using Git's ref namespace (`refs/tracy-local/*`)
+1. After each AI response, the plugin calls `tracy.py` from the tracking component
+2. `tracy.py` creates a hidden commit using Git's ref namespace (`refs/tracy-local/*`)
 3. These commits are never visible in normal Git history but can be queried by the VS Code extension
 
 ## Usage
@@ -31,4 +31,4 @@ bun run index.ts
 ## Requirements
 
 - Bun runtime
-- A repository initialized with `./init.sh` (from the Tracybot root)
+- A repository initialized with `init.py` (from the Tracybot root)

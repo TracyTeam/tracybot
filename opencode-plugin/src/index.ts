@@ -223,7 +223,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                     await L.info(`Tool count for session ${idleSessionId}: ${toolCount}`)
 
                     if (toolCount === 0) {
-                        await L.info("No tool activity → skipping tracy.sh")
+                        await L.info("No tool activity → skipping tracy.py")
                         return
                     }
 
