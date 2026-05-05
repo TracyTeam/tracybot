@@ -42,17 +42,17 @@ export function getBlameViewHtml(
     lineToTaskletId[String(line)] = id;
   }
 
-  const linesJson       = JSON.stringify(fileContent.split('\n'));
-  const lineMapJson     = JSON.stringify(lineToTaskletId);
-  const taskletsJson    = JSON.stringify(tasklets);
-  const fileNameJson    = JSON.stringify(fileName);
+  const linesJson = JSON.stringify(fileContent.split('\n'));
+  const lineMapJson = JSON.stringify(lineToTaskletId);
+  const taskletsJson = JSON.stringify(tasklets);
+  const fileNameJson = JSON.stringify(fileName);
   const initialLineJson = JSON.stringify(initialLine ?? null);
 
   const mediaUri = (file: string) =>
     webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', file));
 
   const cssUri = mediaUri('blameView.css');
-  const jsUri  = mediaUri('blameView.js');
+  const jsUri = mediaUri('blameView.js');
 
   return /* html */`<!DOCTYPE html>
 <html lang="en">
@@ -107,15 +107,19 @@ export function getBlameViewHtml(
 
 <script>
   // global constants for the webview script; these are populated by the server based on the file being viewed and the blame data we have for it
-  const LINES        = ${linesJson};
-  const LINE_MAP     = ${lineMapJson};
-  const TASKLETS     = ${taskletsJson};
-  const FILE_NAME    = ${fileNameJson};
-  const INITIAL_LINE = ${initialLineJson};
+  const LINES        = ${escapeScriptTag(linesJson)};
+  const LINE_MAP     = ${escapeScriptTag(lineMapJson)};
+  const TASKLETS     = ${escapeScriptTag(taskletsJson)};
+  const FILE_NAME    = ${escapeScriptTag(fileNameJson)};
+  const INITIAL_LINE = ${escapeScriptTag(initialLineJson)};
 </script>
 <script src="${jsUri}"></script>
 </body>
 </html>`;
+}
+
+function escapeScriptTag(json: string): string {
+  return json.replace(/<\/script/g, '<\\/script');
 }
 
 // Server-side HTML escaper; esc() in the webview script is its browser-side counterpart
