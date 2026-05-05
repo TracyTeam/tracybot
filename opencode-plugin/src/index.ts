@@ -18,7 +18,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             return null
         }
     }
-
+    await L.info("DEBUG directory", { directory })
     const repoRoot = await getRepoRoot()
     if (!repoRoot) {
         await L.error("Not a git repo")
@@ -69,11 +69,23 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         if (!(await configFile.exists())) return // no env and no config = bye
 
         // cannot use dotenv, so enjoy this handrolled env parsing
-        const text = await configFile.text()
-        for (const line of text.split("\n")) {
-            const match = line.match(/^([^=]+)=(.*)$/)
-            if (match && match[1] && match[2]) {
-                process.env[match[1].trim()] = match[2].trim()
+        const text = await configFile.text();
+        // Remove UTF-8 BOM (safeguard for cross-platform edge cases)
+        const cleanedText = text.replace(/^\uFEFF/, '');
+        for (const line of cleanedText.split("\n")) {
+            const trimmedLine = line.trim();
+            // Skip empty lines and comments (matches Python hook parsing)
+            if (!trimmedLine || trimmedLine.startsWith("#")) continue;
+
+            // Split on FIRST = only (avoids issues with edge cases)
+            const eqIndex = trimmedLine.indexOf("=");
+            if (eqIndex === -1) continue;
+
+            const key = trimmedLine.substring(0, eqIndex).trim();
+            const value = trimmedLine.substring(eqIndex + 1).trim();
+
+            if (key && value !== undefined) {
+                process.env[key] = value.replace(/\r/g, '');
             }
         }
 
@@ -84,7 +96,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
     const isInstalled = tracyPath ? await Bun.file(tracyPath).exists() : false
 
     if (!isInstalled || !tracyPath) {
-        await L.error("tracy.sh not found")
+        await L.error("tracy.py not found")
         return {} // No-op
     }
 
@@ -93,6 +105,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
     let sessions = new Set<string>()
     const snapshotLocks = new Map<string, Promise<void>>()
+    const taskletToolCounter = new Map<string, number>()
 
     const sessionQuestions = new Map<string, Question[]>()
     const pendingQuestionsIndices = new Map<string, string[]>()
@@ -164,6 +177,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                 const sessionId = event.properties.info.id
                 if (sessionId) {
                     sessions.add(sessionId)
+                    taskletToolCounter.set(sessionId, 0)
                 }
                 return
             }
@@ -182,6 +196,15 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                 snapshotLocks.delete(idleSessionId)
 
                 if (sessions.has(idleSessionId)) {
+
+                    const toolCount = taskletToolCounter.get(idleSessionId) ?? 0
+                    await L.info(`Tool count for session ${idleSessionId}: ${toolCount}`)
+
+                    if (toolCount === 0) {
+                        await L.info("No tool activity → skipping tracy.sh")
+                        return
+                    }
+
                     const tasklet = await createTasklet(idleSessionId) // TODO: CACHE THIS PLEASE FOR THE LOVE OF GOD // No :)
 
                     if (!tasklet) {
@@ -189,14 +212,23 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                         return
                     }
 
-                    const output = await $`${tracyPath} --user-name "opencode" --user-email "opencode" --description ${JSON.stringify(tasklet)} --session-id "${tasklet.sessionId}" `.cwd(repoRoot).text()
-                    await L.info(`committed OC changes. tracy.sh: ${output.trim()}`, { tasklet })
+                    const output = await $`python ${tracyPath} --user-name "opencode" --user-email "opencode" --description ${JSON.stringify(tasklet)} --session-id "${tasklet.sessionId}" `.cwd(repoRoot).text()
+                    await L.info(`committed OC changes. tracy.py: ${output.trim()}`, { tasklet })
+
+                    taskletToolCounter.set(idleSessionId, 0)
                 }
                 return
             }
         },
 
         "tool.execute.before": async (input, output) => {
+
+            const sessionId = input.sessionID
+            if (sessionId) {
+                const current = taskletToolCounter.get(sessionId) ?? 0
+                taskletToolCounter.set(sessionId, current + 1)
+            }
+
             // Edit tool -> create user snapshot before the file is edited
             if (EDIT_TOOLS.has(input.tool)) {
                 const sessionId = input.sessionID
@@ -204,18 +236,27 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
                 const path = output.args.filePath as string | undefined
                 if (!path) {
-                    await L.warn(`skill issue: missing pth in tool.execute.before hook`, { input, output })
+                    await L.warn(`skill issue: missing path in tool.execute.before hook`, { input, output })
                 }
 
                 if (!snapshotLocks.has(sessionId)) {
                     const lockPromise = (async () => {
-                        try {
-                            const output = await $`${tracyPath}`.cwd(repoRoot).text() // user snapshot
-                            await L.info(`created user snapshot for ${path}. tracy.sh: ${output.trim()}`)
+                        const result = await $`python "${tracyPath}"`
+                            .cwd(repoRoot)
+                            .quiet()
+
+                        if (result.exitCode !== 0) {
+                            await L.error("Python failed", {
+                                stdout: result.stdout.toString(),
+                                stderr: result.stderr.toString(),
+                                exitCode: result.exitCode
+                            })
+                            return
                         }
-                        catch (e: any) {
-                            await L.error(`skill issue: ${e}`)
-                        }
+
+                        await L.info(
+                            `created user snapshot for ${path}. tracy.py: ${result.stdout.toString().trim()}`
+                        )
                     })()
 
                     snapshotLocks.set(sessionId, lockPromise)

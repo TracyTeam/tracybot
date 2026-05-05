@@ -1,0 +1,221 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:            var(--vscode-editor-background);
+  --surface:       var(--vscode-sideBar-background, var(--vscode-editorGroupHeader-tabsBackground, var(--vscode-editor-background)));
+  --border:        var(--vscode-panel-border, var(--vscode-editorGroup-border, rgba(128,128,128,0.35)));
+  --text:          var(--vscode-editor-foreground);
+  --text-dim:      var(--vscode-descriptionForeground);
+  --text-bright:   var(--vscode-foreground);
+  --accent:        #8040ff;
+  --accent-dim:    rgba(128, 0, 255, 0.18);
+  --accent-glow:   rgba(128, 0, 255, 0.55);
+  --selected-bg:   rgba(128, 0, 255, 0.55);
+  --unselected-bg: rgba(128, 0, 255, 0.18);
+  --line-num:      var(--vscode-editorLineNumber-foreground);
+  --font-mono:     var(--vscode-editor-font-family);
+  --font-ui:       var(--vscode-font-family);
+  --radius:        6px;
+}
+
+/* Let hljs token colours show through without overriding our background */
+.hljs { background: transparent !important; padding: 0 !important; }
+
+html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--font-ui); overflow: hidden; }
+
+/* ── Root layout ── */
+#root { display: flex; flex-direction: column; height: 100vh; }
+
+#header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+#header .icon     { width: 18px; height: 18px; opacity: .7; }
+#header .filename { font-family: var(--font-mono); font-size: var(--vscode-editor-font-size, 12px); color: var(--text-bright); letter-spacing: .02em; }
+#header .badge    {
+  margin-left: auto; font-size: 10px; padding: 2px 8px; border-radius: 20px;
+  background: var(--accent-dim); color: var(--accent); border: 1px solid var(--accent);
+  letter-spacing: .06em; text-transform: uppercase;
+}
+
+#panels { display: flex; flex: 1; overflow: hidden; }
+
+/* ── Left: file panel ── */
+#file-panel   { flex: 1 1 55%; display: flex; flex-direction: column; border-right: 1px solid var(--border); overflow: hidden; }
+#file-scroll  { flex: 1; overflow-y: auto; overflow-x: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+#file-scroll::-webkit-scrollbar       { width: 6px; height: 6px; }
+#file-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+table.code-table { min-width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: var(--vscode-editor-font-size, 12.5px); line-height: 1.65; table-layout: fixed; }
+col.col-num  { width: 52px; }
+tr { transition: background 80ms ease; }
+td.line-num  { width: 52px; min-width: 52px; text-align: right; padding: 0 12px 0 0; color: var(--line-num); user-select: none; vertical-align: top; font-size: 11px; }
+td.line-code { padding: 0 16px 0 8px; white-space: pre; color: var(--text); overflow: hidden; }
+
+tr.ai-line td              { background: var(--unselected-bg); }
+tr.ai-line td.line-num     { color: var(--accent); opacity: .7; }
+tr.ai-line                 { cursor: pointer; }
+tr.ai-line:hover td        { background: rgba(128,0,255,.28); }
+tr.ai-selected td          { background: var(--selected-bg) !important; }
+tr.ai-selected td.line-num { color: var(--accent); opacity: 1; }
+
+/* ── Right: prompt panel ── */
+#prompt-panel   { flex: 1 1 45%; display: flex; flex-direction: column; overflow: hidden; min-width: 280px; }
+#prompt-header  { padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 11px; color: var(--text-dim); letter-spacing: .08em; text-transform: uppercase; flex-shrink: 0; }
+#prompt-content { flex: 1; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+#prompt-content::-webkit-scrollbar       { width: 6px; }
+#prompt-content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* ── Blank state ── */
+#blank-state           { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: var(--text-dim); user-select: none; }
+#blank-state .hint-icon { width: 40px; height: 40px; opacity: .25; }
+#blank-state p          { font-size: 12px; letter-spacing: .04em; }
+
+/* ── Tasklet card ── */
+.tasklet-card { padding: 16px 20px 0; animation: fadeSlide .18s ease both; }
+
+@keyframes fadeSlide {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Single header row: [title] [model pill] [line-count pill] →→ [button] */
+.card-nav {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 6px;
+  min-width: 0;
+  margin-bottom: 12px;
+}
+
+.card-title {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-bright);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1 1 0;
+}
+
+.meta-pill {
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  letter-spacing: .04em;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.meta-pill.accent { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+
+.menu-btn {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  background: transparent;
+  color: var(--text-dim);
+  letter-spacing: .04em;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-left: auto;
+  transition: border-color 120ms, color 120ms, background 120ms;
+}
+.menu-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+
+/* ── Section label ── */
+.section-label { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 8px; }
+
+/* ── Message boxes ── */
+.messages-section { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+
+.message-box {
+  background-color: var(--vscode-textBlockQuote-background, rgba(255,255,255,0.05));
+  padding: 12px 16px;
+  border-radius: var(--radius);
+  word-break: break-word;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text);
+}
+.message-box.prompt   { border-left:  4px solid transparent; }
+.message-box.response { border-right: 4px solid transparent; }
+.message-box.build { border-color: var(--vscode-charts-blue,   #3794ff); }
+.message-box.plan  { border-color: var(--vscode-charts-orange, #e8a24a); }
+
+.message-label {
+  font-size: 9px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.message-label.build { color: var(--vscode-charts-blue,   #3794ff); }
+.message-label.plan  { color: var(--vscode-charts-orange, #e8a24a); }
+
+.message-box p                  { margin: 0 0 8px; }
+.message-box p:last-child       { margin-bottom: 0; }
+.message-box code               { font-family: var(--font-mono); font-size: 11.5px; background: var(--vscode-textCodeBlock-background, rgba(255,255,255,0.08)); padding: 1px 5px; border-radius: 3px; }
+.message-box pre                { background: var(--vscode-textCodeBlock-background, rgba(255,255,255,0.06)); padding: 10px 12px; border-radius: 4px; overflow-x: auto; margin: 8px 0; }
+.message-box pre code           { background: none; padding: 0; }
+.message-box ul, .message-box ol { padding-left: 20px; margin: 6px 0; }
+
+.questions-section { margin-top: 12px; }
+.question-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+.question-item:last-child { margin-bottom: 0; }
+.question-header {
+  font-size: 10px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+.question-text {
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+/* ── Chunk chips ── */
+.lines-section { margin-bottom: 24px; }
+.lines-chips   { display: flex; flex-wrap: wrap; gap: 4px; }
+
+.line-chip {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  border: 1px solid rgba(128,0,255,.3);
+  cursor: pointer;
+  transition: background 100ms;
+  user-select: none;
+}
+.line-chip:hover { background: var(--accent-glow); color: #fff; }
+
+/* ── Tasklet menu view ── */
+.tasklet-menu { padding: 20px 20px 0; animation: fadeSlide .18s ease both; }
+.menu-title   { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 12px; }
+
+.tasklet-list    { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 2px; }
+.tasklet-list li { padding: 8px 12px; border-radius: var(--radius); cursor: pointer; font-size: 13px; color: var(--text); border: 1px solid transparent; transition: background 100ms, border-color 100ms; }
+.tasklet-list li:hover { background: var(--accent-dim); border-color: rgba(128,0,255,.25); color: var(--text-bright); }
+
+/* ── Resize handle ── */
+#resize-handle { width: 4px; cursor: col-resize; background: var(--border); flex-shrink: 0; transition: background 150ms; }
+#resize-handle:hover, #resize-handle.dragging { background: var(--accent); }

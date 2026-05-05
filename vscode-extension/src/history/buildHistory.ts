@@ -278,10 +278,29 @@ async function extractSnapshot(
         linesAtSnapshot
       );
 
-      if (lines.length > 0) {
+      const userDiffMap = await getDiff(
+        repoPath,
+        snapshot.treeHash,
+        targetTree,
+        filePath
+      );
+
+      const userHunks = userDiffMap.get(filePath) || [];
+
+      const filteredLines = lines.filter((line) => {
+        return !userHunks.some((hunk) => {
+          return (
+            hunk.oldCount > 0 && // ignore pure insertions
+            line >= hunk.oldStart &&
+            line < hunk.oldStart + hunk.oldCount
+          );
+        });
+      });
+
+      if (filteredLines.length > 0) {
         return {
           filePath,
-          lines,
+          lines: filteredLines,
           model: snapshot.authorName,
           name: title,
           tasklet_messages: messages,
@@ -576,7 +595,7 @@ export async function buildHistory(repoPath: string | undefined): Promise<Histor
 
     // Build committed AI changes first
     const committedChanges = await buildCommittedHistory(repoPath, mainCommits);
-    // Build committed AI changes
+    // Build uncommitted AI changes
     const { uncommittedChanges, lastTracyTip } = await buildUncommittedChanges(repoPath, headTree);
     // Align committed changes to lastTracyTip
     let alignedCommitted = committedChanges;
