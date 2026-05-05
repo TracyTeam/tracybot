@@ -3,9 +3,25 @@ import pLimit from 'p-limit';
 import { spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
+import { bleu } from 'bleu-score';
 import { Change, CommitInfo, DiffHunk, History } from "./history/types";
 
+const SIMILARITY_THRESHOLD = 0.75;
 const PROCESS_LIMIT = pLimit(5);
+
+export { SIMILARITY_THRESHOLD };
+
+function tokenizeHunk(text: string) {
+  const clean = text
+    .split('\n')
+    .map(line => /^[+\- ]/.test(line) ? line.slice(1) : line)
+    .join('\n');
+
+  const tokens = clean.match(/[a-zA-Z0-9_]+|[^\w\s]/g) || [];
+
+  // trick the default tokenizer by injecting our tokens space-separated
+  return tokens.join(' ');
+}
 
 export async function runGit(repoPath: string, args: string[]): Promise<string> {
   return PROCESS_LIMIT(() => {
@@ -42,15 +58,15 @@ export async function getTracyRefCommit(repoPath: string, tracyId: string): Prom
 }
 
 // Returns a map of all files that changed between two trees
-// Gonna be honest, completely vibed, hunks hurt my brain
+// Computes per-hunk significance using BLEU similarity
 export async function getDiff(
-  repoPath: string, 
-  fromTree: string, 
-  toTree: string | "WORKING_TREE", 
+  repoPath: string,
+  fromTree: string,
+  toTree: string | "WORKING_TREE",
   filePath?: string
 ): Promise<Map<string, DiffHunk[]>> {
   const args = ["diff", "--no-color", "--unified=0"];
-  
+
   if (toTree === "WORKING_DIR") {
     args.push(fromTree);
   } else {
@@ -60,7 +76,7 @@ export async function getDiff(
   if (filePath) {
     args.push("--", filePath);
   }
-  
+
   const output = await runGit(repoPath, args);
   const fileChanges = new Map<string, DiffHunk[]>();
 
@@ -69,40 +85,96 @@ export async function getDiff(
   }
 
   let currentFile = "";
-  for (const line of output.split("\n")) {
-    if (line.startsWith("diff --git a/")) {
-      // Example: "diff --git a/src/helpers.ts b/src/helpers.ts"
-      // Group 1: Source file path (src/helpers.ts)
-      // Group 2: Target file path (src/helpers.ts)
-      const match = line.match(/^diff --git a\/(.*?) b\/(.*)$/);
+  let currentHunk: DiffHunk | null = null;
+  let oldHunkLines: string[] = [];
+  let newHunkLines: string[] = [];
 
+  const lines = output.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (line.startsWith("diff --git a/")) {
+      // Save previous hunk if exists
+      if (currentHunk && currentFile) {
+        currentHunk.isSignificant = computeHunkSignificance(oldHunkLines, newHunkLines);
+        fileChanges.get(currentFile)!.push(currentHunk);
+      }
+
+      currentHunk = null;
+      oldHunkLines = [];
+      newHunkLines = [];
+
+      const match = line.match(/^diff --git a\/(.*?) b\/(.*)$/);
       if (match) {
         currentFile = match[2];
-
         if (!fileChanges.has(currentFile)) {
           fileChanges.set(currentFile, []);
         }
       }
     } else if (line.startsWith("@@ ") && currentFile) {
-      // Example: "@@ -10,4 +10,6 @@"
-      // Group 1: Old file start line (10)
-      // Group 2: Old file line count (4) - defaults to 1 if missing
-      // Group 3: New file start line (10)
-      // Group 4: New file line count (6) - defaults to 1 if missing
-      const match = line.match(/^@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?/);
+      // Save previous hunk if exists
+      if (currentHunk) {
+        currentHunk.isSignificant = computeHunkSignificance(oldHunkLines, newHunkLines);
+        fileChanges.get(currentFile)!.push(currentHunk);
+      }
 
+      const match = line.match(/^@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?/);
       if (match) {
-        fileChanges.get(currentFile)!.push({
+        currentHunk = {
           oldStart: parseInt(match[1], 10),
           oldCount: match[2] !== undefined ? parseInt(match[2], 10) : 1,
           newStart: parseInt(match[3], 10),
           newCount: match[4] !== undefined ? parseInt(match[4], 10) : 1,
-        });
+        };
+        oldHunkLines = [];
+        newHunkLines = [];
+      }
+    } else if (currentHunk) {
+      // Collect hunk content lines (excluding lines starting with '\\' which indicate no newline)
+      if (line.startsWith("-")) {
+        oldHunkLines.push(line.substring(1));
+      } else if (line.startsWith("+")) {
+        newHunkLines.push(line.substring(1));
+      } else if (line.startsWith(" ") || line.startsWith("\\")) {
+        // Context lines (shouldn't be many with unified=0) or no-newline markers
+        oldHunkLines.push(line.substring(1));
+        newHunkLines.push(line.substring(1));
       }
     }
   }
 
+  // Don't forget the last hunk
+  if (currentHunk && currentFile) {
+    currentHunk.isSignificant = computeHunkSignificance(oldHunkLines, newHunkLines);
+    fileChanges.get(currentFile)!.push(currentHunk);
+  }
+
+  console.log(`getDiff(${filePath}): \n${JSON.stringify(fileChanges)}\n${output}`);
   return fileChanges;
+}
+
+// Compute significance of a hunk by comparing old and new content using BLEU
+function computeHunkSignificance(oldLines: string[], newLines: string[]): boolean {
+  if (oldLines.length === 0 && newLines.length === 0) {
+    return false;
+  }
+
+  const oldContent = oldLines.join("\n");
+  const newContent = newLines.join("\n");
+
+  // If only additions (oldCount would be 0), it's significant
+  if (oldLines.length === 0) {
+    return true;
+  }
+
+  // If only deletions (newCount would be 0), it's significant
+  if (newLines.length === 0) {
+    return true;
+  }
+
+  const score = bleu(tokenizeHunk(oldContent), tokenizeHunk(newContent), 4);
+  console.log(`similarity: ${score}\noldLines: \n${oldContent}\nnewLines: \n${newContent}\n\n`);
+  return score <= SIMILARITY_THRESHOLD;
 }
 
 export async function getChangedLines(repoPath: string, fromTree: string, toTree: string, filePath: string): Promise<number[]> {
@@ -183,7 +255,7 @@ export async function mapLinesToTree(
         }
 
         mapped = true;
-        
+
         break;
       }
 
@@ -299,13 +371,13 @@ export function getContiguousChunks(lines: number[]): number[][] {
 export async function getRepoPath(): Promise<string | undefined> {
   // Get the built-in git extension
   const gitExtension = vscode.extensions.getExtension('vscode.git')?.exports;
-  if (!gitExtension) { 
-    return undefined; 
+  if (!gitExtension) {
+    return undefined;
   }
 
   const git = gitExtension.getAPI(1);
-  if (!git) { 
-    return undefined; 
+  if (!git) {
+    return undefined;
   }
 
   // If there's only one repo, return it directly
@@ -320,8 +392,8 @@ export async function getRepoPath(): Promise<string | undefined> {
       activeEditor.document.uri.fsPath.startsWith(r.rootUri.fsPath)
     );
 
-    if (repo) { 
-      return repo.rootUri.fsPath; 
+    if (repo) {
+      return repo.rootUri.fsPath;
     }
   }
 

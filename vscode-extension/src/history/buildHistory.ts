@@ -2,7 +2,6 @@ import { Change, CommitInfo, DiffHunk, History, TaskletMessage } from "./types";
 import {
   getActiveHiddenCommit,
   getActiveTracyId,
-  getChangedLines,
   getCommitTree,
   getDiff,
   getTracyRefCommit,
@@ -259,7 +258,17 @@ async function extractSnapshot(
   const fileChangesMap = await getDiff(repoPath, diffFromTree, snapshot.treeHash);
   const fileResults = await Promise.all(
     Array.from(fileChangesMap.keys()).map(async (filePath) => {
-      const linesAtSnapshot = await getChangedLines(repoPath, diffFromTree, snapshot.treeHash, filePath);
+      const hunks = fileChangesMap.get(filePath) || [];
+
+      // Only include lines from significant hunks
+      // This handles User->AI: if AI made insignificant changes, don't attribute those lines to AI
+      const significantHunks = hunks.filter(h => h.isSignificant);
+      const linesAtSnapshot: number[] = [];
+      for (const hunk of significantHunks) {
+        for (let i = 0; i < hunk.newCount; i++) {
+          linesAtSnapshot.push(hunk.newStart + i);
+        }
+      }
 
       const lines = await mapLinesToTree(
         repoPath,
@@ -416,43 +425,54 @@ async function buildUncommittedChanges(
   return { uncommittedChanges: chainChanges.flat(), lastTracyTip };
 }
 
-// Drops lines that fall inside a modified or deleted hunk, shifts lines that are before one
+// Drops lines that fall inside a significant modified or deleted hunk
+// Insignificant hunks preserve AI attribution - ALL new lines from the hunk are kept
 // Pure insertions (oldCount = 0) never consume old lines, only shift subsequent ones
 function consumeAndShift(lines: number[], hunks: DiffHunk[]): number[] {
-  const survivingLines: number[] = [];
+  const survivingLines = new Set<number>();
+  const processedInsignificantHunks = new Set<DiffHunk>();
 
-  for (const line of [...lines].sort((a, b) => a - b)) {
-    let currentShift = 0;
-    let mapped = false;
+  const sortedLines = [...lines].sort((a, b) => a - b);
+  const sortedHunks = [...hunks].sort((a, b) => a.oldStart - b.oldStart);
 
-    for (const hunk of hunks) {
-      // Pure insertions (oldCount === 0) have no old-space range to consume
-      // Their effective start for ordering purposes is oldStart + 1
-      const effectiveOldStart = hunk.oldCount === 0 ? hunk.oldStart + 1 : hunk.oldStart;
-
-      if (line < effectiveOldStart) {
-        survivingLines.push(line + currentShift);
-        mapped = true;
-
-        break;
-      }
-
-      // Line falls inside a user modified or user deleted region
+  for (const line of sortedLines) {
+    // Find if line falls inside any hunk
+    let containingHunk: DiffHunk | null = null;
+    for (const hunk of sortedHunks) {
       if (hunk.oldCount > 0 && line >= hunk.oldStart && line < hunk.oldStart + hunk.oldCount) {
-        mapped = true;
-
+        containingHunk = hunk;
         break;
       }
-
-      currentShift += (hunk.newCount - hunk.oldCount);
     }
 
-    if (!mapped) {
-      survivingLines.push(line + currentShift);
+    if (containingHunk) {
+      if (containingHunk.isSignificant) {
+        // Significant hunk: consume the line (user override)
+        continue;
+      } else {
+        // Insignificant hunk: preserve AI attribution for ALL new lines in the hunk
+        // Only process each hunk once to avoid duplicates
+        if (!processedInsignificantHunks.has(containingHunk)) {
+          for (let i = 0; i < containingHunk.newCount; i++) {
+            survivingLines.add(containingHunk.newStart + i);
+          }
+          processedInsignificantHunks.add(containingHunk);
+        }
+        // The current line is "absorbed" - no need to add individually
+      }
+    } else {
+      // Line not in any hunk, apply shifts from all hunks before this line
+      let totalShift = 0;
+      for (const hunk of sortedHunks) {
+        const effectiveOldStart = hunk.oldCount === 0 ? hunk.oldStart + 1 : hunk.oldStart;
+        if (line < effectiveOldStart) { break; }
+        totalShift += (hunk.newCount - hunk.oldCount);
+      }
+      survivingLines.add(line + totalShift);
     }
   }
 
-  return survivingLines;
+  return Array.from(survivingLines).sort((a, b) => a - b);
 }
 
 // For each AI change, drop lines that fall inside a user-modified hunk
