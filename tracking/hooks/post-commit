@@ -1,16 +1,167 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Get the last commit
 USER_COMMIT=$(git rev-parse HEAD)
+SHORT_HASH=$(git rev-parse --short=8 HEAD)
+ORIGIN_COMMIT=$(git rev-parse --verify HEAD^ 2>/dev/null || true)
 
-# Retrieve and unset current tracy ID
 TRACY_ID=$(git config --get tracy.current-id || true)
-if [[ -n "$TRACY_ID" ]]; then
-    git notes add -f -m "tracy-id: $TRACY_ID" "$USER_COMMIT"
+if [[ -z "$TRACY_ID" ]]; then
+    exit 0
+fi
 
-    # If there are no unstaged changes left, we can clear the chain
+REF_LOCAL="refs/tracy-local/$TRACY_ID"
+FINAL_TRACY_ID="$TRACY_ID@$SHORT_HASH"
+REF_FINAL="refs/tracy/$FINAL_TRACY_ID"
+
+if ! git rev-parse --verify "$REF_LOCAL" >/dev/null 2>&1; then
+    exit 0
+fi
+
+# --root ensures root commits (no parent) list all their files rather than nothing
+FILES_IN_COMMIT=$(git diff-tree --root --no-commit-id -r --name-only "$USER_COMMIT" | sort | uniq)
+
+build_filtered_chain() {
+    local local_ref="$1"
+    local origin_commit="${2:-}"
+
+    # Walk only the hidden snapshot commits, not the full visible-branch history.
+    # After an amend the pre-amend HEAD is no longer on any branch, so
+    # --not --branches misses it.  ORIG_HEAD is set to that commit by git
+    # during git commit --amend, so we exclude it explicitly.
+    local orig_head
+    orig_head=$(git rev-parse ORIG_HEAD 2>/dev/null || true)
+    local commits
+    commits=$(git log --format="%H" "$local_ref" --not --branches --not --tags \
+        ${orig_head:+--not "$orig_head"} 2>/dev/null || true)
+    if [[ -z "$commits" ]]; then
+        return
+    fi
+    
+    local reversed=""
+    while IFS= read -r line; do
+        reversed="$line"$'\n'"$reversed"
+    done <<< "$commits"
+    reversed=${reversed%$'\n'}
+    
+    local previous_tree=""
+    local new_chain_head=""
+    
+    while IFS= read -r commit; do
+        [[ -z "$commit" ]] && continue
+
+        # User commits have a tracy-id note; hidden snapshot commits have none.
+        # After git commit --amend the pre-amend HEAD is reachable from the
+        # local ref but is no longer on any branch, so --not --branches above
+        # does not exclude it. Skipping noted commits here catches that case
+        # reliably regardless of how ORIG_HEAD is set.
+        if git notes show "$commit" >/dev/null 2>&1; then
+            continue
+        fi
+
+        local commit_tree
+        commit_tree=$(git rev-parse "$commit^{tree}" 2>/dev/null || true)
+
+        # --root handles root snapshot commits (no parent) correctly
+        local commit_files
+        commit_files=$(git diff-tree --root --no-commit-id -r --name-only "$commit" 2>/dev/null | sort || true)
+
+        if [[ -z "$commit_files" ]]; then
+            continue
+        fi
+        
+        local filtered_files=()
+        while IFS= read -r file; do
+            if echo "$FILES_IN_COMMIT" | grep -qx "$file"; then
+                filtered_files+=("$file")
+            fi
+        done <<< "$commit_files"
+        
+        if [[ ${#filtered_files[@]} -eq 0 ]]; then
+            continue
+        fi
+
+        local commit_msg
+        commit_msg=$(git log -1 --format="%s" "$commit" 2>/dev/null || echo "tracy snapshot")
+        local commit_desc=""
+        if git log -1 --format="%B" "$commit" 2>/dev/null | tail -n +2 | grep -q .; then
+            commit_desc=$(git log -1 --format="%B" "$commit" 2>/dev/null | tail -n +2)
+        fi
+
+        local TMP_INDEX REAL_INDEX
+        TMP_INDEX=$(mktemp)
+        REAL_INDEX="$(git rev-parse --git-dir)/index"
+        if [[ -f "$REAL_INDEX" ]]; then
+            cp "$REAL_INDEX" "$TMP_INDEX"
+        fi
+
+        export GIT_INDEX_FILE="$TMP_INDEX"
+        git rm -rf --cached . >/dev/null 2>&1 || true
+
+        for file in "${filtered_files[@]}"; do
+            local ls_out mode blob_hash
+
+            ls_out=$(git ls-tree "$commit_tree" -- "$file" 2>/dev/null || true)
+            if [[ -n "$ls_out" ]]; then
+                mode=$(printf '%s' "$ls_out" | awk '{print $1}')
+                blob_hash=$(printf '%s' "$ls_out" | awk '{print $3}')
+
+                git update-index --add --cacheinfo "$mode","$blob_hash","$file" 2>/dev/null || true
+            fi
+        done
+
+        local TREE
+        TREE=$(git write-tree 2>/dev/null || true)
+        rm -f "$TMP_INDEX"
+        unset GIT_INDEX_FILE
+        
+        if [[ -z "$TREE" ]] || [[ "$TREE" == "$previous_tree" ]]; then
+            continue
+        fi
+        previous_tree="$TREE"
+
+        local PARENT_FLAG=""
+        if [[ -n "$new_chain_head" ]]; then
+            PARENT_FLAG="-p $new_chain_head"
+        elif [[ -n "$origin_commit" ]]; then
+            PARENT_FLAG="-p $origin_commit"
+        fi
+
+        local author_name author_email
+        author_name=$(git log -1 --format="%an" "$commit" 2>/dev/null || echo "Tracybot")
+        author_email=$(git log -1 --format="%ae" "$commit" 2>/dev/null || echo "tracybot@local")
+
+        local new_commit
+        if [[ -n "$commit_desc" ]]; then
+            new_commit=$(GIT_AUTHOR_NAME="$author_name" GIT_AUTHOR_EMAIL="$author_email" \
+                GIT_COMMITTER_NAME="$author_name" GIT_COMMITTER_EMAIL="$author_email" \
+                git commit-tree "$TREE" $PARENT_FLAG -m "$commit_msg" -m "$commit_desc" 2>/dev/null || true)
+        else
+            new_commit=$(GIT_AUTHOR_NAME="$author_name" GIT_AUTHOR_EMAIL="$author_email" \
+                GIT_COMMITTER_NAME="$author_name" GIT_COMMITTER_EMAIL="$author_email" \
+                git commit-tree "$TREE" $PARENT_FLAG -m "$commit_msg" 2>/dev/null || true)
+        fi
+
+        if [[ -n "$new_commit" ]]; then
+            new_chain_head="$new_commit"
+        fi
+    done <<< "$reversed"
+    
+    if [[ -n "$new_chain_head" ]]; then
+        echo "$new_chain_head"
+    fi
+}
+
+FINAL_CHAIN=$(build_filtered_chain "$REF_LOCAL" "$ORIGIN_COMMIT")
+
+if [[ -n "$FINAL_CHAIN" ]]; then
+    git update-ref "$REF_FINAL" "$FINAL_CHAIN"
+    git config "tracy.$FINAL_TRACY_ID.hidden" "$FINAL_CHAIN"
+
+    git notes add -f -m "tracy-id: $FINAL_TRACY_ID" "$USER_COMMIT"
+
     if git diff --quiet; then
-        git config --unset tracy.current-id
+        git update-ref -d "$REF_LOCAL" 2>/dev/null || true
+        git config --unset tracy.current-id 2>/dev/null || true
     fi
 fi

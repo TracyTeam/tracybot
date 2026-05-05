@@ -1,10 +1,10 @@
 import { Change, CommitInfo, DiffHunk, History, TaskletMessage } from "./types";
 import {
-  getActiveHiddenCommit,
   getActiveTracyId,
   getChangedLines,
   getCommitTree,
   getDiff,
+  getTracyLocalRefCommit,
   getTracyRefCommit,
   groupChangesByFile,
   isAiChange,
@@ -65,11 +65,20 @@ async function getMainCommits(repoPath: string): Promise<CommitInfo[]> {
 async function getTracyIdNote(repoPath: string, commitHash: string): Promise<string | null> {
   try {
     const output = await runGit(repoPath, ["notes", "show", commitHash]);
-    const match = output.match(/tracy-id:\s*([a-f0-9-]+)/);
+    const match = output.match(/tracy-id:\s*([a-f0-9@-]+)/);
 
     return match ? match[1] : null;
   } catch {
     return null;
+  }
+}
+
+async function isOnAnyBranch(repoPath: string, hash: string): Promise<boolean> {
+  try {
+    const result = await runGit(repoPath, ["branch", "--contains", hash, "--no-color"]);
+    return result.trim().length > 0;
+  } catch {
+    return false;
   }
 }
 
@@ -137,8 +146,14 @@ async function getTracyChain(repoPath: string, startCommit: string): Promise<Com
         treeHash: treeHash
       });
 
-      // Check for multiple parents (merge commit)
-      // Merge commits have parents separated by space: "parent1 parent2 parent3"
+      // Stop traversal at commits reachable from refs/heads — those are origin
+      // commits that anchor the diff baseline, not part of the hidden chain.
+      const onBranch = await isOnAnyBranch(repoPath, hash);
+      if (onBranch) {
+        continue;
+      }
+
+      // Follow parents of hidden chain commits. Merge commits have space-separated parents.
       if (parentHash && parentHash.includes(" ")) {
         const allParents = parentHash.split(" ");
 
@@ -413,7 +428,8 @@ async function buildUncommittedChanges(
     return { uncommittedChanges: [], lastTracyTip: headTree };
   }
 
-  const activeHiddenTip = await getActiveHiddenCommit(repoPath, activeTracyId);
+  const activeHiddenTip = await getTracyLocalRefCommit(repoPath, activeTracyId);
+
   if (!activeHiddenTip) {
     return { uncommittedChanges: [], lastTracyTip: headTree };
   }

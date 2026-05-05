@@ -1,5 +1,3 @@
-
-#!/usr/bin/env python3
 import os
 import sys
 import subprocess
@@ -7,25 +5,29 @@ import tempfile
 import shutil
 import uuid
 
-REF_BASE = "refs/tracy"
+REF_BASE = "refs/tracy-local"
 USER_NAME = ""
 USER_EMAIL = ""
 DESCRIPTION = ""
 SESSION_ID = ""
 RESET_ID = False
 INDEX_ONLY = False
-DEBUG = True
+DEBUG = False
 
 
-def run_git(args, capture_output=False, check=False):
+def run_git(args, capture_output=False, check=False, cwd=None):
     try:
         result = subprocess.run(
             ["git"] + args,
             text=True,
-            capture_output=capture_output,
-            check=check
+            stdout=subprocess.PIPE if capture_output else None,
+            stderr=subprocess.DEVNULL,
+            check=check,
+            cwd=cwd
         )
-        return result.stdout.strip() if capture_output else result.returncode == 0
+        if capture_output:
+            return result.stdout.strip()
+        return result.returncode == 0
     except subprocess.CalledProcessError:
         return None if capture_output else False
 
@@ -58,7 +60,6 @@ while i < len(args):
         INDEX_ONLY = True
         i += 1
     else:
-        print(f"Unknown argument: {arg}")
         sys.exit(1)
 
 # -------------------------------
@@ -75,10 +76,10 @@ if not SESSION_ID:
 
 if not USER_NAME or not USER_EMAIL:
     if DEBUG:
-        print(f"Missing user info: NAME='{USER_NAME}', EMAIL='{USER_EMAIL}'")
-        print(f"Git config user.name: {run_git(['config', 'user.name'], capture_output=True, cwd=REPO_ROOT)}")
-        print(f"Git config user.email: {run_git(['config', 'user.email'], capture_output=True, cwd=REPO_ROOT)}")
-        print("Either both --user-name and --user-email are provided, or leave them empty.")
+        print(f"Missing user info: NAME='{USER_NAME}', EMAIL='{USER_EMAIL}'", file=sys.stderr)
+        print(f"Git config user.name: {run_git(['config', 'user.name'], capture_output=True, cwd=REPO_ROOT)}", file=sys.stderr)
+        print(f"Git config user.email: {run_git(['config', 'user.email'], capture_output=True, cwd=REPO_ROOT)}", file=sys.stderr)
+        print("Either both --user-name and --user-email are provided, or leave them empty.", file=sys.stderr)
     sys.exit(1)
 
 # -------------------------------
@@ -96,19 +97,19 @@ if INDEX_ONLY:
     if run_git(["rev-parse", "--verify", "HEAD"]):
         if run_git(["diff", "--cached", "--quiet"]):
             if DEBUG:
-                print("No staged changes detected. Skipping Tracy snapshot.")
+                print("No staged changes detected. Skipping Tracy snapshot.", file=sys.stderr)
             sys.exit(0)
     else:
         cached = run_git(["ls-files", "--cached"], capture_output=True)
         if not cached:
             if DEBUG:
-                print("No staged changes detected. Skipping Tracy snapshot.")
+                print("No staged changes detected. Skipping Tracy snapshot.", file=sys.stderr)
             sys.exit(0)
 else:
     status = run_git(["status", "--porcelain"], capture_output=True)
     if not status:
         if DEBUG:
-            print("No repository changes detected. Skipping Tracy snapshot.")
+            print("No repository changes detected. Skipping Tracy snapshot.", file=sys.stderr)
         sys.exit(0)
 
 # -------------------------------
@@ -122,7 +123,7 @@ if RESET_ID:
         run_git(["config", "--unset", f"tracy.{TRACY_ID}.hidden"])
 
     if DEBUG:
-        print("Tracy chain reset.")
+        print("Tracy chain reset.", file=sys.stderr)
 
     TRACY_ID = ""
 
@@ -131,12 +132,15 @@ if not TRACY_ID:
     run_git(["config", "tracy.current-id", TRACY_ID])
 
 REF = f"{REF_BASE}/{TRACY_ID}"
-
 # -------------------------------
 # TEMPORARY INDEX
 # -------------------------------
+
 if INDEX_ONLY:
     TREE = run_git(["write-tree"], capture_output=True)
+    if not TREE:
+        print("Error: write-tree failed for index", file=sys.stderr)
+        sys.exit(1)
 else:
     tmp_index = tempfile.NamedTemporaryFile(delete=False)
     tmp_index_path = tmp_index.name
@@ -156,20 +160,30 @@ else:
     os.remove(tmp_index_path)
     os.environ.pop("GIT_INDEX_FILE", None)
 
-# -------------------------------
-# CHECK FOR REDUNDANCY
-# -------------------------------
-LATEST_HIDDEN = run_git(["config", "--get", f"tracy.{TRACY_ID}.hidden"], capture_output=True) or ""
+    if not TREE:
+        print("Error: write-tree failed", file=sys.stderr)
+        sys.exit(1)
 
+# -------------------------------
+# CHECK FOR PARENT & REDUNDANCY
+# -------------------------------
+
+# Use --verify to check if ref exists
+if run_git(["rev-parse", "--verify", REF]):
+    LATEST_HIDDEN = run_git(["rev-parse", REF], capture_output=True)
+else:
+    LATEST_HIDDEN = ""
+
+# Prevent creating identical, empty snapshots
 if LATEST_HIDDEN:
     latest_tree = run_git(["rev-parse", f"{LATEST_HIDDEN}^{{tree}}"], capture_output=True)
     if TREE == latest_tree:
         if DEBUG:
-            print("No changes since last tracy snapshot. Skipping.")
+            print("No changes since last tracy snapshot. Skipping.", file=sys.stderr)
         sys.exit(0)
 
 # -------------------------------
-# PARENT FLAG
+# CREATE COMMIT
 # -------------------------------
 parent_args = []
 if LATEST_HIDDEN:
@@ -177,9 +191,6 @@ if LATEST_HIDDEN:
 elif VISIBLE_HEAD != "initial":
     parent_args = ["-p", VISIBLE_HEAD]
 
-# -------------------------------
-# CREATE COMMIT
-# -------------------------------
 env = os.environ.copy()
 env.update({
     "GIT_AUTHOR_NAME": USER_NAME,
@@ -192,11 +203,12 @@ commit_cmd = ["git", "commit-tree", TREE] + parent_args + ["-m", SESSION_ID]
 if DESCRIPTION:
     commit_cmd += ["-m", DESCRIPTION]
 
-result = subprocess.run(commit_cmd, text=True, capture_output=True, env=env)
+result = subprocess.run(commit_cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env)
 COMMIT = result.stdout.strip()
 
-# Store hidden commit
-run_git(["config", f"tracy.{TRACY_ID}.hidden", COMMIT])
+if not COMMIT:
+    print(f"Error: commit-tree failed: {result.stderr.strip() or 'empty result'}", file=sys.stderr)
+    sys.exit(1)
 
 # -------------------------------
 # UPDATE REF
@@ -204,4 +216,4 @@ run_git(["config", f"tracy.{TRACY_ID}.hidden", COMMIT])
 run_git(["update-ref", REF, COMMIT])
 
 if DEBUG:
-    print(f"Committed to {REF} -> {COMMIT}")
+    print(f"Committed to {REF} -> {COMMIT}", file=sys.stderr)

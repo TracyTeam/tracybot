@@ -41,6 +41,15 @@ export async function getTracyRefCommit(repoPath: string, tracyId: string): Prom
   }
 }
 
+export async function getTracyLocalRefCommit(repoPath: string, tracyId: string): Promise<string | null> {
+  const refPath = path.join(repoPath, ".git", "refs", "tracy-local", tracyId);
+  try {
+    return fs.readFileSync(refPath, "utf-8").trim();
+  } catch {
+    return null;
+  }
+}
+
 // Returns a map of all files that changed between two trees
 // Gonna be honest, completely vibed, hunks hurt my brain
 export async function getDiff(
@@ -217,13 +226,6 @@ export async function getActiveTracyId(repoPath: string): Promise<string | null>
   }
 }
 
-export async function getActiveHiddenCommit(repoPath: string, tracyId: string): Promise<string | null> {
-  try {
-    return await runGit(repoPath, ["config", "--get", `tracy.${tracyId}.hidden`]);
-  } catch {
-    return null;
-  }
-}
 
 export async function getUserName(repoPath: string): Promise<string> {
   try {

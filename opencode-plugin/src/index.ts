@@ -58,20 +58,20 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
     }
 
     async function resolveTracyPath(repoRoot: string): Promise<string | undefined> {
-        // support passing from shell instead of file
-        if (process.env.TRACY_SCRIPT) {
-            return process.env.TRACY_SCRIPT
+        if (process.env.TRACY_SNAPSHOT_SCRIPT) {
+            return path.resolve(repoRoot, process.env.TRACY_SNAPSHOT_SCRIPT)
         }
 
         const configPath = path.join(repoRoot, ".git", "tracybot", "config")
         const configFile = Bun.file(configPath)
 
-        if (!(await configFile.exists())) return // no env and no config = bye
+        if (!(await configFile.exists())) return
 
         // cannot use dotenv, so enjoy this handrolled env parsing
         const text = await configFile.text();
         // Remove UTF-8 BOM (safeguard for cross-platform edge cases)
         const cleanedText = text.replace(/^\uFEFF/, '');
+
         for (const line of cleanedText.split("\n")) {
             const trimmedLine = line.trim();
             // Skip empty lines and comments (matches Python hook parsing)
@@ -89,7 +89,8 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             }
         }
 
-        return process.env.TRACY_SCRIPT
+        if (!process.env.TRACY_SNAPSHOT_SCRIPT) return
+        return path.resolve(repoRoot, process.env.TRACY_SNAPSHOT_SCRIPT)
     }
 
     const tracyPath = await resolveTracyPath(repoRoot)
@@ -102,6 +103,19 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
     await L.info("Plugin initialized", { repoRoot, tracyPath })
 
+    let pythonCmd;
+    if ((await $`python3 --version`.quiet()).exitCode === 0) {
+        pythonCmd = 'python3'
+        await L.info("Detected python command: python3")
+    } else {
+        if ((await $`python --version`.quiet()).exitCode === 0) {
+            pythonCmd = 'python'
+            await L.info("Detected python command: python")
+        } else {
+            await L.error("Neither python nor python3 is available")
+            return {}
+        }
+    }
 
     let sessions = new Set<string>()
     const snapshotLocks = new Map<string, Promise<void>>()
@@ -201,7 +215,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                     await L.info(`Tool count for session ${idleSessionId}: ${toolCount}`)
 
                     if (toolCount === 0) {
-                        await L.info("No tool activity → skipping tracy.sh")
+                        await L.info("No tool activity → skipping tracy.py")
                         return
                     }
 
@@ -212,7 +226,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                         return
                     }
 
-                    const output = await $`python ${tracyPath} --user-name "opencode" --user-email "opencode" --description ${JSON.stringify(tasklet)} --session-id "${tasklet.sessionId}" `.cwd(repoRoot).text()
+                    const output = await $`${pythonCmd} ${tracyPath} --user-name "opencode" --user-email "opencode" --description ${JSON.stringify(tasklet)} --session-id "${tasklet.sessionId}" `.cwd(repoRoot).text()
                     await L.info(`committed OC changes. tracy.py: ${output.trim()}`, { tasklet })
 
                     taskletToolCounter.set(idleSessionId, 0)
@@ -241,7 +255,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
                 if (!snapshotLocks.has(sessionId)) {
                     const lockPromise = (async () => {
-                        const result = await $`python "${tracyPath}"`
+                        const result = await $`${pythonCmd} "${tracyPath}"`
                             .cwd(repoRoot)
                             .quiet()
 
