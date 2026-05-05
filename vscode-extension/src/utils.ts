@@ -149,7 +149,6 @@ export async function getDiff(
     fileChanges.get(currentFile)!.push(currentHunk);
   }
 
-  console.log(`getDiff(${filePath}): \n${JSON.stringify(fileChanges)}\n${output}`);
   return fileChanges;
 }
 
@@ -173,7 +172,6 @@ function computeHunkSignificance(oldLines: string[], newLines: string[]): boolea
   }
 
   const score = bleu(tokenizeHunk(oldContent), tokenizeHunk(newContent), 4);
-  console.log(`similarity: ${score}\noldLines: \n${oldContent}\nnewLines: \n${newContent}\n\n`);
   return score <= SIMILARITY_THRESHOLD;
 }
 
