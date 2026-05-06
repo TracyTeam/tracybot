@@ -89,11 +89,11 @@ add_config_if_missing() {
 
 add_config_if_missing remote.origin.push "HEAD"
 add_config_if_missing remote.origin.push "refs/tracy/*:refs/tracy/*"
-add_config_if_missing remote.origin.push "refs/notes/commits:refs/notes/commits"
+add_config_if_missing remote.origin.push "refs/notes/*:refs/notes/*"
 
 add_config_if_missing remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
 add_config_if_missing remote.origin.fetch "+refs/tracy/*:refs/tracy/*"
-add_config_if_missing remote.origin.fetch "+refs/notes/commits:refs/notes/commits"
+add_config_if_missing remote.origin.fetch "+refs/notes/*:refs/notes/*"
 
 printf "+----------------------------------------------------+\n"
 printf "| [DONE] Git notes rewriting configured              |\n"
@@ -211,9 +211,9 @@ printf "you must re-run this initialization script, or manually reconfigure:\n\n
 
 printf "  git config --add remote.origin.push \"HEAD\"\n"
 printf "  git config --add remote.origin.push \"refs/tracy/*:refs/tracy/*\"\n"
-printf "  git config --add remote.origin.push \"refs/notes/commits:refs/notes/commits\"\n"
+printf "  git config --add remote.origin.push \"refs/notes/*:refs/notes/*\"\n"
 printf "  git config --add remote.origin.fetch \"+refs/heads/*:refs/remotes/origin/*\"\n"
 printf "  git config --add remote.origin.fetch \"+refs/tracy/*:refs/tracy/*\"\n"
-printf "  git config --add remote.origin.fetch \"+refs/notes/commits:refs/notes/commits\"\n"
+printf "  git config --add remote.origin.fetch \"+refs/notes/*:refs/notes/*\"\n"
 echo ""
 

@@ -5,20 +5,7 @@ import { readFileSync, rmSync, existsSync, mkdirSync, copyFileSync, readdirSync,
 import { join } from 'path'
 import { homedir } from 'os'
 
-const PLUGINS_DIR = {
-    linux: join(homedir(), '.config', 'opencode', 'plugin'),
-    darwin: join(homedir(), '.config', 'opencode', 'plugin'),
-    win32: join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'opencode', 'plugin')
-}
-
-function getPluginsDir() {
-    const dir = PLUGINS_DIR[process.platform]
-    if (!dir) {
-        console.error(`Unsupported platform: ${process.platform}`)
-        process.exit(1)
-    }
-    return dir
-}
+const PLUGINS_DIR = join(homedir(), '.config', 'opencode', 'plugin')
 
 function build() {
     console.log('Building plugin...')
@@ -32,7 +19,7 @@ function build() {
 }
 
 function install() {
-    const pluginsDir = getPluginsDir()
+    const pluginsDir = PLUGINS_DIR
     console.log(`Installing to ${pluginsDir}...`)
 
     const distDir = 'dist'
