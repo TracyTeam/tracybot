@@ -398,7 +398,9 @@ async function buildCommittedHistory(
       }
     }
 
-    commitHistoryCache.set(mainCommit.hash, accumulatedChanges);
+    if (accumulatedChanges.length > 0) {
+      commitHistoryCache.set(mainCommit.hash, accumulatedChanges);
+    }
   }
 
   return accumulatedChanges;
