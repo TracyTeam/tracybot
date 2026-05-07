@@ -59,6 +59,9 @@ while i < len(args):
     elif arg == "--index-only":
         INDEX_ONLY = True
         i += 1
+    elif arg == "--debug":
+        DEBUG = True
+        i += 1
     else:
         sys.exit(1)
 
