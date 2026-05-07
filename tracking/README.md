@@ -21,7 +21,7 @@ Invoked by the opencode-plugin after each AI interaction. It:
 
 ### Git Hooks
 
-`init.py` installs three hooks:
+`init.py` installs five hooks:
 
 - **`pre-commit`** — calls `tracy.py --index-only` to snapshot exactly what is staged before the commit lands
 - **`post-commit`** — promotes the local snapshot chain to `refs/tracy/<UUID>`, keeping only files that were actually in the commit; attaches a `tracy-id` note to the commit; cleans up the local ref
@@ -29,6 +29,8 @@ Invoked by the opencode-plugin after each AI interaction. It:
   - **amend**: combines the pre-amend chain with the newly created post-commit chain into one
   - **rebase** (one-to-one): recreates the chain under a fresh ID for the new commit SHA
   - **squash**: merges all chains from the squashed commits into a single chain
+- **`post-fetch`** — repairs `remote.origin.fetch` rules after any `git fetch` and re-fetches tracy refs; skips silently if no origin remote exists
+- **`pre-push`** — ensures push rules are configured before push; skips silently if no origin remote exists
 
 ## Usage
 
@@ -40,5 +42,5 @@ Typically, you don't run tracking components directly. Instead:
 
 ## Requirements
 
-- Git repository with an origin remote configured
+- Git repository (origin remote is optional — tracking works without it, but push/fetch sync is skipped)
 - Git hooks must be installed via `init.py`

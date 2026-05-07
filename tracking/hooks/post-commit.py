@@ -18,6 +18,8 @@ def run_git(args, capture=False, check=False, env=None):
             check=check,
             env=env
         )
+        if capture and result.returncode != 0:
+            return None
         return result.stdout.strip() if capture else result.returncode == 0
     except subprocess.CalledProcessError:
         return None if capture else False
