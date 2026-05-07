@@ -14,8 +14,8 @@
     "typescript": "^5"
   },
   "scripts": {
-    "build": "tsup src/index.ts --format esm --clean",
-    "dev": "tsup src/index.ts --format esm --clean --watch",
+    "build": "tsup",
+    "dev": "tsup --watch",
     "deploy": "bun scripts/deploy.js",
     "logs": "bun scripts/getLogs.js"
   }

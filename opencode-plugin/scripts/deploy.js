@@ -29,8 +29,8 @@ function install() {
         process.exit(1)
     }
 
-    const srcPath = join(distDir, 'index.js')
-    const destPath = join(pluginsDir, 'tracybot.js')
+    const srcPath = join(distDir, 'tracybot-oc.js')
+    const destPath = join(pluginsDir, 'tracybot-oc.js')
 
     if (existsSync(destPath)) {
         const stat = statSync(destPath)
