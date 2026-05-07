@@ -1,0 +1,24 @@
+name: Release
+on:
+  release:
+    types: [published]
+jobs:
+  package-vscode:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: vscode-extension
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: vscode-extension/package-lock.json
+      - run: npm i
+      - run: npm run compile
+      - run: npx vsce package
+      - name: Upload VSIX to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: vscode-extension/*.vsix
