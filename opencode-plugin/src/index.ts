@@ -25,38 +25,6 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         return {} // No-op
     }
 
-    async function getPlanOutputs(sessionId: string): Promise<PlanOutput[]> {
-        const response = await client.session.messages({
-            path: { id: sessionId }
-        })
-
-        const allMessages = response.data ?? []
-
-        const getTextFromParts = (parts: Part[] | undefined): string => {
-            if (!parts) return ""
-            return parts
-                .flatMap(part => part.type === "text" && part.text ? [part.text] : [])
-                .join("\n\n---\n\n")
-        }
-
-        return allMessages
-            .filter((message) => message.info.role === "user" && message.info.agent !== "build")
-            .map((userMsg, idx) => {
-                const assistantMsgs = allMessages.filter((message) =>
-                    message.info.role === "assistant" && message.info.parentID === userMsg.info.id)
-
-                return {
-                    id: `plan_${idx}`,
-                    prompt: getTextFromParts(userMsg.parts),
-                    response: assistantMsgs
-                        .map(msg => getTextFromParts(msg.parts))
-                        .filter(text => text)
-                        .join("\n\n---\n\n"),
-                }
-            })
-
-    }
-
     async function resolveTracyPath(repoRoot: string): Promise<string | undefined> {
         // support passing from shell instead of file
         if (process.env.TRACY_SCRIPT) {
@@ -106,17 +74,15 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
     let sessions = new Set<string>()
     const snapshotLocks = new Map<string, Promise<void>>()
     const taskletToolCounter = new Map<string, number>()
+    const lastBuildId = new Map<string, string>()
 
     const sessionQuestions = new Map<string, Question[]>()
     const pendingQuestionsIndices = new Map<string, string[]>()
 
     async function createTasklet(sessionId: string): Promise<Tasklet | undefined> {
-        const planOutputs = await getPlanOutputs(sessionId)
-
         const response = await client.session.messages({
             path: { id: sessionId }
         })
-
 
         const title = (await client.session.get({ path: { id: sessionId } }))
             .data?.title.trim()
@@ -130,23 +96,62 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                 .join("\n\n---\n\n")
         }
 
-        const storedQuestions = sessionQuestions.get(sessionId) ?? []
-        const finalPlanCount = planOutputs.length
-        await L.info(`Processing ${storedQuestions.length} stored questions, finalPlanCount: ${finalPlanCount}`, { storedQuestions })
-
-
         const buildUserMsg = [...allMessages].reverse().find(
             (message) => message.info.role === "user" && message.info.agent === "build"
         )
-
+        
         if (!buildUserMsg) {
+            await L.debug("No build user message found, skipping tasklet creation")
+            return
+        }
+        
+        const lastBuild = lastBuildId.get(sessionId)
+        if (buildUserMsg.info.id === lastBuild) {
+            await L.debug(`Build ${buildUserMsg.info.id} already processed, skipping`)
+            return
+        }
+        const currentBuildIndex = allMessages.indexOf(buildUserMsg)
+        if (currentBuildIndex === -1) {
+            await L.error("Current build message not found in allMessages")
             return
         }
 
+        let prevBuildIndex = -1
+        for (let i = currentBuildIndex - 1; i >= 0; i--) {
+            const msg = allMessages[i]
+            if (msg && msg.info.role === "user" && msg.info.agent === "build") {
+                prevBuildIndex = i
+                break
+            }
+        }  
+
+        const scopedPlanMessages = allMessages.slice(prevBuildIndex + 1, currentBuildIndex)
+        .filter(msg => msg.info.role === "user" && msg.info.agent !== "build")
+        
+        
+        const planOutputs: PlanOutput[] = scopedPlanMessages.map((userMsg, idx) => {
+            const assistantMsgs = allMessages.filter((message) =>
+                message.info.role === "assistant" && message.info.parentID === userMsg.info.id
+            )
+            return {
+                id: `plan_${idx}`,
+                prompt: getTextFromParts(userMsg.parts),
+                response: assistantMsgs
+                .map(message => getTextFromParts(message.parts))
+                .filter(text => text)
+                .join("\n\n---\n\n"),
+            }
+        })
+
+        const storedQuestions = sessionQuestions.get(sessionId) ?? []
+        const finalPlanCount = planOutputs.length
+        await L.info(`Processing ${storedQuestions.length} stored questions, finalPlanCount: ${finalPlanCount}`, { storedQuestions })
+        
         const buildAssistantMsgs = allMessages.filter(
             (message) => message.info.role === "assistant" &&
-                message.info.parentID === buildUserMsg.info.id
+            message.info.parentID === buildUserMsg.info.id
         )
+        
 
         const buildOutput: BuildOutput = {
             id: `build_${planOutputs.length}`,
@@ -167,6 +172,8 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         }
 
         await L.debug(`Created tasklet: ${tasklet.id}`, { tasklet })
+        
+        lastBuildId.set(sessionId, buildUserMsg.info.id)
         sessionQuestions.delete(sessionId)
         return tasklet
     }
@@ -186,6 +193,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                 const sessionId = event.properties.info.id
                 if (sessionId) {
                     sessions.delete(sessionId)
+                    lastBuildId.delete(sessionId)
                 }
                 return
             }
