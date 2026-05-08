@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execSync } from 'child_process'
-import { readFileSync, rmSync, existsSync, mkdirSync, copyFileSync, readdirSync, statSync } from 'fs'
+import { readFileSync, rmSync, existsSync, mkdirSync, copyFileSync, readdirSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 
@@ -23,24 +23,23 @@ function install() {
     console.log(`Installing to ${pluginsDir}...`)
 
     const distDir = 'dist'
+    const srcPath = join(distDir, 'tracybot-oc.js')
 
-    if (!existsSync(distDir)) {
-        console.error('✗ dist/ directory not found. Run build first.')
+    if (!existsSync(distDir) || !existsSync(srcPath)) {
+        console.error('✗ Built plugin not found. Run build first.')
         process.exit(1)
     }
 
-    const srcPath = join(distDir, 'tracybot-oc.js')
     const destPath = join(pluginsDir, 'tracybot-oc.js')
 
+    if (!existsSync(pluginsDir)) {
+        mkdirSync(pluginsDir)
+        console.log(`  Created plugins directory ${pluginsDir}`)
+    }
+
     if (existsSync(destPath)) {
-        const stat = statSync(destPath)
-        if (stat.isDirectory()) {
-            console.log(`  Removing existing directory ${destPath}`)
-            rmSync(destPath, { recursive: true, force: true })
-        } else {
-            console.log(`  Removing existing file ${destPath}`)
-            rmSync(destPath, { force: true })
-        }
+        console.log(`  Removing existing file ${destPath}`)
+        rmSync(destPath, { force: true })
     }
 
     console.log('  Copying files...')
