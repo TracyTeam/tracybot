@@ -34,7 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: vscode-extension
+        working-directory: opencode-plugin
 
     steps:
       - uses: actions/checkout@v4
