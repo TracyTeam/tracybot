@@ -43,11 +43,12 @@ async function getMainCommits(repoPath: string): Promise<CommitInfo[]> {
 
   const commits: CommitInfo[] = [];
   for (const record of output.split("\x00")) {
-    if (!record.trim()) {
+    const trimmed = record.trim();
+    if (!trimmed) {
       continue;
     }
 
-const parts = record.split(DELIMITER);
+    const parts = trimmed.split(DELIMITER);
     if (parts.length < 7) {
       console.warn(`Skipping malformed commit line: expected 7 fields, got ${parts.length}`);
       continue;
@@ -331,7 +332,6 @@ async function extractSnapshot(
       const filteredLines = lines.filter((line) => {
         return !userHunks.some((hunk) => {
           return (
-            hunk.oldCount > 0 && // ignore pure insertions
             line >= hunk.oldStart &&
             line < hunk.oldStart + hunk.oldCount
           );
