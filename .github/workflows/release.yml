@@ -4,10 +4,14 @@ on:
     types: [published]
 jobs:
   package-vscode:
+    permissions:
+      contents: write
+
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: vscode-extension
+
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -22,3 +26,28 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: vscode-extension/*.vsix
+
+  package-opencode:
+    permissions:
+      contents: write
+
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: opencode-plugin
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - run: bun install
+      - run: bun run build
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            opencode-plugin/dist/tracybot-oc.js

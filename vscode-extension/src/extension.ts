@@ -4,6 +4,7 @@ import { buildHistory, hydrateCache, getSerializedCache } from './history/buildH
 import { History, TaskletUI, LineMap, Change } from './history/types';
 import { getBlameViewHtml } from './blameView';
 import { getRepoPath } from './utils';
+import { checkOpencode } from './pluginCheck';
 
 // History data — populated asynchronously when the extension activates
 let history: History | undefined;
@@ -59,6 +60,8 @@ let statusBarItem: vscode.StatusBarItem;
 
 // Activate function
 export async function activate(context: vscode.ExtensionContext) {
+  checkOpencode(context);
+
   // Status bar button — always visible, click opens the blame panel
   statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
   statusBarItem.command = 'tracybot-extension.blameAI';
