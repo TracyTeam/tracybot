@@ -4,12 +4,12 @@ export default defineConfig({
     entry: {
         'tracybot-oc': 'src/index.ts',
     },
-    format: ['cjs'],
+    format: ['esm'],
     outDir: 'dist',
     clean: true,
     outExtension({ format }) {
         return {
             js: `.js`
         }
-    }
+    },
 });
