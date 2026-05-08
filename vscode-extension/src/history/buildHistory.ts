@@ -29,11 +29,12 @@ export function getSerializedCache(): Record<string, Change[]> {
 }
 
 async function getMainCommits(repoPath: string): Promise<CommitInfo[]> {
-  // Commit info in format: hash|email|name|subject|body|parent|tree
+  // %x00 terminates each record with a null byte so multi-line %b bodies
+  // don't split a commit across multiple lines when we iterate the output.
   const output = await runGit(repoPath, [
     "log",
     "--reverse",
-    `--format=%H${DELIMITER}%ae${DELIMITER}%an${DELIMITER}%s${DELIMITER}%b${DELIMITER}%P${DELIMITER}%T`,
+    `--format=%H${DELIMITER}%ae${DELIMITER}%an${DELIMITER}%s${DELIMITER}%b${DELIMITER}%P${DELIMITER}%T%x00`,
   ]);
 
   if (!output) {
@@ -41,12 +42,37 @@ async function getMainCommits(repoPath: string): Promise<CommitInfo[]> {
   }
 
   const commits: CommitInfo[] = [];
-  for (const line of output.split("\n")) {
-    if (!line) {
+  for (const record of output.split("\x00")) {
+    if (!record.trim()) {
       continue;
     }
 
-    const [hash, authorEmail, authorName, message, description, parentHash, treeHash] = line.split(DELIMITER);
+const parts = record.split(DELIMITER);
+    if (parts.length < 7) {
+      console.warn(`Skipping malformed commit line: expected 7 fields, got ${parts.length}`);
+      continue;
+    }
+
+    const [hash, authorEmail, authorName, message, description, parentHash, treeHash] = parts;
+
+    if (!treeHash) {
+      console.warn(`Missing treeHash for commit ${hash}, fetching directly`);
+      const fetchedTree = await getCommitTree(repoPath, hash);
+      if (!fetchedTree) {
+        console.warn(`Could not fetch tree for commit ${hash}, skipping`);
+        continue;
+      }
+      commits.push({
+        hash,
+        authorEmail,
+        authorName,
+        message,
+        description,
+        parentHash: parentHash || null,
+        treeHash: fetchedTree
+      });
+      continue;
+    }
     commits.push({
       hash,
       authorEmail,
