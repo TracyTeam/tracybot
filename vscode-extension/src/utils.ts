@@ -174,7 +174,6 @@ function computeHunkSignificance(oldLines: string[], newLines: string[]): boolea
 
   const score = bleu(tokenizeHunk(oldContent), tokenizeHunk(newContent), 4);
 
-  console.log(`old: ${oldContent}\nnew: ${newContent}\nscore: ${score}\n\n`);
   return score <= SIMILARITY_THRESHOLD;
 }
 
