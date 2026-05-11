@@ -11,13 +11,14 @@ const PROCESS_LIMIT = pLimit(5);
 
 export { SIMILARITY_THRESHOLD };
 
-function tokenizeHunk(text: string) {
+function tokenizeHunk(text: string): string {
   const clean = text
     .split('\n')
     .map(line => /^[+\- ]/.test(line) ? line.slice(1) : line)
     .join('\n');
 
-  const tokens = clean.match(/[a-zA-Z0-9_]+|[^\w\s]/g) || [];
+  const noWhitespace = clean.replace(/\s+/g, '');
+  const tokens = Array.from(noWhitespace);
 
   // trick the default tokenizer by injecting our tokens space-separated
   return tokens.join(' ');
@@ -172,6 +173,8 @@ function computeHunkSignificance(oldLines: string[], newLines: string[]): boolea
   }
 
   const score = bleu(tokenizeHunk(oldContent), tokenizeHunk(newContent), 4);
+
+  console.log(`old: ${oldContent}\nnew: ${newContent}\nscore: ${score}\n\n`);
   return score <= SIMILARITY_THRESHOLD;
 }
 
