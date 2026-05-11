@@ -1,9 +1,7 @@
-#!/usr/bin/env python3
-import os
 import sys
+import re
 import subprocess
 import shutil
-import tempfile
 from pathlib import Path
 
 # Colors
@@ -40,7 +38,7 @@ def find_repo(start: Path):
 def confirm():
     print("  Confirm initialization? (y/n) ", end="", flush=True)
     ch = sys.stdin.read(1)
-    print("\n")
+    print()
     return ch.lower() == "y"
 
 
@@ -65,9 +63,9 @@ def main():
             print(f"{R}******************************************************{NC}\n")
             sys.exit(1)
 
-        print(f"\n{B}+------------------------+{NC}")
+        print(f"\n{B}+-----------------------+{NC}")
         print(f"{B}| INITIALIZING TRACYBOT |{NC}")
-        print(f"{B}+-----------------------+{NC}")
+        print(f"{B}+-----------------------+{NC}\n")
         print(f"  {BOLD}Target Path:{NC} {repo}\n")
 
         if not confirm():
@@ -83,69 +81,60 @@ def main():
             sys.exit(1)
 
     repo = str(repo)
-
-    # -------------------------------
-    # CHECK ORIGIN
-    # -------------------------------
-    if not run_git(repo, ["remote", "get-url", "origin"]):
-        print(f"\n{R}******************************************************{NC}")
-        print(f"{R}* ERROR: Tracybot requires an 'origin' remote        *{NC}")
-        print(f"{R}******************************************************{NC}\n")
-        sys.exit(1)
+    git_dir = Path(repo) / ".git"
 
     git_dir = Path(repo) / ".git"
     tracy_dir = git_dir / "tracybot"
-
     script_source = Path(__file__).resolve().parent / "tracking" / "tracy.py"
-
     tracy_dir.mkdir(parents=True, exist_ok=True)
 
     # -------------------------------
-    # GIT CONFIG
+    # GIT CONFIG (notes rewriting - always)
     # -------------------------------
     run_git(repo, ["config", "notes.rewrite.rebase", "true"])
     run_git(repo, ["config", "notes.rewrite.merge", "true"])
     run_git(repo, ["config", "notes.rewriteRef", "refs/notes/commits"])
 
-    add_config_if_missing(repo, "remote.origin.push", "HEAD")
-    add_config_if_missing(repo, "remote.origin.push", "refs/tracy/*:refs/tracy/*")
-    add_config_if_missing(repo, "remote.origin.push", "refs/notes/*:refs/notes/*")
-
-    add_config_if_missing(repo, "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
-    add_config_if_missing(repo, "remote.origin.fetch", "+refs/tracy/*:refs/tracy/*")
-    add_config_if_missing(repo, "remote.origin.fetch", "+refs/notes/*:refs/notes/*")
-
-    print("+----------------------------------------------------+")
-    print("| [DONE] Git notes rewriting configured              |")
-    print("| [DONE] Tracy refs configured for fetch and push    |")
-    print("+----------------------------------------------------+\n")
-
     # -------------------------------
-    # FETCH
+    # ORIGIN CONFIG (only if origin exists)
     # -------------------------------
-    print(f"{BOLD}Syncing with remote...{NC}\n")
+    origin_url = run_git(repo, ["remote", "get-url", "origin"], capture=True)
+    if origin_url:
+        add_config_if_missing(repo, "remote.origin.push", "HEAD")
+        add_config_if_missing(repo, "remote.origin.push", "refs/tracy/*:refs/tracy/*")
+        add_config_if_missing(repo, "remote.origin.push", "refs/notes/*:refs/notes/*")
+        add_config_if_missing(repo, "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+        add_config_if_missing(repo, "remote.origin.fetch", "+refs/tracy/*:refs/tracy/*")
+        add_config_if_missing(repo, "remote.origin.fetch", "+refs/notes/*:refs/notes/*")
 
-    ok = True
-    for cmd in [
-        ["fetch", "origin"],
-        ["fetch", "origin", "+refs/tracy/*:refs/tracy/*"],
-        ["fetch", "origin", "+refs/notes/commits:refs/notes/commits"],
-    ]:
-        if not run_git(repo, cmd):
-            ok = False
+        print("+----------------------------------------------------+")
+        print("| [DONE] Git notes rewriting configured              |")
+        print("| [DONE] Tracy refs configured for fetch and push    |")
+        print("+----------------------------------------------------+\n")
 
-    if not ok:
-        print("  [INFO] No remote tracing data found")
+        print(f"{BOLD}Syncing with remote...{NC}\n")
+        ok = True
+        for cmd in [
+            ["fetch", "origin"],
+            ["fetch", "origin", "+refs/tracy/*:refs/tracy/*"],
+            ["fetch", "origin", "+refs/notes/commits:refs/notes/commits"],
+        ]:
+            if not run_git(repo, cmd):
+                ok = False
+        if not ok:
+            print("  [INFO] No remote tracing data found")
+        else:
+            print(f"  {G}[OK] Successfully fetched latest tracing data{NC}")
+        print()
     else:
-        print(f"  {G}[OK] Successfully fetched latest tracing data{NC}")
-
-    print()
+        print(f"{Y}[SKIP] No 'origin' remote found — skipping remote config and fetch.{NC}")
+        print()
 
     # -------------------------------
     # CONFIG FILE
     # -------------------------------
     with open(tracy_dir / "config", "w") as f:
-        f.write(f"TRACY_SCRIPT={script_source.as_posix()}\n")
+        f.write(f"TRACY_SNAPSHOT_SCRIPT={script_source.as_posix()}\n")
 
     # -------------------------------
     # HOOKS
@@ -158,22 +147,54 @@ def main():
 
     rows = []
 
-    for hook in ["pre-commit", "post-commit", "post-rewrite"]:
+    for hook in ["pre-commit", "post-commit", "post-rewrite", "post-fetch", "pre-push"]:
         source_hook = hooks_source / f"{hook}.py"
         tracy_hook = hooks_dir / f"{hook}.tracy"
         dest_hook = hooks_dir / hook
 
-        tracy_block = f"""# --- TRACYBOT START ---
-if [ -x "$(dirname "$0")/{hook}.tracy" ]; then
-    python "$(dirname "$0")/{hook}.tracy" "$@"
+        start_marker = "# --- TRACYBOT START ---"
+        end_marker = "# --- TRACYBOT END ---"
+
+        tracy_block = f"""{start_marker}
+#
+# !!! WARNING: DO NOT MODIFY OR REMOVE THIS BLOCK !!!
+#
+# This section is managed automatically by Tracybot.
+# Any manual changes inside these markers may be overwritten.
+# You may safely edit anything outside this block
+
+TRACY_FILE="$(git rev-parse --git-path hooks)/{hook}.tracy"
+
+if [ -e "$TRACY_FILE" ]; then
+    if command -v python3 >/dev/null 2>&1 && python3 -c "import sys" >/dev/null 2>&1; then
+        PYTHON_CMD="python3"
+    elif command -v python >/dev/null 2>&1 && python -c "import sys" >/dev/null 2>&1; then
+        PYTHON_CMD="python"
+    else
+        echo "Error: Python is not installed or not working." >&2
+        exit 1
+    fi
+
+    "$PYTHON_CMD" "$TRACY_FILE" "$@"
 fi
-# --- TRACYBOT END ---
+{end_marker}
 """
 
         if dest_hook.exists():
             content = dest_hook.read_text()
 
-            if "TRACYBOT START" in content:
+            if start_marker in content and end_marker in content:
+                start_idx = content.find(start_marker)
+                end_idx = content.find(end_marker)
+
+                if start_idx != -1 and end_idx != -1:
+                    end_idx += len(end_marker)
+                    new_content = content[:start_idx] + tracy_block + content[end_idx:]
+                else:
+                    new_content = content + "\n" + tracy_block
+
+                dest_hook.write_text(new_content)
+                dest_hook.chmod(0o755)
                 status = f"{G}Updated{NC}"
             else:
                 print(f"{Y}WARNING: {hook} hook already exists.{NC}")
@@ -200,7 +221,8 @@ fi
         shutil.copy(source_hook, tracy_hook)
         tracy_hook.chmod(0o755)
 
-        rows.append(f"| {hook:<16} | {status:<25} |")
+        status_clean = re.sub(r'\033\[[0-9;]*m', '', status)
+        rows.append(f"| {hook:<16} | {status}{' ' * (31 - len(status_clean))} |")
 
     print("+------------------+---------------------------------+")
     print(f"| {'Hook':<16} | {'Status':<31} |")
@@ -212,16 +234,6 @@ fi
     print(f"{G}******************************************************{NC}")
     print(f"{G}* SUCCESS: Tracybot is ready to go!                  *{NC}")
     print(f"{G}******************************************************{NC}\n")
-
-    print(f"{Y}Note:{NC} If the {B}origin{NC} remote is changed or replaced,")
-    print("you must re-run this initialization script, or manually reconfigure:\n")
-
-    print('  git config --add remote.origin.push "HEAD"')
-    print('  git config --add remote.origin.push "refs/tracy/*:refs/tracy/*"')
-    print('  git config --add remote.origin.push "refs/notes/*:refs/notes/*"')
-    print('  git config --add remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"')
-    print('  git config --add remote.origin.fetch "+refs/tracy/*:refs/tracy/*"')
-    print('  git config --add remote.origin.fetch "+refs/notes/*:refs/notes/*"')
 
 
 if __name__ == "__main__":

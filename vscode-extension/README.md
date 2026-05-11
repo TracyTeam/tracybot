@@ -25,7 +25,7 @@ Open `src/extension.ts` in VS Code and press **F5** to launch the extension debu
 
 - Node.js v22 or later
 - npm
-- A repository initialized with `./init.sh`
+- A repository initialized with `init.py`
 
 ## AI Blame Tab
 

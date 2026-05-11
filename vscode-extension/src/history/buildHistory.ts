@@ -1,9 +1,9 @@
 import { Change, CommitInfo, DiffHunk, History, TaskletMessage } from "./types";
 import {
-  getActiveHiddenCommit,
   getActiveTracyId,
   getCommitTree,
   getDiff,
+  getTracyLocalRefCommit,
   getTracyRefCommit,
   groupChangesByFile,
   isAiChange,
@@ -29,11 +29,12 @@ export function getSerializedCache(): Record<string, Change[]> {
 }
 
 async function getMainCommits(repoPath: string): Promise<CommitInfo[]> {
-  // Commit info in format: hash|email|name|subject|body|parent|tree
+  // %x00 terminates each record with a null byte so multi-line %b bodies
+  // don't split a commit across multiple lines when we iterate the output.
   const output = await runGit(repoPath, [
     "log",
     "--reverse",
-    `--format=%H${DELIMITER}%ae${DELIMITER}%an${DELIMITER}%s${DELIMITER}%b${DELIMITER}%P${DELIMITER}%T`,
+    `--format=%H${DELIMITER}%ae${DELIMITER}%an${DELIMITER}%s${DELIMITER}%b${DELIMITER}%P${DELIMITER}%T%x00`,
   ]);
 
   if (!output) {
@@ -41,12 +42,38 @@ async function getMainCommits(repoPath: string): Promise<CommitInfo[]> {
   }
 
   const commits: CommitInfo[] = [];
-  for (const line of output.split("\n")) {
-    if (!line) {
+  for (const record of output.split("\x00")) {
+    const trimmed = record.trim();
+    if (!trimmed) {
       continue;
     }
 
-    const [hash, authorEmail, authorName, message, description, parentHash, treeHash] = line.split(DELIMITER);
+    const parts = trimmed.split(DELIMITER);
+    if (parts.length < 7) {
+      console.warn(`Skipping malformed commit line: expected 7 fields, got ${parts.length}`);
+      continue;
+    }
+
+    const [hash, authorEmail, authorName, message, description, parentHash, treeHash] = parts;
+
+    if (!treeHash) {
+      console.warn(`Missing treeHash for commit ${hash}, fetching directly`);
+      const fetchedTree = await getCommitTree(repoPath, hash);
+      if (!fetchedTree) {
+        console.warn(`Could not fetch tree for commit ${hash}, skipping`);
+        continue;
+      }
+      commits.push({
+        hash,
+        authorEmail,
+        authorName,
+        message,
+        description,
+        parentHash: parentHash || null,
+        treeHash: fetchedTree
+      });
+      continue;
+    }
     commits.push({
       hash,
       authorEmail,
@@ -64,11 +91,20 @@ async function getMainCommits(repoPath: string): Promise<CommitInfo[]> {
 async function getTracyIdNote(repoPath: string, commitHash: string): Promise<string | null> {
   try {
     const output = await runGit(repoPath, ["notes", "show", commitHash]);
-    const match = output.match(/tracy-id:\s*([a-f0-9-]+)/);
+    const match = output.match(/tracy-id:\s*([a-f0-9@-]+)/);
 
     return match ? match[1] : null;
   } catch {
     return null;
+  }
+}
+
+async function isOnAnyBranch(repoPath: string, hash: string): Promise<boolean> {
+  try {
+    const result = await runGit(repoPath, ["branch", "--contains", hash, "--no-color"]);
+    return result.trim().length > 0;
+  } catch {
+    return false;
   }
 }
 
@@ -136,8 +172,14 @@ async function getTracyChain(repoPath: string, startCommit: string): Promise<Com
         treeHash: treeHash
       });
 
-      // Check for multiple parents (merge commit)
-      // Merge commits have parents separated by space: "parent1 parent2 parent3"
+      // Stop traversal at commits reachable from refs/heads — those are origin
+      // commits that anchor the diff baseline, not part of the hidden chain.
+      const onBranch = await isOnAnyBranch(repoPath, hash);
+      if (onBranch) {
+        continue;
+      }
+
+      // Follow parents of hidden chain commits. Merge commits have space-separated parents.
       if (parentHash && parentHash.includes(" ")) {
         const allParents = parentHash.split(" ");
 
@@ -290,7 +332,6 @@ async function extractSnapshot(
       const filteredLines = lines.filter((line) => {
         return !userHunks.some((hunk) => {
           return (
-            hunk.oldCount > 0 && // ignore pure insertions
             line >= hunk.oldStart &&
             line < hunk.oldStart + hunk.oldCount
           );
@@ -419,7 +460,8 @@ async function buildUncommittedChanges(
     return { uncommittedChanges: [], lastTracyTip: headTree };
   }
 
-  const activeHiddenTip = await getActiveHiddenCommit(repoPath, activeTracyId);
+  const activeHiddenTip = await getTracyLocalRefCommit(repoPath, activeTracyId);
+
   if (!activeHiddenTip) {
     return { uncommittedChanges: [], lastTracyTip: headTree };
   }
