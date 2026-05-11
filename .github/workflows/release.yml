@@ -21,7 +21,7 @@ jobs:
           cache-dependency-path: vscode-extension/package-lock.json
       - run: npm i
       - run: npm run compile
-      - run: npx vsce package
+      - run: npx vsce package --out vscode-extension.vsix
       - name: Upload VSIX to Release
         uses: softprops/action-gh-release@v2
         with:
