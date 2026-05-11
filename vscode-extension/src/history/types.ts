@@ -64,4 +64,5 @@ export interface DiffHunk {
   oldCount: number;
   newStart: number;
   newCount: number;
+  isSignificant?: boolean;
 }
