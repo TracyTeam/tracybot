@@ -2,7 +2,6 @@ import subprocess
 import tempfile
 import sys
 import os
-import shutil
 
 REF_BASE_LOCAL = "refs/tracy-local"
 REF_BASE_PUSHED = "refs/tracy"
@@ -85,15 +84,14 @@ def build_filtered_chain(local_ref, origin_commit, files_in_commit):
         tmp_index_path = tmp_index.name
         tmp_index.close()
 
-        git_dir = run_git(["rev-parse", "--git-dir"], capture=True)
-        real_index = os.path.join(git_dir, "index")
-        if os.path.exists(real_index):
-            shutil.copy(real_index, tmp_index_path)
-
         env = os.environ.copy()
         env["GIT_INDEX_FILE"] = tmp_index_path
 
-        subprocess.run(["git", "rm", "-rf", "--cached", "."], env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False)
+        # Start from parent tree so unrelated files are preserved in the snapshot tree,
+        # preventing spurious deletions of files the user didn't touch
+        parent_for_tree = new_chain_head if new_chain_head else origin_commit
+        if parent_for_tree:
+            subprocess.run(["git", "read-tree", parent_for_tree], env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False)
 
         for file in filtered_files:
             ls_out = run_git(["ls-tree", commit_tree, "--", file], capture=True, env=env)
