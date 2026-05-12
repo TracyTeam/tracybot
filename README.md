@@ -101,3 +101,14 @@ curl -fsSL https://raw.githubusercontent.com/TracyTeam/tracybot/main/opencode-pl
 powershell -Command "irm https://raw.githubusercontent.com/TracyTeam/tracybot/main/opencode-plugin/install.sh | iex"
 ```
 
+#### Manual Installation
+
+1. Download the built plugin (`tracybot-oc.js`) with
+```bash
+curl -fsSL -o tracy.vsix https://github.com/TracyTeam/tracybot/releases/latest/download/tracybot-oc.js
+```
+
+or from the [latest release](https://github.com/TracyTeam/tracybot/releases/latest)
+
+2. Place the downloaded file into the following directory: `$HOME/.config/opencode/plugin`
+
