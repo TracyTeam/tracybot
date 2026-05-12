@@ -93,11 +93,11 @@ To install the plugin from the terminal, run:
 
 ##### Linux & macOS
 ```bash
-curl -fsSL https://raw.githubusercontent.com/TracyTeam/tracybot/main/opencode-extension/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/TracyTeam/tracybot/main/opencode-plugin/install.sh | bash
 ```
 
 ##### Windows
 ```powershell
-powershell -Command "irm https://raw.githubusercontent.com/TracyTeam/tracybot/main/opencode-extension/install.sh | iex"
+powershell -Command "irm https://raw.githubusercontent.com/TracyTeam/tracybot/main/opencode-plugin/install.sh | iex"
 ```
 
