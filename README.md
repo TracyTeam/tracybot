@@ -47,20 +47,34 @@ cd opencode-plugin
 bun run deploy
 ```
 
-### 3. Run the VS Code Extension
+### 3. Install the VSCode Extension
 
-There are 2 different ways of using our extension
+#### Automated installation (recommended)
 
-Option 1. Run
+##### Linux & macOS
 
+In the terminal, run
 ```bash
-bash -c "curl -Ls -o tracy.vsix https://github.com/TracyTeam/tracybot/releases/latest/download/vscode-extension.vsix && code --install-extension tracy.vsix && rm tracy.vsix"
+curl -fsSL https://raw.githubusercontent.com/TracyTeam/tracybot/main/vscode-extension/install.sh | bash
 ```
 
-Option 2. Manual install
-1. Download packaged extension
-```bash
-bash -c "curl -Ls -o tracy.vsix https://github.com/TracyTeam/tracybot/releases/latest/download/vscode-extension.vsix"
+##### Windows
+
+In Powershell, run
+```powershell
+powershell -Command "irm https://raw.githubusercontent.com/TracyTeam/tracybot/main/install.ps1 | iex"
 ```
+
+#### Manual installation
+
+Alternatively, the extension can be installed manually.
+
+1. Download the packaged extension
+```bash
+curl -fsSL -o tracy.vsix https://github.com/TracyTeam/tracybot/releases/latest/download/vscode-extension.vsix
+```
+
+or from the [latest release](https://github.com/TracyTeam/tracybot/releases/latest)
+
 Then open VSCode and go to EXTENSIONS (left side) --> Click on the 3 dots --> Install from vsix and choose the downloaded .vsix file
 
