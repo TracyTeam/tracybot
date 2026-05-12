@@ -47,12 +47,13 @@ jobs:
         id: version
         working-directory: vscode-extension
         run: |
+          git checkout ${{ github.ref_name }}
           NEW_VERSION=$(npm version ${{ inputs.version_bump }} -m "chore: version bump %s")
           echo "tag=$NEW_VERSION" >> $GITHUB_OUTPUT
 
       - name: Push commit and tag to main
         run: |
-          git push origin main
+          git push origin ${{ github.ref_name }}
           git push origin ${{ steps.version.outputs.tag }}
 
       - name: Create Base GitHub Release
