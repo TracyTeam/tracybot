@@ -198,6 +198,8 @@ export async function activate(context: vscode.ExtensionContext) {
         }
       );
 
+      panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'icon.png');
+
       const initialLine = editor.selection.active.line;
       panel.webview.html = getBlameViewHtml(fileContent, fileName, fileMap, panel.webview, context.extensionUri, initialLine);
     })

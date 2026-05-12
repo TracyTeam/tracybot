@@ -26,20 +26,6 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 /* ── Root layout ── */
 #root { display: flex; flex-direction: column; height: 100vh; }
 
-#header {
-  display: flex; align-items: center; gap: 10px;
-  padding: 10px 16px;
-  background: var(--surface); border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-#header .icon     { width: 18px; height: 18px; opacity: .7; }
-#header .filename { font-family: var(--font-mono); font-size: var(--vscode-editor-font-size, 12px); color: var(--text-bright); letter-spacing: .02em; }
-#header .badge    {
-  margin-left: auto; font-size: 10px; padding: 2px 8px; border-radius: 20px;
-  background: var(--accent-dim); color: var(--accent); border: 1px solid var(--accent);
-  letter-spacing: .06em; text-transform: uppercase;
-}
-
 #panels { display: flex; flex: 1; overflow: hidden; }
 
 /* ── Left: file panel ── */
