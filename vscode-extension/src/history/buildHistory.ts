@@ -240,11 +240,11 @@ function buildTaskletMessages(tasklet_str: string): { messages: TaskletMessage[]
   if (tasklet_obj?.planOutputs && Array.isArray(tasklet_obj.planOutputs)) {
     tasklet_obj.planOutputs.forEach((plan: any) => {
       if (plan.prompt) {
-        messages.push({ stage: "plan", type: "prompt", message: plan.prompt });
+        messages.push({ stage: "plan", type: "prompt", model: plan.model, message: plan.prompt });
       }
 
       if (plan.response) {
-        messages.push({ stage: "plan", type: "response", message: appendQuestions(plan.response, plan.id) });
+        messages.push({ stage: "plan", type: "response", model: plan.model, message: appendQuestions(plan.response, plan.id) });
       }
     });
   }
@@ -252,8 +252,8 @@ function buildTaskletMessages(tasklet_str: string): { messages: TaskletMessage[]
   if (!tasklet_obj.buildOutput) {
     console.warn(`Missing build output in tasklet: ${tasklet_str}`);
   } else {
-    messages.push({ stage: "build", type: "prompt", message: tasklet_obj.buildOutput?.prompt });
-    messages.push({ stage: "build", type: "response", message: appendQuestions(tasklet_obj.buildOutput?.response ?? "", tasklet_obj.buildOutput?.id) });
+    messages.push({ stage: "build", type: "prompt", model: tasklet_obj.buildOutput?.model, message: tasklet_obj.buildOutput?.prompt });
+    messages.push({ stage: "build", type: "response", model: tasklet_obj.buildOutput?.model, message: appendQuestions(tasklet_obj.buildOutput?.response ?? "", tasklet_obj.buildOutput?.id) });
   }
 
   return { messages, title };

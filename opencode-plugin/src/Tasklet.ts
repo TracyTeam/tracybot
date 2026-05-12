@@ -1,3 +1,5 @@
+import type { Part, UserMessage } from "@opencode-ai/sdk"
+
 export interface Tasklet {
     id: string
     sessionId: string
@@ -7,14 +9,21 @@ export interface Tasklet {
     questions: Question[]
 }
 
+export interface UserMessageWrapper {
+    info: UserMessage
+    parts: Part[]
+}
+
 export interface PlanOutput {
     id: string
+    model: string
     prompt: string
     response: string
 }
 
 export interface BuildOutput {
     id: string
+    model: string
     prompt: string
     response: string
 }
@@ -22,7 +31,7 @@ export interface BuildOutput {
 export interface Question {
     question: string
     header: string
-    options: {label: string; description: string}[]
+    options: { label: string; description: string }[]
     answer: string[]
     outputId: string
 }

@@ -1,10 +1,16 @@
 import type { Plugin, PluginInput } from "@opencode-ai/plugin"
-import type { Part } from "@opencode-ai/sdk"
-import type { Tasklet, PlanOutput, BuildOutput, Question } from "./Tasklet"
+import type { Part, UserMessage } from "@opencode-ai/sdk"
+import type { Tasklet, PlanOutput, BuildOutput, Question, UserMessageWrapper } from "./Tasklet"
 import path from "path"
 import { Logger } from "./Logger"
 
 const EDIT_TOOLS = new Set(["edit", "write", "patch", "multiedit", "apply_patch", "applypatch"])
+
+type UserMessageModel = UserMessage["model"];
+
+const getFormattedModel = (model: UserMessageModel): string => {
+    return `${model.providerID}/${model.modelID}`;
+};
 
 export const MyPlugin: Plugin = async (input: PluginInput) => {
     const { client, $, directory } = input
@@ -111,14 +117,15 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         }
 
         const buildUserMsg = [...allMessages].reverse().find(
-            (message) => message.info.role === "user" && message.info.agent === "build"
+            (message): message is UserMessageWrapper =>
+                message.info.role === "user" && message.info.agent === "build"
         )
-        
+
         if (!buildUserMsg) {
             await L.debug("No build user message found, skipping tasklet creation")
             return
         }
-        
+
         const lastBuild = lastBuildId.get(sessionId)
         if (buildUserMsg.info.id === lastBuild) {
             await L.debug(`Build ${buildUserMsg.info.id} already processed, skipping`)
@@ -137,38 +144,41 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                 prevBuildIndex = i
                 break
             }
-        }  
+        }
 
-        const scopedPlanMessages = allMessages.slice(prevBuildIndex + 1, currentBuildIndex)
-        .filter(msg => msg.info.role === "user" && msg.info.agent !== "build")
-        
-        
-        const planOutputs: PlanOutput[] = scopedPlanMessages.map((userMsg, idx) => {
-            const assistantMsgs = allMessages.filter((message) =>
-                message.info.role === "assistant" && message.info.parentID === userMsg.info.id
+        const planOutputs: PlanOutput[] = allMessages
+            .slice(prevBuildIndex + 1, currentBuildIndex)
+            .filter((msg): msg is UserMessageWrapper =>
+                msg.info.role === "user" && msg.info.agent !== "build"
             )
-            return {
-                id: `plan_${idx}`,
-                prompt: getTextFromParts(userMsg.parts),
-                response: assistantMsgs
-                .map(message => getTextFromParts(message.parts))
-                .filter(text => text)
-                .join("\n\n---\n\n"),
-            }
-        })
+            .map((userMsg, idx) => {
+                const assistantMsgs = allMessages.filter((message) =>
+                    message.info.role === "assistant" && message.info.parentID === userMsg.info.id
+                )
+                return {
+                    id: `plan_${idx}`,
+                    model: getFormattedModel(userMsg.info.model),
+                    prompt: getTextFromParts(userMsg.parts),
+                    response: assistantMsgs
+                        .map(message => getTextFromParts(message.parts))
+                        .filter(text => text)
+                        .join("\n\n---\n\n"),
+                }
+            })
 
         const storedQuestions = sessionQuestions.get(sessionId) ?? []
         const finalPlanCount = planOutputs.length
         await L.info(`Processing ${storedQuestions.length} stored questions, finalPlanCount: ${finalPlanCount}`, { storedQuestions })
-        
+
         const buildAssistantMsgs = allMessages.filter(
             (message) => message.info.role === "assistant" &&
-            message.info.parentID === buildUserMsg.info.id
+                message.info.parentID === buildUserMsg.info.id
         )
-        
+
 
         const buildOutput: BuildOutput = {
             id: `build_${planOutputs.length}`,
+            model: getFormattedModel(buildUserMsg.info.model),
             prompt: getTextFromParts(buildUserMsg.parts),
             response: buildAssistantMsgs
                 .map(message => getTextFromParts(message.parts))
@@ -186,7 +196,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         }
 
         await L.debug(`Created tasklet: ${tasklet.id}`, { tasklet })
-        
+
         lastBuildId.set(sessionId, buildUserMsg.info.id)
         sessionQuestions.delete(sessionId)
         return tasklet
