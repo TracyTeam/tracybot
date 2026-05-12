@@ -184,7 +184,7 @@
             : '';
           return `
             <div>
-              <div class="message-label ${esc(msg.stage)}">${esc(msg.stage)} · ${esc(msg.type)}</div>
+              <div class="message-label ${esc(msg.stage)}">${esc(msg.stage)} · ${esc(msg.type)}${msg.type === 'response' ? ` · ${esc(msg.model)}` : ''}</div>
               <div class="message-box ${esc(msg.type)} ${esc(msg.stage)}">${renderMd(msg.message)}</div>
               ${questionsHtml ? `<div class="questions-section">${questionsHtml}</div>` : ''}
             </div>`;

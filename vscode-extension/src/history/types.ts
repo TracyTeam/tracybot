@@ -3,6 +3,7 @@ import * as z from "zod";
 export const taskletMessage = z.object({
   stage: z.enum(["plan", "build"]),
   type: z.enum(["prompt", "response"]),
+  model: z.string().optional(),
   message: z.string(),
   questions: z.array(z.object({
     question: z.string(),
