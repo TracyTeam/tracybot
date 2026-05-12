@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 
-import { buildHistory, hydrateCache, getSerializedCache } from './history/buildHistory';
+import { buildHistory, hydrateCache, getSerializedCache, clearCache } from './history/buildHistory';
 import { History, TaskletUI, LineMap, Change } from './history/types';
 import { getBlameViewHtml } from './blameView';
 import { getRepoPath } from './utils';
@@ -8,6 +8,7 @@ import { checkOpencode } from './pluginCheck';
 
 // History data — populated asynchronously when the extension activates
 let history: History | undefined;
+let buildHistoryLock: Promise<void> | null = null;
 
 // Maps a relative file path to a map of line number -> Tasklet
 // Built once after history loads; updated on each blameAI invocation
@@ -32,6 +33,48 @@ function buildLineMap(h: typeof history & {}): LineMap {
   }
 
   return result;
+}
+
+async function buildHistoryAndSet(ctx: vscode.ExtensionContext): Promise<void> {
+  if (buildHistoryLock) {
+    console.log('buildHistory already running, waiting...');
+    await buildHistoryLock;
+
+    return;
+  }
+
+  const repoPath = await getRepoPath();
+  if (!repoPath) {
+    return;
+  }
+
+  buildHistoryLock = (async () => {
+    const time = Date.now();
+
+    try {
+      const result = await buildHistory(repoPath);
+      console.log(`History build time: ${Date.now() - time}ms`);
+
+      if (!result) {
+        console.error('Failed to build history');
+        return;
+      }
+
+      result.files.forEach(file =>
+        file.tasklets.forEach(t => (t as TaskletUI).selected = false)
+      );
+
+      history = result as unknown as { files: { path: string; tasklets: TaskletUI[] }[] } & History;
+      lineMap = buildLineMap(history);
+      displayLineMap = new Map(lineMap);
+
+      await ctx.workspaceState.update('tracybot.buildHistoryCache', getSerializedCache());
+    } finally {
+      buildHistoryLock = null;
+    }
+  })();
+
+  await buildHistoryLock;
 }
 
 // Returns the relative path for a document, or undefined if outside the workspace
@@ -60,6 +103,17 @@ let statusBarItem: vscode.StatusBarItem;
 
 // Activate function
 export async function activate(context: vscode.ExtensionContext) {
+  // git extension is a hard requirement for some functions
+  const gitExtension = vscode.extensions.getExtension('vscode.git')?.exports;
+  if (!gitExtension) {
+    return undefined;
+  }
+  
+  const git = gitExtension.getAPI(1);
+  if (!git) {
+    return undefined;
+  }
+
   checkOpencode(context);
 
   // Status bar button — always visible, click opens the blame panel
@@ -106,26 +160,14 @@ export async function activate(context: vscode.ExtensionContext) {
           cancellable: false,
         },
         async () => {
-          const result = await buildHistory(await getRepoPath());
-
-          if (!result) {
-            vscode.window.showErrorMessage('AI Blame: Failed to build history.');
-            return;
-          }
-
-          // Extend each tasklet with the runtime 'selected' flag and store globally
-          result.files.forEach(file =>
-            file.tasklets.forEach(t => (t as TaskletUI).selected = false)
-          );
-
-          history = result as unknown as { files: { path: string; tasklets: TaskletUI[] }[] } & History;
-
-          lineMap = buildLineMap(history);
-          displayLineMap = new Map(lineMap);
-
-          await context.workspaceState.update('tracybot.buildHistoryCache', getSerializedCache());
+          await buildHistoryAndSet(context);
         }
       );
+
+      if (!history) {
+        vscode.window.showErrorMessage('AI Blame: Failed to build history.');
+        return;
+      }
 
       // Resolve the (now-fresh) file map for the active document.
       const fileMap: Map<number, TaskletUI> | undefined =
@@ -161,26 +203,29 @@ export async function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // Warm up history on activation so the first blameAI click is faster
-  const time = Date.now();
-  buildHistory(await getRepoPath()).then(async (result) => {
-    console.log(`History build time: ${Date.now() - time}ms`);
-    console.log(result);
-
-    if (!result) {
-      console.error('Failed to build history');
-      return;
+  const refreshHistory = () => {
+    if (git.repositories.length > 0) {
+      buildHistoryAndSet(context);
     }
+  };
 
-    result.files.forEach(file =>
-      file.tasklets.forEach(t => (t as TaskletUI).selected = false)
-    );
+  // clearCache — clears the history cache
+  context.subscriptions.push(
+    vscode.commands.registerCommand('tracybot-extension.invalidateCache', async () => {
+      clearCache();
 
-    history = result as unknown as { files: { path: string; tasklets: TaskletUI[] }[] } & History;
+      await context.workspaceState.update('tracybot.buildHistoryCache', undefined);
+      vscode.window.showInformationMessage('Tracybot: History cache cleared.');
 
-    lineMap = buildLineMap(history);
-    displayLineMap = new Map(lineMap);
-  });
+      refreshHistory();
+    })
+  );
+
+  // Warm up history on activation so the first blameAI click is faster
+  refreshHistory();
+  context.subscriptions.push(
+    git.onDidOpenRepository(refreshHistory)
+  );
 }
 
 export function deactivate() { }

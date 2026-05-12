@@ -28,6 +28,10 @@ export function getSerializedCache(): Record<string, Change[]> {
   return Object.fromEntries(commitHistoryCache);
 }
 
+export function clearCache(): void {
+  commitHistoryCache.clear();
+}
+
 async function getMainCommits(repoPath: string): Promise<CommitInfo[]> {
   // %x00 terminates each record with a null byte so multi-line %b bodies
   // don't split a commit across multiple lines when we iterate the output.
