@@ -24,9 +24,19 @@ jobs:
     outputs:
       tag: ${{ steps.version.outputs.tag }}
     steps:
+      # generate a short-lived token from the CI app
+      - name: Generate GitHub App Token
+        id: generate-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      # pass that token to checkout to authorize pushes with protection rule bypass
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ steps.generate-token.outputs.token }}
 
       - name: Configure Git User
         run: |
@@ -37,7 +47,7 @@ jobs:
         id: version
         working-directory: vscode-extension
         run: |
-          NEW_VERSION=$(npm version ${{ inputs.version_bump }} -m "chore: release %s")
+          NEW_VERSION=$(npm version ${{ inputs.version_bump }} -m "chore: version bump %s")
           echo "tag=$NEW_VERSION" >> $GITHUB_OUTPUT
 
       - name: Push commit and tag to main
