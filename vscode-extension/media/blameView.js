@@ -195,9 +195,12 @@
       <div class="tasklet-card">
         <div class="card-nav">
           <div class="card-title">${esc(t.name)}</div>
-          <span class="meta-pill accent">${esc(t.model)}</span>
-          <span class="meta-pill">${t.lines.length}&nbsp;line${t.lines.length !== 1 ? 's' : ''}</span>
           <button class="menu-btn" id="all-tasklets-btn">All Tasklets</button>
+        </div>
+        <div class="card-nav-pills">
+          <span class="meta-pill accent">${esc(t.model)}</span>
+          ${t.originCommitHash ? `<span class="commit-chip" title="${esc(t.originCommitHash)}">${esc(t.originCommitHash.slice(0, 8))}</span>` : ''}
+          <span class="meta-pill">${t.lines.length}&nbsp;line${t.lines.length !== 1 ? 's' : ''}</span>
         </div>
 
         <div class="section-label">Messages</div>

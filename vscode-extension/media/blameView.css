@@ -26,20 +26,6 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 /* ── Root layout ── */
 #root { display: flex; flex-direction: column; height: 100vh; }
 
-#header {
-  display: flex; align-items: center; gap: 10px;
-  padding: 10px 16px;
-  background: var(--surface); border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-#header .icon     { width: 18px; height: 18px; opacity: .7; }
-#header .filename { font-family: var(--font-mono); font-size: var(--vscode-editor-font-size, 12px); color: var(--text-bright); letter-spacing: .02em; }
-#header .badge    {
-  margin-left: auto; font-size: 10px; padding: 2px 8px; border-radius: 20px;
-  background: var(--accent-dim); color: var(--accent); border: 1px solid var(--accent);
-  letter-spacing: .06em; text-transform: uppercase;
-}
-
 #panels { display: flex; flex: 1; overflow: hidden; }
 
 /* ── Left: file panel ── */
@@ -81,14 +67,19 @@ tr.ai-selected td.line-num { color: var(--accent); opacity: 1; }
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* Single header row: [title] [model pill] [line-count pill] →→ [button] */
+/* Single header row: [title] - [button] */
 .card-nav {
   display: flex;
   align-items: center;
-  flex-wrap: nowrap;
   gap: 6px;
   min-width: 0;
-  margin-bottom: 12px;
+}
+
+.card-nav-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 0px 12px;
 }
 
 .card-title {
@@ -207,6 +198,19 @@ tr.ai-selected td.line-num { color: var(--accent); opacity: 1; }
   user-select: none;
 }
 .line-chip:hover { background: var(--accent-glow); color: #fff; }
+
+.commit-chip {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  user-select: text;
+  cursor: text;
+  letter-spacing: .04em;
+  flex-shrink: 0;
+}
 
 /* ── Tasklet menu view ── */
 .tasklet-menu { padding: 20px 20px 0; animation: fadeSlide .18s ease both; }

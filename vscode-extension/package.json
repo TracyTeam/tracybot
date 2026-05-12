@@ -19,6 +19,10 @@
       {
         "command": "tracybot-extension.blameAI",
         "title": "Tracybot: Open AI Blame window"
+      },
+      {
+        "command": "tracybot-extension.invalidateCache",
+        "title": "Tracybot: Invalidate History Cache"
       }
     ],
     "keybindings": [

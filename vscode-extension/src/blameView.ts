@@ -9,6 +9,7 @@ interface TaskletData {
   lines: number[];     // 0-based
   messages: TaskletMessage[];
   chunks: number[][];  // pre-computed contiguous line runs
+  originCommitHash?: string;
 }
 
 export function getBlameViewHtml(
@@ -37,6 +38,7 @@ export function getBlameViewHtml(
         lines: lines0,
         messages: tasklet.messages ?? [],
         chunks: getContiguousChunks(lines0),
+        originCommitHash: tasklet.originCommitHash,
       };
     }
     lineToTaskletId[String(line)] = id;
@@ -67,15 +69,6 @@ export function getBlameViewHtml(
 </head>
 <body>
 <div id="root">
-
-  <div id="header">
-    <svg class="icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="10" cy="10" r="8" stroke="#8040ff" stroke-width="1.5"/>
-      <path d="M6.5 10 L9 12.5 L13.5 7.5" stroke="#8040ff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-    </svg>
-    <span class="filename">${escapeHtml(fileName)}</span>
-    <span class="badge">AI Blame</span>
-  </div>
 
   <div id="panels">
 
