@@ -69,12 +69,11 @@ powershell -Command "irm https://raw.githubusercontent.com/TracyTeam/tracybot/ma
 
 Alternatively, the extension can be installed manually.
 
-1. Download the packaged extension
+1. Download the packaged extension from the [latest release](https://github.com/TracyTeam/tracybot/releases/latest)
+or with
 ```bash
 curl -fsSL -o tracy.vsix https://github.com/TracyTeam/tracybot/releases/latest/download/vscode-extension.vsix
 ```
-
-or from the [latest release](https://github.com/TracyTeam/tracybot/releases/latest)
 
 2. In VSCode, go to `EXTENSIONS tab --> Click on the 3 dots --> Install from vsix` and choose the downloaded .vsix file
 
@@ -103,12 +102,12 @@ powershell -Command "irm https://raw.githubusercontent.com/TracyTeam/tracybot/ma
 
 #### Manual Installation
 
-1. Download the built plugin (`tracybot-oc.js`) with
+1. Download the built plugin (`tracybot-oc.js`) from the [latest release](https://github.com/TracyTeam/tracybot/releases/latest) 
+or with
 ```bash
 curl -fsSL -o tracy.vsix https://github.com/TracyTeam/tracybot/releases/latest/download/tracybot-oc.js
 ```
 
-or from the [latest release](https://github.com/TracyTeam/tracybot/releases/latest)
 
 2. Place the downloaded file into the following directory: `$HOME/.config/opencode/plugin`
 
