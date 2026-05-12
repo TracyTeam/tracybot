@@ -54,13 +54,13 @@ There are 2 different ways of using our extension
 Option 1. Run
 
 ```bash
-bash -c "curl -Ls -o tracy.vsix https://github.com/TracyTeam/tracybot/releases/download/latest/vscode-extension.vsix && code --install-extension tracy.vsix && rm tracy.vsix"
+bash -c "curl -Ls -o tracy.vsix https://github.com/TracyTeam/tracybot/releases/latest/download/vscode-extension.vsix && code --install-extension tracy.vsix && rm tracy.vsix"
 ```
 
 Option 2. Manual install
 1. Download packaged extension
 ```bash
-bash -c "curl -Ls -o tracy.vsix https://github.com/TracyTeam/tracybot/releases/download/latest/vscode-extension.vsix"
+bash -c "curl -Ls -o tracy.vsix https://github.com/TracyTeam/tracybot/releases/latest/download/vscode-extension.vsix"
 ```
 Then open VSCode and go to EXTENSIONS (left side) --> Click on the 3 dots --> Install from vsix and choose the downloaded .vsix file
 
