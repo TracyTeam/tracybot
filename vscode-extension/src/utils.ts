@@ -305,7 +305,8 @@ export function groupChangesByFile(changes: Change[]): History["files"] {
         model: change.model,
         name: change.name,
         messages: change.tasklet_messages,
-        lines: change.lines
+        lines: change.lines,
+        originCommitHash: change.originCommitHash,
       }))
     });
   }

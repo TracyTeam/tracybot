@@ -9,6 +9,7 @@ interface TaskletData {
   lines: number[];     // 0-based
   messages: TaskletMessage[];
   chunks: number[][];  // pre-computed contiguous line runs
+  originCommitHash?: string;
 }
 
 export function getBlameViewHtml(
@@ -37,6 +38,7 @@ export function getBlameViewHtml(
         lines: lines0,
         messages: tasklet.messages ?? [],
         chunks: getContiguousChunks(lines0),
+        originCommitHash: tasklet.originCommitHash,
       };
     }
     lineToTaskletId[String(line)] = id;

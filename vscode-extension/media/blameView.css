@@ -81,14 +81,19 @@ tr.ai-selected td.line-num { color: var(--accent); opacity: 1; }
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* Single header row: [title] [model pill] [line-count pill] →→ [button] */
+/* Single header row: [title] - [button] */
 .card-nav {
   display: flex;
   align-items: center;
-  flex-wrap: nowrap;
   gap: 6px;
   min-width: 0;
-  margin-bottom: 12px;
+}
+
+.card-nav-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 0px 12px;
 }
 
 .card-title {
@@ -207,6 +212,19 @@ tr.ai-selected td.line-num { color: var(--accent); opacity: 1; }
   user-select: none;
 }
 .line-chip:hover { background: var(--accent-glow); color: #fff; }
+
+.commit-chip {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  user-select: text;
+  cursor: text;
+  letter-spacing: .04em;
+  flex-shrink: 0;
+}
 
 /* ── Tasklet menu view ── */
 .tasklet-menu { padding: 20px 20px 0; animation: fadeSlide .18s ease both; }

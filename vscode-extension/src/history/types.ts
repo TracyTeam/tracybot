@@ -27,7 +27,8 @@ const historySchema = z.object({
           model: z.string(),
           name: z.string(),
           messages: z.array(taskletMessage),
-          lines: z.array(z.number())
+          lines: z.array(z.number()),
+          originCommitHash: z.string().optional(),
         })
       )
     })
@@ -53,6 +54,7 @@ export interface Change {
   name: string;
   tasklet_messages: TaskletMessage[];
   snapshotHash: string;
+  originCommitHash?: string;
 }
 
 // Extends the base Tasklet type from History with runtime-only UI state

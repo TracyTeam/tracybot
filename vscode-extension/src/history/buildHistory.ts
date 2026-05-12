@@ -267,11 +267,12 @@ async function extractChangesFromSnapshotChain(
   repoPath: string,
   chain: CommitInfo[],
   baseTree: string,
-  targetTree: string | "WORKING_DIR"
+  targetTree: string | "WORKING_DIR",
+  originCommitHash?: string
 ): Promise<Change[]> {
   const results = await Promise.all(
     chain.map(async (snapshot, index) => {
-      return extractSnapshot(repoPath, snapshot, chain, baseTree, index, targetTree);
+      return extractSnapshot(repoPath, snapshot, chain, baseTree, index, targetTree, originCommitHash);
     })
   );
 
@@ -284,7 +285,8 @@ async function extractSnapshot(
   chain: CommitInfo[],
   baseTree: string,
   index: number,
-  targetTree: string | "WORKING_DIR"
+  targetTree: string | "WORKING_DIR",
+  originCommitHash?: string
 ): Promise<Change[]> {
   if (!isAiChange(snapshot)) {
     return [];
@@ -350,6 +352,7 @@ async function extractSnapshot(
           name: title,
           tasklet_messages: messages,
           snapshotHash: snapshot.hash,
+          originCommitHash: originCommitHash,
         } as Change;
       }
 
@@ -440,7 +443,8 @@ async function buildCommittedHistory(
           repoPath,
           tracyChain,
           prevTree,
-          mainCommit.treeHash
+          mainCommit.treeHash,
+          mainCommit.hash
         );
 
         accumulatedChanges.push(...newChanges);
