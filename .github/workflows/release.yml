@@ -48,8 +48,12 @@ jobs:
         working-directory: vscode-extension
         run: |
           git checkout ${{ github.ref_name }}
-          NEW_VERSION=$(npm version ${{ inputs.version_bump }} -m "chore: version bump %s")
+          NEW_VERSION=$(npm version ${{ inputs.version_bump }} --no-git-tag-version)
           echo "tag=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+          git add package.json package-lock.json
+          git commit -m "chore: release $NEW_VERSION"
+          git tag $NEW_VERSION
 
       - name: Push commit and tag to main
         run: |
