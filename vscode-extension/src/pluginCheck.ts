@@ -4,7 +4,7 @@ import * as path from 'path';
 import { homedir } from 'os';
 
 const PLUGIN_FILENAME = 'tracybot-oc.js';
-const PLUGIN_URL = 'https://github.com/TracyTeam/tracybot/releases/download/latest/tracybot-oc.js';
+const PLUGIN_URL = 'https://github.com/TracyTeam/tracybot/releases/latest/download/tracybot-oc.js';
 const SKIP_CHECK_KEY = 'tracybot.skipPluginCheck';
 
 const Actions = {
