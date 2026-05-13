@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 import { buildHistory, hydrateCache, getSerializedCache, clearCache } from './history/buildHistory';
 import { History, TaskletUI, LineMap, Change } from './history/types';
 import { getBlameViewHtml } from './blameView';
-import { getRepoPath } from './utils';
+import { getRepoPath, mergeRemoteNotes } from './utils';
 import { checkOpencode } from './pluginCheck';
 
 // History data — populated asynchronously when the extension activates
@@ -211,6 +211,14 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   };
 
+  // Merge remote notes into local after any git state change (e.g. after autofetch)
+  const syncNotesOnStateChange = async () => {
+    const repoPath = await getRepoPath();
+    if (repoPath) {
+      await mergeRemoteNotes(repoPath);
+    }
+  };
+
   // clearCache — clears the history cache
   context.subscriptions.push(
     vscode.commands.registerCommand('tracybot-extension.invalidateCache', async () => {
@@ -226,7 +234,11 @@ export async function activate(context: vscode.ExtensionContext) {
   // Warm up history on activation so the first blameAI click is faster
   refreshHistory();
   context.subscriptions.push(
-    git.onDidOpenRepository(refreshHistory)
+    git.onDidOpenRepository(refreshHistory),
+    // Merge remote notes after git state changes (covers autofetch completing)
+    ...git.repositories.map((repo: { state: { onDidChange: (cb: () => void) => vscode.Disposable } }) =>
+      repo.state.onDidChange(syncNotesOnStateChange)
+    )
   );
 }
 

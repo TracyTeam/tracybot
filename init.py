@@ -102,10 +102,10 @@ def main():
     if origin_url:
         add_config_if_missing(repo, "remote.origin.push", "HEAD")
         add_config_if_missing(repo, "remote.origin.push", "refs/tracy/*:refs/tracy/*")
-        add_config_if_missing(repo, "remote.origin.push", "refs/notes/*:refs/notes/*")
+        add_config_if_missing(repo, "remote.origin.push", "refs/notes/commits:refs/notes/commits")
         add_config_if_missing(repo, "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
         add_config_if_missing(repo, "remote.origin.fetch", "+refs/tracy/*:refs/tracy/*")
-        add_config_if_missing(repo, "remote.origin.fetch", "+refs/notes/*:refs/notes/*")
+        add_config_if_missing(repo, "remote.origin.fetch", "+refs/notes/*:refs/notes/origin/*")
 
         print("+----------------------------------------------------+")
         print("| [DONE] Git notes rewriting configured              |")
@@ -117,10 +117,11 @@ def main():
         for cmd in [
             ["fetch", "origin"],
             ["fetch", "origin", "+refs/tracy/*:refs/tracy/*"],
-            ["fetch", "origin", "+refs/notes/commits:refs/notes/commits"],
         ]:
             if not run_git(repo, cmd):
                 ok = False
+        # Merge remote notes into local after fetch (non-fatal)
+        run_git(repo, ["notes", "merge", "--strategy=union", "refs/notes/origin/commits"])
         if not ok:
             print("  [INFO] No remote tracing data found")
         else:
@@ -147,7 +148,7 @@ def main():
 
     rows = []
 
-    for hook in ["pre-commit", "post-commit", "post-rewrite", "post-fetch", "pre-push"]:
+    for hook in ["pre-commit", "post-commit", "post-rewrite", "post-fetch", "post-merge", "reference-transaction", "pre-push"]:
         source_hook = hooks_source / f"{hook}.py"
         tracy_hook = hooks_dir / f"{hook}.tracy"
         dest_hook = hooks_dir / hook
