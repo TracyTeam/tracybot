@@ -1,8 +1,7 @@
 import * as vscode from 'vscode';
 import pLimit from 'p-limit';
 import { spawn } from "child_process";
-import * as fs from "fs";
-import * as path from "path";
+
 import { bleu } from 'bleu-score';
 import { Change, CommitInfo, DiffHunk, History } from "./history/types";
 
@@ -47,21 +46,17 @@ export async function runGit(repoPath: string, args: string[]): Promise<string> 
   });
 }
 
-// OpenCode changed it to read ref files from the filesystem rather than git
-// smth smth more efficient smth smth I agree
 export async function getTracyRefCommit(repoPath: string, tracyId: string): Promise<string | null> {
-  const refPath = path.join(repoPath, ".git", "refs", "tracy", tracyId);
   try {
-    return fs.readFileSync(refPath, "utf-8").trim();
+    return await runGit(repoPath, ["rev-parse", `refs/tracy/${tracyId}`]);
   } catch {
     return null;
   }
 }
 
 export async function getTracyLocalRefCommit(repoPath: string, tracyId: string): Promise<string | null> {
-  const refPath = path.join(repoPath, ".git", "refs", "tracy-local", tracyId);
   try {
-    return fs.readFileSync(refPath, "utf-8").trim();
+    return await runGit(repoPath, ["rev-parse", `refs/tracy-local/${tracyId}`]);
   } catch {
     return null;
   }
