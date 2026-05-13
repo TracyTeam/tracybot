@@ -2,9 +2,127 @@ name: Manual Release
 
 on:
   workflow_dispatch:
+    inputs:
+      version_bump:
+        description: 'Select version bump type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
 
 jobs:
-  placeholder:
+  # Bumps the version, tags it, and creates the baseline GitHub Release
+  create-release:
+    name: Cut Release Tag
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
     steps:
-      - run: echo "Placeholder workflow to enable UI button."
+      # generate a short-lived token from the CI app
+      - name: Generate GitHub App Token
+        id: generate-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      # pass that token to checkout to authorize pushes with protection rule bypass
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ steps.generate-token.outputs.token }}
+
+      - name: Configure Git User
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump Version & Tag
+        id: version
+        working-directory: vscode-extension
+        run: |
+          git checkout ${{ github.ref_name }}
+          NEW_VERSION=$(npm version ${{ inputs.version_bump }} --no-git-tag-version)
+          echo "tag=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+          git add package.json package-lock.json
+          git commit -m "chore: release $NEW_VERSION"
+          git tag $NEW_VERSION
+
+      - name: Push commit and tag to main
+        run: |
+          git push origin ${{ github.ref_name }}
+          git push origin ${{ steps.version.outputs.tag }}
+
+      - name: Create Base GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Create an empty release container marked as latest
+          gh release create ${{ steps.version.outputs.tag }} \
+            --title "${{ steps.version.outputs.tag }}" \
+            --generate-notes \
+            --latest
+
+  # Builds and appends the VS Code Extension asset
+  package-vscode:
+    name: Build & Upload VS Code Extension
+    needs: create-release
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: vscode-extension
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.create-release.outputs.tag }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: vscode-extension/package-lock.json
+
+      - run: npm ci
+      - run: npm run compile
+      - run: npx vsce package --out vscode-extension.vsix
+
+      # Use softprops to cleanly append the asset to the existing tag
+      - name: Upload VSIX to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.create-release.outputs.tag }}
+          files: vscode-extension/vscode-extension.vsix
+
+  # Builds and appends the OpenCode Plugin asset
+  package-opencode:
+    name: Build & Upload OpenCode Plugin
+    needs: create-release
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: opencode-plugin
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.create-release.outputs.tag }}
+
+      - uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - run: bun install
+      - run: bun run build
+
+      - name: Upload OpenCode Asset to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.create-release.outputs.tag }}
+          files: opencode-plugin/dist/tracybot-oc.js
+

@@ -47,20 +47,67 @@ cd opencode-plugin
 bun run deploy
 ```
 
-### 3. Run the VS Code Extension
+### 3. Install the VSCode Extension
 
-There are 2 different ways of using our extension
+#### Automated installation (recommended)
 
-Option 1. Run
+##### Linux & macOS
 
+In the terminal, run
 ```bash
-bash -c "curl -Ls -o tracy.vsix https://github.com/TracyTeam/tracybot/releases/latest/download/vscode-extension.vsix && code --install-extension tracy.vsix && rm tracy.vsix"
+curl -fsSL https://raw.githubusercontent.com/TracyTeam/tracybot/main/vscode-extension/install.sh | bash
 ```
 
-Option 2. Manual install
-1. Download packaged extension
-```bash
-bash -c "curl -Ls -o tracy.vsix https://github.com/TracyTeam/tracybot/releases/latest/download/vscode-extension.vsix"
+##### Windows
+
+In Powershell, run
+```powershell
+powershell -Command "irm https://raw.githubusercontent.com/TracyTeam/tracybot/main/install.ps1 | iex"
 ```
-Then open VSCode and go to EXTENSIONS (left side) --> Click on the 3 dots --> Install from vsix and choose the downloaded .vsix file
+
+#### Manual installation
+
+Alternatively, the extension can be installed manually.
+
+1. Download the packaged extension from the [latest release](https://github.com/TracyTeam/tracybot/releases/latest)
+or with
+```bash
+curl -fsSL -o tracy.vsix https://github.com/TracyTeam/tracybot/releases/latest/download/vscode-extension.vsix
+```
+
+2. In VSCode, go to `EXTENSIONS tab --> Click on the 3 dots --> Install from vsix` and choose the downloaded .vsix file
+
+### 4. Install the OpenCode Plugin
+
+If you wish to use the Tracybot OpenCode integration, the OpenCode plugin needs to be installed.
+
+#### From VSCode
+
+If the VSCode extension is installed, you will be prompted to install the plugin if it was not yet installed.
+You may choose to install it globally (global OpenCode plugin directory), or per project (.opencode directory in the project).
+
+#### Automated Installation
+
+To install the plugin from the terminal, run:
+
+##### Linux & macOS
+```bash
+curl -fsSL https://raw.githubusercontent.com/TracyTeam/tracybot/main/opencode-plugin/install.sh | bash
+```
+
+##### Windows
+```powershell
+powershell -Command "irm https://raw.githubusercontent.com/TracyTeam/tracybot/main/opencode-plugin/install.sh | iex"
+```
+
+#### Manual Installation
+
+1. Download the built plugin (`tracybot-oc.js`) from the [latest release](https://github.com/TracyTeam/tracybot/releases/latest) 
+or with
+```bash
+curl -fsSL -o tracy.vsix https://github.com/TracyTeam/tracybot/releases/latest/download/tracybot-oc.js
+```
+
+
+2. Place the downloaded file into the following directory: `$HOME/.config/opencode/plugin`
 
