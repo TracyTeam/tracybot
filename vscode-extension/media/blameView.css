@@ -47,6 +47,17 @@ tr.ai-line:hover td        { background: rgba(128,0,255,.28); }
 tr.ai-selected td          { background: var(--selected-bg) !important; }
 tr.ai-selected td.line-num { color: var(--accent); opacity: 1; }
 
+/* Selected-line cursor — distinct from the broader tasklet selection.
+   This is the single line the user is "pointing at" inside the selected
+   tasklet; the previous-tasklets dropdown is keyed off this line. */
+tr.ai-line-cursor td {
+  background: rgba(128, 0, 255, 0.85) !important;
+  color: #fff !important;
+  box-shadow: inset 3px 0 0 #fff;
+}
+tr.ai-line-cursor td.line-num { color: #fff !important; opacity: 1; font-weight: 600; }
+
+
 /* ── Right: prompt panel ── */
 #prompt-panel   { flex: 1 1 45%; display: flex; flex-direction: column; overflow: hidden; min-width: 280px; }
 #prompt-header  { padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 11px; color: var(--text-dim); letter-spacing: .08em; text-transform: uppercase; flex-shrink: 0; }
@@ -219,6 +230,64 @@ tr.ai-selected td.line-num { color: var(--accent); opacity: 1; }
 .tasklet-list    { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 2px; }
 .tasklet-list li { padding: 8px 12px; border-radius: var(--radius); cursor: pointer; font-size: 13px; color: var(--text); border: 1px solid transparent; transition: background 100ms, border-color 100ms; }
 .tasklet-list li:hover { background: var(--accent-dim); border-color: rgba(128,0,255,.25); color: var(--text-bright); }
+
+/* ── Previous tasklets dropdown ── */
+.previous-tasklets { margin: 8px 0 24px; }
+
+.prev-dropdown {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+.prev-dropdown > summary {
+  cursor: pointer;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: var(--text-bright);
+  list-style: none;
+  position: relative;
+  user-select: none;
+}
+.prev-dropdown > summary::-webkit-details-marker { display: none; }
+.prev-dropdown > summary::after {
+  content: '▾';
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 10px;
+  color: var(--text-dim);
+  transition: transform 120ms;
+}
+.prev-dropdown[open] > summary::after { transform: translateY(-50%) rotate(180deg); }
+.prev-dropdown > summary:hover { background: var(--accent-dim); color: var(--accent); }
+
+.prev-tasklet-list {
+  list-style: none;
+  padding: 4px;
+  margin: 0;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.prev-tasklet-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 100ms, border-color 100ms;
+}
+.prev-tasklet-item:hover {
+  background: var(--accent-dim);
+  border-color: rgba(128, 0, 255, .25);
+}
+.prev-name { font-size: 12px; color: var(--text-bright); }
+.prev-meta { font-size: 10px; color: var(--text-dim); letter-spacing: .04em; }
 
 /* ── Resize handle ── */
 #resize-handle { width: 4px; cursor: col-resize; background: var(--border); flex-shrink: 0; transition: background 150ms; }

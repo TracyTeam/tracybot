@@ -14,6 +14,9 @@ let buildHistoryLock: Promise<void> | null = null;
 // Built once after history loads; updated on each blameAI invocation
 let lineMap: LineMap = new Map();
 let displayLineMap: LineMap = new Map();
+// Per-file, all tasklets (including those whose live lines have been fully
+// overridden but that still have ghost attribution at some current-tree line).
+let fileTaskletsMap: Map<string, TaskletUI[]> = new Map();
 
 // Builds the lineMap from the loaded history
 function buildLineMap(h: typeof history & {}): LineMap {
@@ -32,6 +35,14 @@ function buildLineMap(h: typeof history & {}): LineMap {
     result.set(file.path, fileMap);
   }
 
+  return result;
+}
+
+function buildFileTaskletsMap(h: typeof history & {}): Map<string, TaskletUI[]> {
+  const result = new Map<string, TaskletUI[]>();
+  for (const file of h.files) {
+    result.set(file.path, file.tasklets as TaskletUI[]);
+  }
   return result;
 }
 
@@ -67,6 +78,7 @@ async function buildHistoryAndSet(ctx: vscode.ExtensionContext): Promise<void> {
       history = result as unknown as { files: { path: string; tasklets: TaskletUI[] }[] } & History;
       lineMap = buildLineMap(history);
       displayLineMap = new Map(lineMap);
+      fileTaskletsMap = buildFileTaskletsMap(history);
 
       await ctx.workspaceState.update('tracybot.buildHistoryCache', getSerializedCache());
     } finally {
@@ -177,6 +189,9 @@ export async function activate(context: vscode.ExtensionContext) {
           return relativePath ? lineMap.get(relativePath) : undefined;
         })();
 
+      const relativePath = getDocumentRelativePath(document);
+      const fileTasklets = relativePath ? (fileTaskletsMap.get(relativePath) ?? []) : [];
+
       if (!fileMap || fileMap.size === 0) {
         vscode.window.showInformationMessage(
           `AI Blame: No AI-generated lines found in "${fileName}".`
@@ -201,7 +216,7 @@ export async function activate(context: vscode.ExtensionContext) {
       panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'icon.png');
 
       const initialLine = editor.selection.active.line;
-      panel.webview.html = getBlameViewHtml(fileContent, fileName, fileMap, panel.webview, context.extensionUri, initialLine);
+      panel.webview.html = getBlameViewHtml(fileContent, fileName, fileMap, fileTasklets, panel.webview, context.extensionUri, initialLine);
     })
   );
 

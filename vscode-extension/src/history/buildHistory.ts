@@ -21,7 +21,11 @@ export function hydrateCache(serialized: Record<string, Change[]> | undefined) {
     return;
   }
 
-  commitHistoryCache = new Map(Object.entries(serialized));
+  const entries: [string, Change[]][] = Object.entries(serialized).map(([k, changes]) => [
+    k,
+    changes.map(c => ({ ...c, ghostLines: c.ghostLines ?? [] })),
+  ]);
+  commitHistoryCache = new Map(entries);
 }
 
 export function getSerializedCache(): Record<string, Change[]> {
@@ -348,6 +352,7 @@ async function extractSnapshot(
         return {
           filePath,
           lines: filteredLines,
+          ghostLines: [],
           model: snapshot.authorName,
           name: title,
           tasklet_messages: messages,
@@ -392,15 +397,22 @@ async function propagateChanges(
         }
 
         return fileChanges.map(change => {
-          const surviving = consumeAndShift(change.lines, hunks);
-          return surviving.length > 0
-            ? { ...change, lines: surviving }
-            : null;
+          const liveResult = consumeAndShift(change.lines, hunks);
+          const ghostShifted = consumeAndShiftGhost(change.ghostLines, hunks);
+          const newGhost = mergeSorted(ghostShifted, liveResult.consumedNewPositions);
+          if (liveResult.survivors.length > 0 || newGhost.length > 0) {
+            return { ...change, lines: liveResult.survivors, ghostLines: newGhost };
+          }
+          return null;
         }).filter(change => change !== null);
       })
   );
 
   return results.flat();
+}
+
+function mergeSorted(a: number[], b: number[]): number[] {
+  return Array.from(new Set([...a, ...b])).sort((x, y) => x - y);
 }
 
 async function buildCommittedHistory(
@@ -414,7 +426,7 @@ async function buildCommittedHistory(
     const cached = commitHistoryCache.get(mainCommits[index].hash);
     if (cached) {
       // Deep clone to prevent accidental cache mutations
-      accumulatedChanges = cached.map(cache => ({ ...cache, lines: [...cache.lines] }));
+      accumulatedChanges = cached.map(cache => ({ ...cache, lines: [...cache.lines], ghostLines: [...(cache.ghostLines ?? [])] }));
       startIndex = index + 1;
 
       break;
@@ -499,9 +511,12 @@ async function buildUncommittedChanges(
 // Drops lines that fall inside a significant modified or deleted hunk
 // Insignificant hunks preserve AI attribution - ALL new lines from the hunk are kept
 // Pure insertions (oldCount = 0) never consume old lines, only shift subsequent ones
-function consumeAndShift(lines: number[], hunks: DiffHunk[]): number[] {
+// Also returns the new-tree positions of lines consumed by significant hunks so the
+// caller can record them as "ghost" attribution for the previous owner.
+function consumeAndShift(lines: number[], hunks: DiffHunk[]): { survivors: number[]; consumedNewPositions: number[] } {
   const survivingLines = new Set<number>();
   const processedInsignificantHunks = new Set<DiffHunk>();
+  const consumedHunks = new Set<DiffHunk>();
 
   const sortedLines = [...lines].sort((a, b) => a - b);
   const sortedHunks = [...hunks].sort((a, b) => a.oldStart - b.oldStart);
@@ -519,6 +534,7 @@ function consumeAndShift(lines: number[], hunks: DiffHunk[]): number[] {
     if (containingHunk) {
       if (containingHunk.isSignificant) {
         // Significant hunk: consume the line (user override)
+        consumedHunks.add(containingHunk);
         continue;
       } else {
         // Insignificant hunk: preserve AI attribution for ALL new lines in the hunk
@@ -543,7 +559,26 @@ function consumeAndShift(lines: number[], hunks: DiffHunk[]): number[] {
     }
   }
 
-  return Array.from(survivingLines).sort((a, b) => a - b);
+  const consumedNewPositions = new Set<number>();
+  for (const hunk of consumedHunks) {
+    for (let i = 0; i < hunk.newCount; i++) {
+      consumedNewPositions.add(hunk.newStart + i);
+    }
+  }
+
+  return {
+    survivors: Array.from(survivingLines).sort((a, b) => a - b),
+    consumedNewPositions: Array.from(consumedNewPositions).sort((a, b) => a - b),
+  };
+}
+
+// Ghost lines flow through a diff like live lines, but lines consumed by a
+// significant hunk are NOT dropped — they relocate to the new-tree positions
+// so the historical attribution chain stays linked through subsequent edits.
+function consumeAndShiftGhost(lines: number[], hunks: DiffHunk[]): number[] {
+  if (lines.length === 0) { return []; }
+  const { survivors, consumedNewPositions } = consumeAndShift(lines, hunks);
+  return mergeSorted(survivors, consumedNewPositions);
 }
 
 // For each AI change, drop lines that fall inside a user-modified hunk
@@ -573,10 +608,13 @@ async function consumeUserChanges(
 
       return fileChanges
         .map(change => {
-          const survivingLines = consumeAndShift(change.lines, userHunks);
-          return survivingLines.length > 0
-            ? { ...change, lines: survivingLines }
-            : null;
+          const liveResult = consumeAndShift(change.lines, userHunks);
+          const ghostShifted = consumeAndShiftGhost(change.ghostLines, userHunks);
+          const newGhost = mergeSorted(ghostShifted, liveResult.consumedNewPositions);
+          if (liveResult.survivors.length > 0 || newGhost.length > 0) {
+            return { ...change, lines: liveResult.survivors, ghostLines: newGhost };
+          }
+          return null;
         })
         .filter((change) => change !== null);
     })
@@ -610,8 +648,10 @@ function deduplicateAILines(changes: Change[]): Change[] {
       }
 
       const filtered = fileChanges[i].lines.filter(l => !laterLines.has(l));
-      if (filtered.length > 0) {
-        result.push({ ...fileChanges[i], lines: filtered });
+      const overridden = fileChanges[i].lines.filter(l => laterLines.has(l));
+      const ghost = mergeSorted(fileChanges[i].ghostLines, overridden);
+      if (filtered.length > 0 || ghost.length > 0) {
+        result.push({ ...fileChanges[i], lines: filtered, ghostLines: ghost });
       }
     }
   }

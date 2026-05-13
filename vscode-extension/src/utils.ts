@@ -284,6 +284,7 @@ export function groupChangesByFile(changes: Change[]): History["files"] {
     if (duplicate) {
       // remove the duplicates by turning them into a set then back to an array
       duplicate.lines = Array.from(new Set([...duplicate.lines, ...change.lines])).sort((a, b) => a - b);
+      duplicate.ghostLines = Array.from(new Set([...duplicate.ghostLines, ...change.ghostLines])).sort((a, b) => a - b);
     } else {
       existing.push(change);
     }
@@ -297,10 +298,12 @@ export function groupChangesByFile(changes: Change[]): History["files"] {
     files.push({
       path,
       tasklets: fileChanges.map(change => ({
+        id: change.snapshotHash,
         model: change.model,
         name: change.name,
         messages: change.tasklet_messages,
         lines: change.lines,
+        ghostLines: change.ghostLines,
         originCommitHash: change.originCommitHash,
       }))
     });
