@@ -24,10 +24,12 @@ const historySchema = z.object({
       path: z.string(),
       tasklets: z.array(
         z.object({
+          id: z.string(),
           model: z.string(),
           name: z.string(),
           messages: z.array(taskletMessage),
           lines: z.array(z.number()),
+          ghostLines: z.array(z.number()),
           originCommitHash: z.string().optional(),
         })
       )
@@ -50,6 +52,7 @@ export interface CommitInfo {
 export interface Change {
   filePath: string;
   lines: number[];
+  ghostLines: number[];
   model: string;
   name: string;
   tasklet_messages: TaskletMessage[];

@@ -6,9 +6,10 @@ interface TaskletData {
   id: string;
   name: string;
   model: string;
-  lines: number[];     // 0-based
+  lines: number[];        // 0-based, currently-owned (live)
+  ghostLines: number[];   // 0-based, previously-owned but overridden
   messages: TaskletMessage[];
-  chunks: number[][];  // pre-computed contiguous line runs
+  chunks: number[][];     // pre-computed contiguous live line runs
   originCommitHash?: string;
 }
 
@@ -16,39 +17,63 @@ export function getBlameViewHtml(
   fileContent: string,
   fileName: string,
   fileMap: Map<number, TaskletUI>,
+  fileTasklets: TaskletUI[],
   webview: vscode.Webview,
   extensionUri: vscode.Uri,
   initialLine?: number
 ): string {
   const tasklets: Record<string, TaskletData> = {};
   const lineToTaskletId: Record<string, string> = {};
-  const seenTasklets = new Map<TaskletUI, string>();
+  const linePrevious: Record<string, string[]> = {};
 
-  let idCounter = 0;
-  for (const [line, tasklet] of fileMap.entries()) {
-    let id = seenTasklets.get(tasklet);
-    if (id === undefined) {
-      id = String(idCounter++);
-      seenTasklets.set(tasklet, id);
-      const lines0 = tasklet.lines.map(l => l - 1);
-      tasklets[id] = {
-        id,
-        name: tasklet.name,
-        model: tasklet.model,
-        lines: lines0,
-        messages: tasklet.messages ?? [],
-        chunks: getContiguousChunks(lines0),
-        originCommitHash: tasklet.originCommitHash,
-      };
-    }
-    lineToTaskletId[String(line)] = id;
+  // Build the tasklet record. fileTasklets is in chronological order
+  // (oldest -> newest); we preserve that ordering so the previous-tasklets
+  // dropdown can show history naturally.
+  for (const t of fileTasklets) {
+    const lines0 = t.lines.map(l => l - 1);
+    const ghost0 = (t.ghostLines ?? []).map(l => l - 1);
+    tasklets[t.id] = {
+      id: t.id,
+      name: t.name,
+      model: t.model,
+      lines: lines0,
+      ghostLines: ghost0,
+      messages: t.messages ?? [],
+      chunks: getContiguousChunks(lines0),
+      originCommitHash: t.originCommitHash,
+    };
   }
 
-  const linesJson = JSON.stringify(fileContent.split('\n'));
-  const lineMapJson = JSON.stringify(lineToTaskletId);
-  const taskletsJson = JSON.stringify(tasklets);
-  const fileNameJson = JSON.stringify(fileName);
-  const initialLineJson = JSON.stringify(initialLine ?? null);
+  // Map line -> current live owner (only live lines).
+  for (const [line, tasklet] of fileMap.entries()) {
+    lineToTaskletId[String(line)] = tasklet.id;
+  }
+
+  // For each line in the file, the chronological list of tasklets that touched
+  // it (live or ghost) excluding the current live owner. Only tasklets that
+  // still have surviving (live) lines somewhere are included — fully-overridden
+  // tasklets are hidden from both the dropdown and the All Tasklets view.
+  for (const t of fileTasklets) {
+    if (t.lines.length === 0) { continue; }
+    const lines0 = t.lines.map(l => l - 1);
+    const ghost0 = (t.ghostLines ?? []).map(l => l - 1);
+    const touched = new Set<number>([...lines0, ...ghost0]);
+    for (const l of touched) {
+      const owner = lineToTaskletId[String(l)];
+      if (owner === t.id) { continue; }
+      if (!linePrevious[String(l)]) { linePrevious[String(l)] = []; }
+      if (!linePrevious[String(l)].includes(t.id)) {
+        linePrevious[String(l)].push(t.id);
+      }
+    }
+  }
+
+  const linesJson        = JSON.stringify(fileContent.split('\n'));
+  const lineMapJson      = JSON.stringify(lineToTaskletId);
+  const linePreviousJson = JSON.stringify(linePrevious);
+  const taskletsJson     = JSON.stringify(tasklets);
+  const fileNameJson     = JSON.stringify(fileName);
+  const initialLineJson  = JSON.stringify(initialLine ?? null);
 
   const mediaUri = (file: string) =>
     webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', file));
@@ -99,12 +124,14 @@ export function getBlameViewHtml(
 </div>
 
 <script>
-  // global constants for the webview script; these are populated by the server based on the file being viewed and the blame data we have for it
-  const LINES        = ${escapeScriptTag(linesJson)};
-  const LINE_MAP     = ${escapeScriptTag(lineMapJson)};
-  const TASKLETS     = ${escapeScriptTag(taskletsJson)};
-  const FILE_NAME    = ${escapeScriptTag(fileNameJson)};
-  const INITIAL_LINE = ${escapeScriptTag(initialLineJson)};
+  // global constants for the webview script; populated by the server based on
+  // the file being viewed and the blame data we have for it
+  const LINES         = ${escapeScriptTag(linesJson)};
+  const LINE_MAP      = ${escapeScriptTag(lineMapJson)};
+  const LINE_PREVIOUS = ${escapeScriptTag(linePreviousJson)};
+  const TASKLETS      = ${escapeScriptTag(taskletsJson)};
+  const FILE_NAME     = ${escapeScriptTag(fileNameJson)};
+  const INITIAL_LINE  = ${escapeScriptTag(initialLineJson)};
 </script>
 <script src="${jsUri}"></script>
 </body>

@@ -1,9 +1,11 @@
 (function () {
   'use strict';
 
-  // LINES, LINE_MAP, TASKLETS, FILE_NAME, INITIAL_LINE are injected as globals by blameView.ts
+  // LINES, LINE_MAP, LINE_PREVIOUS, TASKLETS, FILE_NAME, INITIAL_LINE
+  // are injected as globals by blameView.ts
 
   let selectedTaskletId = null;
+  let selectedLine = null;
 
   const tbody = document.getElementById('code-body');
 
@@ -41,7 +43,6 @@
     document.getElementById('hljs-theme').href = getHljsThemeUrl();
   }
 
-  // Re-apply theme whenever VS Code switches between light/dark/high-contrast
   new MutationObserver(applyHljsTheme).observe(document.body, { attributes: true, attributeFilter: ['class'] });
   applyHljsTheme();
 
@@ -50,7 +51,6 @@
     return hljs.getLanguage(ext) ? ext : null;
   }
 
-  // Split highlight.js HTML output into per-line strings, preserving open spans across newlines
   function splitHighlightedHtml(html) {
     const rawLines = html.split('\n');
     const result = [];
@@ -58,7 +58,6 @@
 
     for (const rawLine of rawLines) {
       const lineHtml = openTags.join('') + rawLine;
-
       const stack = [];
       const tagRe = /<span[^>]*>|<\/span>/g;
       let m;
@@ -66,11 +65,9 @@
         if (m[0].startsWith('</')) { stack.pop(); }
         else { stack.push(m[0]); }
       }
-
       openTags = stack.slice();
       result.push(lineHtml + '</span>'.repeat(stack.length));
     }
-
     return result;
   }
 
@@ -78,7 +75,6 @@
     if (typeof hljs === 'undefined') { return; }
     const lang = getLanguage(FILE_NAME);
     const fullCode = LINES.join('\n');
-
     let highlighted;
     try {
       highlighted = lang
@@ -97,51 +93,67 @@
 
   applyHighlighting();
 
-  // ── Line selection ────────────────────────────────────────────────────────
+  // ── Selection state ───────────────────────────────────────────────────────
 
   function handleLineClick(lineIdx) {
-    const taskletId = LINE_MAP[String(lineIdx)];
-    if (taskletId === undefined) { return; }
+    const ownerId = LINE_MAP[String(lineIdx)];
+    if (ownerId === undefined) { return; }
 
-    if (selectedTaskletId === taskletId) {
+    // Toggle off if clicking the already-selected line of the same tasklet.
+    if (selectedLine === lineIdx && selectedTaskletId === ownerId) {
+      selectedLine = null;
       selectedTaskletId = null;
       clearSelection();
       showBlank();
-    } else {
-      selectedTaskletId = taskletId;
-      applySelection(taskletId);
-      showPrompt(taskletId);
+      return;
     }
+
+    // Clicking any AI line always switches focus to that line's live owner.
+    // Previous tasklets that ghost-overlap with this line do not absorb the
+    // click — the dropdown is the only way to reach them.
+    selectedTaskletId = ownerId;
+    selectedLine = lineIdx;
+    applySelection(selectedTaskletId);
+    showPrompt(selectedTaskletId);
   }
 
   function clearSelection() {
-    document.querySelectorAll('tr.ai-selected').forEach(tr => tr.classList.remove('ai-selected'));
+    document.querySelectorAll('tr.ai-selected, tr.ai-line-cursor')
+      .forEach(tr => tr.classList.remove('ai-selected', 'ai-line-cursor'));
   }
 
   function applySelection(taskletId) {
     clearSelection();
-    const tasklet = TASKLETS[taskletId];
-    if (!tasklet) { return; }
-    tasklet.lines.forEach(li => {
+    const t = TASKLETS[taskletId];
+    if (!t) { return; }
+
+    // Highlight only live (currently owned) lines. Ghost lines — the
+    // tasklet's overridden positions — are intentionally NOT decorated:
+    // their current visual owner is the live tasklet that overrode them
+    // (or, if the override was a significant user edit, they are plain
+    // text and must remain unhighlighted).
+    t.lines.forEach(li => {
       const tr = tbody.querySelector(`tr[data-line="${li}"]`);
       if (tr) { tr.classList.add('ai-selected'); }
     });
+
+    if (selectedLine !== null) {
+      const tr = tbody.querySelector(`tr[data-line="${selectedLine}"]`);
+      if (tr) { tr.classList.add('ai-line-cursor'); }
+    }
   }
 
   const promptContent = document.getElementById('prompt-content');
 
   // Auto-select initial line
   if (INITIAL_LINE !== null) {
-
-    // If the line is part of the tasklet, select the whole tasklet and show its prompt
     const taskletId = LINE_MAP[String(INITIAL_LINE)];
     if (taskletId !== undefined) {
       selectedTaskletId = taskletId;
+      selectedLine = INITIAL_LINE;
       applySelection(taskletId);
       showPrompt(taskletId);
     }
-
-    // In any case (even if there is no tasklet assosiated with the selected line), scroll the line into view
     const tr = tbody.querySelector(`tr[data-line="${INITIAL_LINE}"]`);
     if (tr) { tr.scrollIntoView({ block: 'center', behavior: 'instant' }); }
   }
@@ -159,6 +171,11 @@
   function renderMd(text) {
     if (!text) { return ''; }
     return (typeof marked !== 'undefined') ? marked.parse(text, { breaks: true }) : `<p>${esc(text)}</p>`;
+  }
+
+  function previousTaskletIdsForLine(lineIdx) {
+    if (lineIdx === null || lineIdx === undefined) { return []; }
+    return LINE_PREVIOUS[String(lineIdx)] || [];
   }
 
   function showPrompt(taskletId) {
@@ -191,6 +208,32 @@
         }).join('')
       : `<div class="message-box prompt build"><p><em>No messages recorded for this tasklet.</em></p></div>`;
 
+    const linesCount = t.lines.length;
+    const linesPill = linesCount > 0
+      ? `<span class="meta-pill">${linesCount}&nbsp;line${linesCount !== 1 ? 's' : ''}</span>`
+      : '';
+
+    const prevIds = previousTaskletIdsForLine(selectedLine);
+    const prevDropdownHtml = (selectedLine !== null && prevIds.length > 0)
+      ? `
+        <div class="previous-tasklets">
+          <div class="section-label">Previous tasklets for line ${selectedLine + 1}</div>
+          <details class="prev-dropdown">
+            <summary>${prevIds.length} previous tasklet${prevIds.length !== 1 ? 's' : ''} touched this line</summary>
+            <ul class="prev-tasklet-list">
+              ${prevIds.map(id => {
+                const pt = TASKLETS[id];
+                if (!pt) { return ''; }
+                return `<li class="prev-tasklet-item" data-id="${esc(id)}">
+                  <span class="prev-name">${esc(pt.name)}</span>
+                  <span class="prev-meta">${esc(pt.model)}</span>
+                </li>`;
+              }).join('')}
+            </ul>
+          </details>
+        </div>`
+      : '';
+
     promptContent.innerHTML = `
       <div class="tasklet-card">
         <div class="card-nav">
@@ -200,16 +243,19 @@
         <div class="card-nav-pills">
           <span class="meta-pill accent">${esc(t.model)}</span>
           ${t.originCommitHash ? `<span class="commit-chip" title="${esc(t.originCommitHash)}">${esc(t.originCommitHash.slice(0, 8))}</span>` : ''}
-          <span class="meta-pill">${t.lines.length}&nbsp;line${t.lines.length !== 1 ? 's' : ''}</span>
+          ${linesPill}
         </div>
 
         <div class="section-label">Messages</div>
         <div class="messages-section">${messagesHtml}</div>
 
+        ${t.chunks.length > 0 ? `
         <div class="lines-section">
           <div class="section-label">Chunks</div>
           <div class="lines-chips">${chunkChips}</div>
-        </div>
+        </div>` : ''}
+
+        ${prevDropdownHtml}
       </div>`;
 
     promptContent.querySelectorAll('.line-chip').forEach(chip => {
@@ -227,14 +273,52 @@
       showTaskletMenu();
       clearSelection();
       selectedTaskletId = null;
+      selectedLine = null;
+    });
+
+    promptContent.querySelectorAll('.prev-tasklet-item').forEach(li => {
+      li.addEventListener('click', () => {
+        selectPreviousTasklet(li.dataset.id);
+      });
     });
   }
 
+  function selectPreviousTasklet(taskletId) {
+    const t = TASKLETS[taskletId];
+    if (!t || t.lines.length === 0) { return; }
+
+    selectedTaskletId = taskletId;
+
+    // Move the selected line to the live line of this tasklet nearest the
+    // current selection; this is what the user sees as "the cursor jumped
+    // to a surviving piece of this tasklet's work."
+    let nextLine = t.lines[0];
+    if (selectedLine !== null) {
+      let bestDelta = Infinity;
+      for (const li of t.lines) {
+        const delta = Math.abs(li - selectedLine);
+        if (delta < bestDelta) { bestDelta = delta; nextLine = li; }
+      }
+    }
+    selectedLine = nextLine;
+
+    applySelection(selectedTaskletId);
+    showPrompt(selectedTaskletId);
+
+    const tr = tbody.querySelector(`tr[data-line="${selectedLine}"]`);
+    if (tr) { tr.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+  }
+
   // ── Tasklet menu ──────────────────────────────────────────────────────────
-  const TASKLET_LIST = Object.values(TASKLETS);
+  // Only tasklets that still own at least one live line are listed; fully
+  // overridden tasklets are only reachable via the per-line previous-tasklets
+  // dropdown.
+  function liveTaskletList() {
+    return Object.values(TASKLETS).filter(t => t.lines.length > 0);
+  }
 
   function showTaskletMenu() {
-    const items = TASKLET_LIST
+    const items = liveTaskletList()
       .map(t => `<li data-id="${esc(t.id)}">${esc(t.name)}</li>`)
       .join('');
 
@@ -247,10 +331,13 @@
     promptContent.querySelectorAll('.tasklet-list li').forEach(li => {
       li.addEventListener('click', () => {
         const id = li.dataset.id;
+        const t = TASKLETS[id];
         selectedTaskletId = id;
+        // Move the line cursor onto this tasklet's first live line so the
+        // previous-tasklets dropdown reflects this tasklet's context.
+        selectedLine = t && t.lines.length > 0 ? t.lines[0] : null;
         applySelection(id);
-        const first = tbody.querySelector('tr.ai-selected');
-        // Scroll to the first line of the selected tasklet
+        const first = tbody.querySelector('tr.ai-line-cursor') || tbody.querySelector('tr.ai-selected');
         if (first) { first.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
         showPrompt(id);
       });
