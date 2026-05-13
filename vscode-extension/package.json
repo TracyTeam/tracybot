@@ -2,7 +2,7 @@
   "name": "tracybot-extension",
   "displayName": "tracybot-extension",
   "description": "",
-  "version": "0.0.2",
+  "version": "1.0.0",
   "engines": {
     "vscode": "^1.110.0"
   },
