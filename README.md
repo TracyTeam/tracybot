@@ -11,7 +11,7 @@ Provide complete traceability between AI-generated code changes and the prompts 
 Tracybot consists of three components that work together:
 - **[opencode-plugin](./opencode-plugin/README.md)** - Plugin for opencode CLI that records snapshots during AI interactions
 - **[vscode-extension](./vscode-extension/README.md)** - VS Code extension to view AI blame information
-- **[tracking](./tracking/README.md)** - Git hooks and scripts for state tracking using hidden commits
+- **[tracking](./tracking/README.md)** - Git hooks and scripts for state tracking using hidden commits and synced git notes
 
 ```
 ┌───────────────────┐     ┌──────────────────┐     ┌────────────────────┐

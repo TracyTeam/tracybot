@@ -7,7 +7,7 @@ LOCK_FILE = ".git/tracybot/fetch-repair.lock"
 TRACY_FETCH_RULES = [
     "+refs/heads/*:refs/remotes/origin/*",
     "+refs/tracy/*:refs/tracy/*",
-    "+refs/notes/*:refs/notes/*",
+    "+refs/notes/*:refs/notes/origin/*",
 ]
 
 
@@ -69,6 +69,12 @@ def re_fetch():
         run_git(["fetch", "origin", refspec])
 
 
+def merge_remote_notes():
+    has_staging = run_git(["rev-parse", "--verify", "refs/notes/origin/commits"], capture=True)
+    if has_staging:
+        run_git(["notes", "merge", "--strategy=union", "refs/notes/origin/commits"])
+
+
 def main():
     if is_locked():
         remove_lock()
@@ -83,6 +89,8 @@ def main():
     if changed:
         create_lock()
         re_fetch()
+
+    merge_remote_notes()
 
 
 if __name__ == "__main__":

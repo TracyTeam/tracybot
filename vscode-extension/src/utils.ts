@@ -339,6 +339,15 @@ export function getContiguousChunks(lines: number[]): number[][] {
   return chunks;
 }
 
+export async function mergeRemoteNotes(repoPath: string): Promise<void> {
+  try {
+    await runGit(repoPath, ["rev-parse", "--verify", "refs/notes/origin/commits"]);
+    await runGit(repoPath, ["notes", "merge", "--strategy=union", "refs/notes/origin/commits"]);
+  } catch {
+	console.log("No remote notes to merge or failed to merge, skipping.");
+  }
+}
+
 export async function getRepoPath(): Promise<string | undefined> {
   // Get the built-in git extension
   const gitExtension = vscode.extensions.getExtension('vscode.git')?.exports;
