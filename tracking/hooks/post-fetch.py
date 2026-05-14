@@ -1,4 +1,4 @@
-import subprocess
+from hook_utils import run_git
 import os
 from pathlib import Path
 import sys
@@ -10,20 +10,6 @@ TRACY_FETCH_RULES = [
     "+refs/tracy/*:refs/tracy/*",
     "+refs/notes/*:refs/notes/origin/*",
 ]
-
-
-def run_git(args, capture=False, check=False):
-    try:
-        result = subprocess.run(
-            ["git"] + args,
-            text=True,
-            stdout=subprocess.PIPE if capture else None,
-            stderr=sys.stderr,
-            check=check
-        )
-        return result.stdout.strip() if capture else result.returncode == 0
-    except subprocess.CalledProcessError:
-        return None if capture else False
 
 
 def is_locked():

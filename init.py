@@ -225,6 +225,12 @@ fi
         status_clean = re.sub(r'\033\[[0-9;]*m', '', status)
         rows.append(f"| {hook:<16} | {status}{' ' * (31 - len(status_clean))} |")
 
+    # Copy shared hook utilities
+    hook_utils_src = hooks_source / "hook_utils.py"
+    hook_utils_dst = hooks_dir / "hook_utils.py"
+    shutil.copy(hook_utils_src, hook_utils_dst)
+    hook_utils_dst.chmod(0o644)
+
     print("+------------------+---------------------------------+")
     print(f"| {'Hook':<16} | {'Status':<31} |")
     print("+------------------+---------------------------------+")
