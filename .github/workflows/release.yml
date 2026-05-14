@@ -90,6 +90,7 @@ jobs:
           cache-dependency-path: vscode-extension/package-lock.json
 
       - run: npm ci
+      - run: cp ../init.py . && cp -r ../tracking .
       - run: npm run compile
       - run: npx vsce package --out vscode-extension.vsix
 
