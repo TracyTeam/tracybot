@@ -1,5 +1,5 @@
 import subprocess
-
+import sys
 
 def run_git(args, capture=False):
     try:
@@ -7,7 +7,7 @@ def run_git(args, capture=False):
             ["git"] + args,
             text=True,
             stdout=subprocess.PIPE if capture else None,
-            stderr=subprocess.DEVNULL,
+            stderr=sys.stderr,
         )
         return result.stdout.strip() if capture else result.returncode == 0
     except Exception:

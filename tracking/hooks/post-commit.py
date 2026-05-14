@@ -13,7 +13,7 @@ def run_git(args, capture=False, check=False, env=None):
             ["git"] + args,
             text=True,
             stdout=subprocess.PIPE if capture else None,
-            stderr=subprocess.DEVNULL,
+            stderr=sys.stderr,
             check=check,
             env=env
         )

@@ -14,7 +14,7 @@ def run_git(args, capture=False, check=False):
             ["git"] + args,
             text=True,
             stdout=subprocess.PIPE if capture else None,
-            stderr=subprocess.DEVNULL,
+            stderr=sys.stderr,
             check=check
         )
         return result.stdout.strip() if capture else result.returncode == 0

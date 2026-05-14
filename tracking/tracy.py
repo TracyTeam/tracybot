@@ -21,7 +21,7 @@ def run_git(args, capture_output=False, check=False, cwd=None):
             ["git"] + args,
             text=True,
             stdout=subprocess.PIPE if capture_output else None,
-            stderr=subprocess.DEVNULL,
+            stderr=sys.stderr,
             check=check,
             cwd=cwd
         )
@@ -78,11 +78,10 @@ if not SESSION_ID:
     SESSION_ID = "tracy snapshot"
 
 if not USER_NAME or not USER_EMAIL:
-    if DEBUG:
-        print(f"Missing user info: NAME='{USER_NAME}', EMAIL='{USER_EMAIL}'", file=sys.stderr)
-        print(f"Git config user.name: {run_git(['config', 'user.name'], capture_output=True, cwd=REPO_ROOT)}", file=sys.stderr)
-        print(f"Git config user.email: {run_git(['config', 'user.email'], capture_output=True, cwd=REPO_ROOT)}", file=sys.stderr)
-        print("Either both --user-name and --user-email are provided, or leave them empty.", file=sys.stderr)
+    print(f"Missing user info: NAME='{USER_NAME}', EMAIL='{USER_EMAIL}'", file=sys.stderr)
+    print(f"Git config user.name: {run_git(['config', 'user.name'], capture_output=True, cwd=REPO_ROOT)}", file=sys.stderr)
+    print(f"Git config user.email: {run_git(['config', 'user.email'], capture_output=True, cwd=REPO_ROOT)}", file=sys.stderr)
+    print("Either both --user-name and --user-email are provided, or leave them empty.", file=sys.stderr)
     sys.exit(1)
 
 # -------------------------------
@@ -100,19 +99,19 @@ if INDEX_ONLY:
     if run_git(["rev-parse", "--verify", "HEAD"]):
         if run_git(["diff", "--cached", "--quiet"]):
             if DEBUG:
-                print("No staged changes detected. Skipping Tracy snapshot.", file=sys.stderr)
+                print("No staged changes detected. Skipping Tracy snapshot.", file=sys.stdout)
             sys.exit(0)
     else:
         cached = run_git(["ls-files", "--cached"], capture_output=True)
         if not cached:
             if DEBUG:
-                print("No staged changes detected. Skipping Tracy snapshot.", file=sys.stderr)
+                print("No staged changes detected. Skipping Tracy snapshot.", file=sys.stdout)
             sys.exit(0)
 else:
     status = run_git(["status", "--porcelain"], capture_output=True)
     if not status:
         if DEBUG:
-            print("No repository changes detected. Skipping Tracy snapshot.", file=sys.stderr)
+            print("No repository changes detected. Skipping Tracy snapshot.", file=sys.stdout)
         sys.exit(0)
 
 # -------------------------------
@@ -126,7 +125,7 @@ if RESET_ID:
         run_git(["config", "--unset", f"tracy.{TRACY_ID}.hidden"])
 
     if DEBUG:
-        print("Tracy chain reset.", file=sys.stderr)
+        print("Tracy chain reset.", file=sys.stdout)
 
     TRACY_ID = ""
 
@@ -219,4 +218,4 @@ if not COMMIT:
 run_git(["update-ref", REF, COMMIT])
 
 if DEBUG:
-    print(f"Committed to {REF} -> {COMMIT}", file=sys.stderr)
+    print(f"Committed to {REF} -> {COMMIT}", file=sys.stdout)
