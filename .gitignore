@@ -38,3 +38,7 @@ test/mock-repository
 
 # Repomix outputs
 repomix*.xml
+
+# Build artifacts
+vscode-extension/init.py
+vscode-extension/tracking
