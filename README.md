@@ -1,25 +1,25 @@
 # Tracybot
 
+![Representative](./public/representative.png)
+[![GitHub Release](https://img.shields.io/github/v/release/TracyTeam/tracybot)](https://github.com/TracyTeam/tracybot/releases/latest) [![License](https://img.shields.io/github/license/TracyTeam/tracybot)](LICENSE) [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/TracyTeam/tracybot/release.yml)](https://github.com/TracyTeam/tracybot/actions)
+
 Tracybot is a tool that traces AI-generated code back to the prompts that created it. It enables tracking for AI-assisted development by recording snapshots of your codebase at each AI interaction.
 
-## Goal
+## Features
 
-Provide complete traceability between AI-generated code changes and the prompts that produced them, enabling developers to understand, audit, and verify AI-assisted work.
+- **AI Traceability** - Map AI-generated lines of code back to their originating prompt
+- **Non-Invasive Storage** - Hidden Git commits and refs keep your history clean
+- **Seamless Integration** - Works with OpenCode CLI and Visual Studio Code
+- **Audit Trail** - Review AI interactions to verify, debug, or understand code origins
+- **Team Sync** - Push traces to remote for team collaboration
 
 ## Architecture
 
 Tracybot consists of three components that work together:
+
 - **[opencode-plugin](./opencode-plugin/README.md)** - Plugin for opencode CLI that records snapshots during AI interactions
 - **[vscode-extension](./vscode-extension/README.md)** - VS Code extension to view AI blame information
 - **[tracking](./tracking/README.md)** - Git hooks and scripts for state tracking using hidden commits and synced git notes
-
-```
-┌───────────────────┐     ┌──────────────────┐     ┌────────────────────┐
-│  opencode-plugin  │────▶│  tracking/hooks  │◀────│  vscode-extension  │
-│  (snapshots AI)   │     │     tracy.py     │     │  (displays blame)  │
-│  (interactions)   │     │  (stores state)  │     │                    │
-└───────────────────┘     └──────────────────┘     └────────────────────┘
-```
 
 ### How Components Communicate
 
@@ -27,87 +27,213 @@ Tracybot consists of three components that work together:
 2. **`tracy.py`** stores snapshots as hidden commits in the Git repository (using `refs/tracy-local/*` namespace)
 3. **vscode-extension** queries Git to build a history timeline and displays blame information in VS Code
 
-## Quick Getting Started
+```mermaid
+graph TB
+    subgraph "opencode-plugin"
+        Plugin["Snapshot Capture<br/>on AI Interaction"]
+    end
 
-### 1. Initialize a Repository
+    subgraph "tracking"
+        direction LR
+        TracyPy["<strong>tracy.py</strong><br/>Create Hidden Commit"]
+        Hooks["<strong>Git Hooks</strong><br/>reference-transaction<br/>pre-commit post-commit<br/>post-rewrite post-merge<br/>pre-push"]
+        Refs["<strong>Git Refs</strong><br/>refs/tracy/*<br/>refs/tracy-local/*"]
+    end
 
-```bash
-cd your-target-repository
-python /path/to/tracybot/init.py
+    subgraph "vscode-extension"
+        BlameView["AI Blame View"]
+    end
+
+    Plugin --> TracyPy
+    TracyPy --> Hooks
+    Hooks --> Refs
+    BlameView --> Refs
 ```
 
-This requires:
-- A Git repository
-- An `origin` remote configured
+### Information Flow Scenarios
 
-### 2. Deploy the Plugin
+```mermaid
+sequenceDiagram
+    participant D as Developer
+    participant O as OpenCode
+    participant P as OpenCode Plugin
+    participant T as tracy.py
+    participant G as Git
 
-```bash
-cd opencode-plugin
-bun run deploy
+    note left of D: Snapshot Creation
+    D->>O: Prompts
+    O->>P: Finishes interaction with changes
+    P->>T: Invoke tracy.py
+    T->>G: Read working tree
+    T->>G: Create hidden commit<br/>refs/tracy-local/{uuid}
 ```
 
-### 3. Install the VSCode Extension
+```mermaid
+sequenceDiagram
+    participant D as Developer
+    participant G as Git
+    participant H as Git Hooks
 
-#### Automated installation (recommended)
+    note left of D: On Commit
+    D->>G: git commit
+    H->>G: Promote to refs/tracy/{uuid}
+    H->>G: Add tracy-id note
+```
 
-##### Linux & macOS
+```mermaid
+sequenceDiagram
+    participant D as Developer
+    participant G as Git
+    participant H as Git Hooks
 
-In the terminal, run
+    note left of D: On Push
+    D->>G: git push
+    H->>G: Fetch remote notes
+    H->>G: Merge notes
+    H->>G: Push refs/tracy/* and notes
+```
+
+```mermaid
+sequenceDiagram
+    participant D as Developer
+    participant G as Git
+    participant H as Git Hooks
+
+    note left of D: On Rebase
+    D->>G: git rebase
+    H->>G: Merge refs/tracy/*
+    H->>G: Update tracy-id note
+```
+
+```mermaid
+sequenceDiagram
+    participant D as Developer
+    participant V as VS Code Extension
+    participant G as Git
+
+    note left of D: Display Flow
+    D->>V: Open AI Blame
+    V->>G: Query refs/tracy/* and refs/tracy-local/*
+    V->>G: Read snapshot metadata
+    V->>D: Display trace results
+```
+
+## Quick Start
+
+### 1. Install the VS Code Extension
+
+This is the recommended entry point. The extension can open AI Blame, prompt to initialize Tracybot in the current repository, and offer to install the OpenCode plugin.
+
+#### Linux and macOS
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/TracyTeam/tracybot/main/vscode-extension/install.sh | bash
 ```
 
-##### Windows
+#### Windows
 
-In Powershell, run
 ```powershell
-powershell -Command "irm https://raw.githubusercontent.com/TracyTeam/tracybot/main/install.ps1 | iex"
+irm https://raw.githubusercontent.com/TracyTeam/tracybot/main/vscode-extension/install.ps1 | iex
 ```
 
-#### Manual installation
+The install scripts use the `code` CLI, so make sure the VS Code command line tools are available first.
 
-Alternatively, the extension can be installed manually.
+### 2. Open Your Repository in VS Code
 
-1. Download the packaged extension from the [latest release](https://github.com/TracyTeam/tracybot/releases/latest)
-or with
+When the extension activates, it adds an `AI Blame` status bar item on the right side of VS Code.
+
+If Tracybot has not been initialized in that repository yet, the extension offers to run initialization for you.
+
+If you prefer to initialize from the terminal instead, run:
+
 ```bash
-curl -fsSL -o tracy.vsix https://github.com/TracyTeam/tracybot/releases/latest/download/vscode-extension.vsix
+python /path/to/tracybot/init.py /path/to/your-target-repository
 ```
 
-2. In VSCode, go to `EXTENSIONS tab --> Click on the 3 dots --> Install from vsix` and choose the downloaded .vsix file
+Requirements:
+- A Git repository
+- Python 3 available as `python3` or `python`
+- An `origin` remote is optional; it is only needed for syncing Tracy refs and notes with a remote
 
-### 4. Install the OpenCode Plugin
+### 3. Install the OpenCode Plugin
 
-If you wish to use the Tracybot OpenCode integration, the OpenCode plugin needs to be installed.
+If the VS Code extension is installed, it will prompt you to install the OpenCode plugin when it is missing.
 
-#### From VSCode
+You can install it either:
+- Globally at `~/.config/opencode/plugin/tracybot-oc.js`
+- Per project at `.opencode/plugin/tracybot-oc.js`
 
-If the VSCode extension is installed, you will be prompted to install the plugin if it was not yet installed.
-You may choose to install it globally (global OpenCode plugin directory), or per project (.opencode directory in the project).
+If you want to install the released plugin directly from the terminal instead of using the VS Code prompt:
 
-#### Automated Installation
+#### Linux and macOS
 
-To install the plugin from the terminal, run:
-
-##### Linux & macOS
 ```bash
 curl -fsSL https://raw.githubusercontent.com/TracyTeam/tracybot/main/opencode-plugin/install.sh | bash
 ```
 
-##### Windows
+#### Windows
+
 ```powershell
-powershell -Command "irm https://raw.githubusercontent.com/TracyTeam/tracybot/main/opencode-plugin/install.sh | iex"
+irm https://raw.githubusercontent.com/TracyTeam/tracybot/main/opencode-plugin/install.ps1 | iex
 ```
 
-#### Manual Installation
+### 4. Start Using AI Blame
 
-1. Download the built plugin (`tracybot-oc.js`) from the [latest release](https://github.com/TracyTeam/tracybot/releases/latest) 
-or with
+After OpenCode makes changes in an initialized repository, Tracybot records snapshots automatically. Click `AI Blame` in VS Code to inspect the prompt history behind the current file.
+
+## Troubleshooting
+
+### Common Issues
+
+**No AI blame information showing**
+- Ensure the repository was initialized with `init.py`
+- Verify VS Code extension is installed
+- Check that OpenCode has already produced tracked changes in this repository
+
+**Snapshots not being created**
+- Check that the OpenCode plugin is installed and loaded
+- Verify Tracybot was initialized successfully in the repository
+- Verify Git hooks are installed under `.git/hooks/`
+- Check for errors in the OpenCode output
+
+**Push sync not working**
+- Ensure an `origin` remote is configured
+- Check that the `pre-push` hook is installed
+- Verify Git notes are being pushed
+
+## Getting Started for Developers
+
+### Initialize a Repository Manually
+
 ```bash
-curl -fsSL -o tracy.vsix https://github.com/TracyTeam/tracybot/releases/latest/download/tracybot-oc.js
+python ./init.py /path/to/target-repository
 ```
 
+If you run `init.py` from inside a Git repository, you can omit the explicit path.
 
-2. Place the downloaded file into the following directory: `$HOME/.config/opencode/plugin`
+### Work on the VS Code Extension
 
+```bash
+cd vscode-extension
+npm install
+npm run compile
+```
+
+Open `vscode-extension` in VS Code and press `F5` to launch the extension host.
+
+### Work on the OpenCode Plugin
+
+```bash
+cd opencode-plugin
+bun install
+bun run deploy
+```
+
+`bun run deploy` builds the plugin and installs it into the global OpenCode plugin directory.
+
+### Manual Installation from Release Assets
+
+If you are testing packaging or release artifacts manually:
+
+1. Download `vscode-extension.vsix` from the [latest release](https://github.com/TracyTeam/tracybot/releases/latest) and install it with `code --install-extension vscode-extension.vsix` or VS Code's `Install from VSIX...` action.
+2. Download `tracybot-oc.js` from the same release and place it in either `~/.config/opencode/plugin/` or `<repo>/.opencode/plugin/`.
