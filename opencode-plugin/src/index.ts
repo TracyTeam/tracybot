@@ -161,7 +161,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                     prompt: getTextFromParts(userMsg.parts),
                     response: assistantMsgs
                         .map(message => getTextFromParts(message.parts))
-                        .filter(text => text)
+                        .filter(text => text.trim().length > 0)
                         .join("\n\n---\n\n"),
                 }
             })
@@ -182,7 +182,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
             prompt: getTextFromParts(buildUserMsg.parts),
             response: buildAssistantMsgs
                 .map(message => getTextFromParts(message.parts))
-                .filter(text => text)
+                .filter(text => text.trim().length > 0)
                 .join("\n\n---\n\n"),
         }
 
