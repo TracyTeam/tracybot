@@ -19,7 +19,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
     async function getRepoRoot(): Promise<string | null> {
         try {
             const result = await $`git rev-parse --show-toplevel`.cwd(directory).quiet()
-            return String(result.stdout).trim() as string
+            return Buffer.from(result.stdout).toString('utf8').trim() as string
         } catch {
             return null
         }
@@ -42,7 +42,15 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         if (!(await configFile.exists())) return
 
         // cannot use dotenv, so enjoy this handrolled env parsing
-        const text = await configFile.text();
+        // Try UTF-8 first; fall back to windows-1252 for config files written
+        // before the utf-8 fix was applied to init.py (Windows default encoding).
+        const bytes = await configFile.bytes()
+        let text: string
+        try {
+            text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+        } catch {
+            text = new TextDecoder('windows-1252').decode(bytes)
+        }
         // Remove UTF-8 BOM (safeguard for cross-platform edge cases)
         const cleanedText = text.replace(/^\uFEFF/, '');
 
@@ -78,11 +86,11 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
     await L.info("Plugin initialized", { repoRoot, tracyPath })
 
     let pythonCmd;
-    if ((await $`python3 --version`.quiet()).exitCode === 0) {
+    if ((await $`python3 --version`.quiet().nothrow()).exitCode === 0) {
         pythonCmd = 'python3'
         await L.info("Detected python command: python3")
     } else {
-        if ((await $`python --version`.quiet()).exitCode === 0) {
+        if ((await $`python --version`.quiet().nothrow()).exitCode === 0) {
             pythonCmd = 'python'
             await L.info("Detected python command: python")
         } else {
@@ -279,15 +287,15 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
 
                         if (result.exitCode !== 0) {
                             await L.error("Python failed", {
-                                stdout: result.stdout.toString(),
-                                stderr: result.stderr.toString(),
+                                stdout: Buffer.from(result.stdout).toString('utf8'),
+                                stderr: Buffer.from(result.stderr).toString('utf8'),
                                 exitCode: result.exitCode
                             })
                             return
                         }
 
                         await L.info(
-                            `created user snapshot for ${path}. tracy.py: ${result.stdout.toString().trim()}`
+                            `created user snapshot for ${path}. tracy.py: ${Buffer.from(result.stdout).toString('utf8').trim()}`
                         )
                     })()
 

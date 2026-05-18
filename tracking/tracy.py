@@ -20,6 +20,7 @@ def run_git(args, capture_output=False, check=False, cwd=None):
         result = subprocess.run(
             ["git"] + args,
             text=True,
+            encoding='utf-8',
             stdout=subprocess.PIPE if capture_output else None,
             stderr=subprocess.DEVNULL,
             check=check,
@@ -206,7 +207,7 @@ commit_cmd = ["git", "commit-tree", TREE] + parent_args + ["-m", SESSION_ID]
 if DESCRIPTION:
     commit_cmd += ["-m", DESCRIPTION]
 
-result = subprocess.run(commit_cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env)
+result = subprocess.run(commit_cmd, text=True, encoding='utf-8', stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env)
 COMMIT = result.stdout.strip()
 
 if not COMMIT:

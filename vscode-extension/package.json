@@ -1,7 +1,7 @@
 {
   "name": "tracybot-extension",
   "displayName": "Tracybot",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "publisher": "TracyTeam",
   "description": "Tracing agent prompts to code",
   "icon": "media/icon.png",
