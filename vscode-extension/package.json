@@ -1,14 +1,36 @@
 {
   "name": "tracybot-extension",
-  "displayName": "tracybot-extension",
-  "description": "",
+  "displayName": "Tracybot",
   "version": "1.1.0",
+  "publisher": "TracyTeam",
+  "description": "Tracing agent prompts to code",
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#1E1E2E",
+    "theme": "dark"
+  },
   "engines": {
     "vscode": "^1.110.0"
   },
   "categories": [
-    "Other"
+    "Other",
+    "Visualization"
   ],
+  "keywords": [
+    "tracy",
+    "ai",
+    "blame",
+    "git",
+    "prompt-tracing"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TracyTeam/tracybot.git"
+  },
+  "bugs": {
+    "url": "https://github.com/TracyTeam/tracybot/issues"
+  },
+  "homepage": "https://github.com/TracyTeam/tracybot/blob/main/vscode-extension/README.md",
   "activationEvents": [
     "onStartupFinished",
     "onLanguage:*"
