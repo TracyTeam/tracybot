@@ -70,9 +70,9 @@ jobs:
             --generate-notes \
             --latest
 
-  # Builds and appends the VS Code Extension asset
-  package-vscode:
-    name: Build & Upload VS Code Extension
+  # Builds and publishes VSCode extension to latest release and marketplace
+  publish-vs:
+    name: Build & Publish VS Code Extension
     needs: create-release
     runs-on: ubuntu-latest
     defaults:
@@ -89,20 +89,23 @@ jobs:
           cache: npm
           cache-dependency-path: vscode-extension/package-lock.json
 
-      - run: npm ci
-      - run: cp ../init.py . && cp -r ../tracking .
-      - run: npm run compile
-      - run: npx vsce package --out vscode-extension.vsix
+      - name: Install Dependencies
+        run: npm ci
 
-      # Use softprops to cleanly append the asset to the existing tag
+      - name: Package Extension
+        run: npx vsce package --out out/vscode-extension.vsix
+
       - name: Upload VSIX to Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.create-release.outputs.tag }}
-          files: vscode-extension/vscode-extension.vsix
+          files: vscode-extension/out/vscode-extension.vsix
 
-  # Builds and appends the OpenCode Plugin asset
-  package-opencode:
+      - name: Publish to Marketplace
+        run: npx @vscode/vsce publish --packagePath out/vscode-extension.vsix --pat ${{ secrets.AZURE_PAT }}
+
+  # Builds and uploads OC plugin to latest release
+  publish-oc:
     name: Build & Upload OpenCode Plugin
     needs: create-release
     runs-on: ubuntu-latest
