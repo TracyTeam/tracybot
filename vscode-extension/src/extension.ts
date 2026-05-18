@@ -121,15 +121,18 @@ export async function activate(context: vscode.ExtensionContext) {
   if (!gitExtension) {
     return undefined;
   }
-  
+
   const git = gitExtension.getAPI(1);
   if (!git) {
     return undefined;
   }
 
-  checkTracyInit(context);
-  checkOpencode(context);
+  const runInitialChecks = () => {
+    checkTracyInit(context);
+    checkOpencode(context);
+  };
 
+  runInitialChecks();
 
   // Status bar button — always visible, click opens the blame panel
   statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
@@ -252,7 +255,10 @@ export async function activate(context: vscode.ExtensionContext) {
   // Warm up history on activation so the first blameAI click is faster
   refreshHistory();
   context.subscriptions.push(
-    git.onDidOpenRepository(refreshHistory),
+    git.onDidOpenRepository(() => {
+      runInitialChecks();
+      refreshHistory();
+    }),
     // Merge remote notes after git state changes (covers autofetch completing)
     ...git.repositories.map((repo: { state: { onDidChange: (cb: () => void) => vscode.Disposable } }) =>
       repo.state.onDidChange(syncNotesOnStateChange)
