@@ -55,7 +55,7 @@ export async function checkTracyInit(context: vscode.ExtensionContext): Promise<
     return;
   }
 
-  const initPy = path.join(context.extensionUri.fsPath, 'init.py');
+  const initPy = path.join(context.extensionUri.fsPath, 'assets', 'init.py');
 
   try {
     await new Promise<void>((resolve, reject) => {

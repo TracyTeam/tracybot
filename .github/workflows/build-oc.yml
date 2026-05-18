@@ -8,7 +8,7 @@ on:
       - 'opencode-plugin/**'
 
 jobs:
-  build:
+  build-oc:
     name: Build
     runs-on: ubuntu-latest
     defaults:

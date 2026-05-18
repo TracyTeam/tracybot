@@ -10,9 +10,7 @@ tsconfig.lsif.json
 *.tsbuildinfo
 
 # Copied during packaging (from project root). Don't commit.
-/init.py
-/tracking/
-/LICENSE
+assets/
 
 # Don't check in API files. These should be pulled in during install
 vscode*.d.ts

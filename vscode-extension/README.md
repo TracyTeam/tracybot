@@ -15,19 +15,31 @@ The extension queries the Git repository to reconstruct the history of AI intera
 
 Installing the extension is the recommended way to get started with Tracybot.
 
-### Linux and macOS
+### VS Code Marketplace (recommended)
+
+You can install the extension directly within VS Code:
+1. Open VS Code and go to the **Extensions** view (`Ctrl+Shift+X` or `Cmd+Shift+X`).
+2. Search for `Tracybot`.
+3. Click **Install**.
+
+Alternatively, visit the [Tracybot VS Code Marketplace page](https://marketplace.visualstudio.com/items?itemName=TracyTeam.tracybot-extension) and follow the instructions on the marketplace page.
+
+### CLI Install
+
+Alternatively, install scripts for Windows, Linux, and macOS are provided.
+The install scripts use the `code` CLI, so make sure the VS Code command line tools are available first.
+
+#### Linux and macOS
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/TracyTeam/tracybot/main/vscode-extension/install.sh | bash
 ```
 
-### Windows
+#### Windows (Powershell)
 
 ```powershell
 irm https://raw.githubusercontent.com/TracyTeam/tracybot/main/vscode-extension/install.ps1 | iex
 ```
-
-The install scripts use the `code` CLI, so make sure the VS Code command line tools are available first.
 
 ## Usage
 
@@ -71,7 +83,14 @@ npm install
 npm run compile
 ```
 
+### Package the Extension (build VSCE package)
+
+```bash
+npm run package
+```
+
 ### Deploy the Extension (build and install VSCE package)
+
 ```bash
 npm run deploy
 ```
@@ -82,8 +101,12 @@ Open `src/extension.ts` in VS Code and press `F5` to launch the extension debugg
 
 ### Install a Packaged VSIX Manually
 
-Download `vscode-extension.vsix` from the [latest release](https://github.com/TracyTeam/tracybot/releases/latest) and install it with:
-
+A VSIX package can be installed from the CLI:
 ```bash
 code --install-extension vscode-extension.vsix
 ```
+
+Build outputs are stored in `./out/`.
+
+Latest released `vscode-extension.vsix` can be downloaded from the [latest release](https://github.com/TracyTeam/tracybot/releases/latest).
+

@@ -1,7 +1,7 @@
 {
   "name": "tracybot-extension",
   "displayName": "Tracybot",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "publisher": "TracyTeam",
   "description": "Tracing agent prompts to code",
   "icon": "media/icon.png",
@@ -32,8 +32,7 @@
   },
   "homepage": "https://github.com/TracyTeam/tracybot/blob/main/vscode-extension/README.md",
   "activationEvents": [
-    "onStartupFinished",
-    "onLanguage:*"
+    "onStartupFinished"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -57,14 +56,15 @@
     ]
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
+    "clean": "rm -rf out assets init.py tracking",
+    "copy-assets": "mkdir -p assets && cp ../init.py assets/ && cp -r ../tracking assets/",
+    "vscode:prepublish": "npm run clean && npm run compile && npm run copy-assets",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",
     "test": "vscode-test",
-    "copy-assets": "rm -rf init.py tracking; cp ../init.py . && cp -r ../tracking . && cp ../LICENSE .",
-    "package": "npm run compile && npm run copy-assets && npx @vscode/vsce package -o out/tracybot-extension.vsix",
+    "package": "vsce package -o out/tracybot-extension.vsix",
     "deploy": "npm run package && code --install-extension out/tracybot-extension.vsix"
   },
   "devDependencies": {
