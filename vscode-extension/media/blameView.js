@@ -35,7 +35,8 @@
   const HLJS_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/';
 
   function getHljsThemeUrl() {
-    const isLight = document.body.classList.contains('vscode-light');
+    const cl = document.body.classList;
+    const isLight = cl.contains('vscode-light') || cl.contains('vscode-high-contrast-light');
     return HLJS_CDN + (isLight ? 'atom-one-light.min.css' : 'atom-one-dark.min.css');
   }
 

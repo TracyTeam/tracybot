@@ -18,6 +18,24 @@
   --radius:        6px;
 }
 
+/* Light-mode overrides: lower opacity so syntax highlighting stays readable */
+body.vscode-light,
+body.vscode-high-contrast-light {
+  --accent:        #6020cc;
+  --accent-dim:    rgba(96, 32, 204, 0.12);
+  --accent-glow:   rgba(96, 32, 204, 0.22);
+  --selected-bg:   rgba(96, 32, 204, 0.18);
+  --unselected-bg: rgba(96, 32, 204, 0.11);
+}
+
+/* High-contrast light: even more reduced so pure-white bg stays readable */
+body.vscode-high-contrast-light {
+  --accent-dim:    rgba(96, 32, 204, 0.11);
+  --accent-glow:   rgba(96, 32, 204, 0.16);
+  --selected-bg:   rgba(96, 32, 204, 0.14);
+  --unselected-bg: rgba(96, 32, 204, 0.10);
+}
+
 /* Let hljs token colours show through without overriding our background */
 .hljs { background: transparent !important; padding: 0 !important; }
 
@@ -43,7 +61,7 @@ td.line-code { padding: 0 16px 0 8px; white-space: pre; color: var(--text); over
 tr.ai-line td              { background: var(--unselected-bg); }
 tr.ai-line td.line-num     { color: var(--accent); opacity: .7; }
 tr.ai-line                 { cursor: pointer; }
-tr.ai-line:hover td        { background: rgba(128,0,255,.28); }
+tr.ai-line:hover td        { background: var(--accent-glow); }
 tr.ai-selected td          { background: var(--selected-bg) !important; }
 tr.ai-selected td.line-num { color: var(--accent); opacity: 1; }
 
@@ -57,6 +75,20 @@ tr.ai-line-cursor td.line-num, tr.ai-line-cursor td.line-code {
   background: rgba(128, 0, 255, 0.85) !important;
 }
 tr.ai-line-cursor td.line-num { color: #fff !important; opacity: 1; font-weight: 600; }
+
+body.vscode-light tr.ai-line-cursor td.line-num {
+  box-shadow: inset 3px 0 0 rgba(96, 32, 204, 0.9);
+}
+body.vscode-light tr.ai-line-cursor td.line-num,
+body.vscode-light tr.ai-line-cursor td.line-code,
+body.vscode-high-contrast-light tr.ai-line-cursor td.line-num,
+body.vscode-high-contrast-light tr.ai-line-cursor td.line-code {
+  background: rgba(96, 32, 204, 0.35) !important;
+}
+body.vscode-light tr.ai-line-cursor td.line-num,
+body.vscode-high-contrast-light tr.ai-line-cursor td.line-num { color: #3a006e !important; }
+body.vscode-light tr.ai-line-cursor td.line-num,
+body.vscode-high-contrast-light tr.ai-line-cursor td.line-num { box-shadow: inset 3px 0 0 rgba(96, 32, 204, 0.9); }
 
 
 /* ── Right: prompt panel ── */
@@ -152,8 +184,8 @@ tr.ai-line-cursor td.line-num { color: #fff !important; opacity: 1; font-weight:
 }
 .message-box.prompt   { border-left:  4px solid transparent; }
 .message-box.response { border-right: 4px solid transparent; }
-.message-box.build { border-color: var(--vscode-charts-blue,   #3794ff); }
-.message-box.plan  { border-color: var(--vscode-charts-orange, #e8a24a); }
+.message-box.build { border-color: #3794ff; }
+.message-box.plan  { border-color: #c98b00; }
 
 .message-label {
   font-size: 9px;
@@ -161,13 +193,13 @@ tr.ai-line-cursor td.line-num { color: #fff !important; opacity: 1; font-weight:
   text-transform: uppercase;
   margin-bottom: 4px;
 }
-.message-label.build { color: var(--vscode-charts-blue,   #3794ff); }
-.message-label.plan  { color: var(--vscode-charts-orange, #e8a24a); }
+.message-label.build { color: #3794ff; }
+.message-label.plan  { color: #c98b00; }
 
 .message-box p                  { margin: 0 0 8px; }
 .message-box p:last-child       { margin-bottom: 0; }
-.message-box code               { font-family: var(--font-mono); font-size: 11.5px; background: var(--vscode-textCodeBlock-background, rgba(255,255,255,0.08)); padding: 1px 5px; border-radius: 3px; }
-.message-box pre                { background: var(--vscode-textCodeBlock-background, rgba(255,255,255,0.06)); padding: 10px 12px; border-radius: 4px; overflow-x: auto; margin: 8px 0; }
+.message-box code               { font-family: var(--font-mono); font-size: 11.5px; background: var(--vscode-textCodeBlock-background, rgba(128,128,128,0.15)); padding: 1px 5px; border-radius: 3px; }
+.message-box pre                { background: var(--vscode-textCodeBlock-background, rgba(128,128,128,0.12)); padding: 10px 12px; border-radius: 4px; overflow-x: auto; margin: 8px 0; }
 .message-box pre code           { background: none; padding: 0; }
 .message-box ul, .message-box ol { padding-left: 20px; margin: 6px 0; }
 
