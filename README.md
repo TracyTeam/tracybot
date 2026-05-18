@@ -1,7 +1,8 @@
 # Tracybot
 
-![Representative](./public/representative.png)
 [![GitHub Release](https://img.shields.io/github/v/release/TracyTeam/tracybot)](https://github.com/TracyTeam/tracybot/releases/latest) [![License](https://img.shields.io/github/license/TracyTeam/tracybot)](LICENSE) [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/TracyTeam/tracybot/release.yml)](https://github.com/TracyTeam/tracybot/actions)
+
+![Representative](./public/representative.png)
 
 Tracybot is a tool that traces AI-generated code back to the prompts that created it. It enables tracking for AI-assisted development by recording snapshots of your codebase at each AI interaction.
 
@@ -19,104 +20,9 @@ Tracybot consists of three components that work together:
 
 - **[opencode-plugin](./opencode-plugin/README.md)** - Plugin for opencode CLI that records snapshots during AI interactions
 - **[vscode-extension](./vscode-extension/README.md)** - VS Code extension to view AI blame information
-- **[tracking](./tracking/README.md)** - Git hooks and scripts for state tracking using hidden commits and synced git notes
+- **[tracybot-tracking](./tracking/README.md)** - Git hooks and scripts for state tracking using hidden commits and synced git notes
 
-### How Components Communicate
-
-1. **opencode-plugin** invokes **`tracy.py`** (from `tracking/`) after each AI interaction to create a snapshot
-2. **`tracy.py`** stores snapshots as hidden commits in the Git repository (using `refs/tracy-local/*` namespace)
-3. **vscode-extension** queries Git to build a history timeline and displays blame information in VS Code
-
-```mermaid
-graph TB
-    subgraph "opencode-plugin"
-        Plugin["Snapshot Capture<br/>on AI Interaction"]
-    end
-
-    subgraph "tracking"
-        direction LR
-        TracyPy["<strong>tracy.py</strong><br/>Create Hidden Commit"]
-        Hooks["<strong>Git Hooks</strong><br/>reference-transaction<br/>pre-commit post-commit<br/>post-rewrite post-merge<br/>pre-push"]
-        Refs["<strong>Git Refs</strong><br/>refs/tracy/*<br/>refs/tracy-local/*"]
-    end
-
-    subgraph "vscode-extension"
-        BlameView["AI Blame View"]
-    end
-
-    Plugin --> TracyPy
-    TracyPy --> Hooks
-    Hooks --> Refs
-    BlameView --> Refs
-```
-
-### Information Flow Scenarios
-
-```mermaid
-sequenceDiagram
-    participant D as Developer
-    participant O as OpenCode
-    participant P as OpenCode Plugin
-    participant T as tracy.py
-    participant G as Git
-
-    note left of D: Snapshot Creation
-    D->>O: Prompts
-    O->>P: Finishes interaction with changes
-    P->>T: Invoke tracy.py
-    T->>G: Read working tree
-    T->>G: Create hidden commit<br/>refs/tracy-local/{uuid}
-```
-
-```mermaid
-sequenceDiagram
-    participant D as Developer
-    participant G as Git
-    participant H as Git Hooks
-
-    note left of D: On Commit
-    D->>G: git commit
-    H->>G: Promote to refs/tracy/{uuid}
-    H->>G: Add tracy-id note
-```
-
-```mermaid
-sequenceDiagram
-    participant D as Developer
-    participant G as Git
-    participant H as Git Hooks
-
-    note left of D: On Push
-    D->>G: git push
-    H->>G: Fetch remote notes
-    H->>G: Merge notes
-    H->>G: Push refs/tracy/* and notes
-```
-
-```mermaid
-sequenceDiagram
-    participant D as Developer
-    participant G as Git
-    participant H as Git Hooks
-
-    note left of D: On Rebase
-    D->>G: git rebase
-    H->>G: Merge refs/tracy/*
-    H->>G: Update tracy-id note
-```
-
-```mermaid
-sequenceDiagram
-    participant D as Developer
-    participant V as VS Code Extension
-    participant G as Git
-
-    note left of D: Display Flow
-    D->>V: Open AI Blame
-    V->>G: Query refs/tracy/* and refs/tracy-local/*
-    V->>G: Read snapshot metadata
-    V->>D: Display trace results
-```
+More information, including the requirements that resulted in these architectural decisions, are on the [wiki](https://github.com/TracyTeam/tracybot/wiki/Architecture).
 
 ## Quick Start
 
