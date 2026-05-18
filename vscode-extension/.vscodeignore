@@ -9,3 +9,14 @@ vsc-extension-quickstart.md
 **/*.map
 **/*.ts
 **/.vscode-test.*
+
+# Ignore Python cache files brought in by the tracking folder
+**/__pycache__/**
+**/*.pyc
+**/*.pyo
+
+# Ignore local packaging output
+out/*.vsix
+
+install.sh
+install.ps1

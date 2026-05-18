@@ -26,6 +26,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .eslintcache
 .cache
 *.tsbuildinfo
+__pycache__
 
 # IntelliJ based IDEs
 .idea
@@ -39,6 +40,3 @@ test/mock-repository
 # Repomix outputs
 repomix*.xml
 
-# Build artifacts
-vscode-extension/init.py
-vscode-extension/tracking

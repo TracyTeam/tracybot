@@ -57,14 +57,15 @@
     ]
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
+    "clean": "rm -rf out assets init.py tracking",
+    "copy-assets": "mkdir -p assets && cp ../init.py assets/ && cp -r ../tracking assets/",
+    "vscode:prepublish": "npm run clean && npm run compile && npm run copy-assets",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",
     "test": "vscode-test",
-    "copy-assets": "rm -rf init.py tracking; cp ../init.py . && cp -r ../tracking . && cp ../LICENSE .",
-    "package": "npm run compile && npm run copy-assets && npx @vscode/vsce package -o out/tracybot-extension.vsix",
+    "package": "vsce package -o out/tracybot-extension.vsix",
     "deploy": "npm run package && code --install-extension out/tracybot-extension.vsix"
   },
   "devDependencies": {
