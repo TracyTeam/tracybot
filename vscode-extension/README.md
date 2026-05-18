@@ -1,6 +1,6 @@
 # Tracybot VS Code Extension
 
-![Representative](../public/representative.png)
+![Representative](https://raw.githubusercontent.com/TracyTeam/tracybot/main/public/representative.png)
 
 A VS Code extension that traces AI generated code back to prompts by displaying original prompts.
 
@@ -69,6 +69,11 @@ npm install
 
 ```bash
 npm run compile
+```
+
+### Deploy the Extension (build and install VSCE package)
+```bash
+npm run deploy
 ```
 
 ### Launch in Debug Mode
