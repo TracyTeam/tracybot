@@ -1,7 +1,12 @@
 # Tracybot
 
+[![GitHub Release](https://img.shields.io/github/v/release/TracyTeam/tracybot)](https://github.com/TracyTeam/tracybot/releases/latest) 
+[![License](https://img.shields.io/github/license/TracyTeam/tracybot)](LICENSE) 
+[![VSC Extension Build](https://img.shields.io/github/actions/workflow/status/TracyTeam/tracybot/build-vs.yml?style=flat-square&logo=github)](https://github.com/TracyTeam/tracybot/actions)
+[![OC Plugin Build](https://img.shields.io/github/actions/workflow/status/TracyTeam/tracybot/build-oc.yml?style=flat-square&logo=github)](https://github.com/TracyTeam/tracybot/actions)
+[![VS Code Marketplace Version](https://img.shields.io/visual-studio-marketplace/v/TracyTeam.tracybot-extension?style=flat-square&logo=visual-studio-code)](https://marketplace.visualstudio.com/items?itemName=TracyTeam.tracybot-extension)
+
 ![Representative](./public/representative.png)
-[![GitHub Release](https://img.shields.io/github/v/release/TracyTeam/tracybot)](https://github.com/TracyTeam/tracybot/releases/latest) [![License](https://img.shields.io/github/license/TracyTeam/tracybot)](LICENSE) [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/TracyTeam/tracybot/release.yml)](https://github.com/TracyTeam/tracybot/actions)
 
 Tracybot is a tool that traces AI-generated code back to the prompts that created it. It enables tracking for AI-assisted development by recording snapshots of your codebase at each AI interaction.
 
@@ -122,27 +127,20 @@ sequenceDiagram
 
 ### 1. Install the VS Code Extension
 
-This is the recommended entry point. The extension can open AI Blame, prompt to initialize Tracybot in the current repository, and offer to install the OpenCode plugin.
+This is the entry point to Tracybot. The extension can open AI Blame, prompt to initialize Tracybot in the current repository, and offer to install the OpenCode plugin.
 
-#### Linux and macOS
+You can install the extension directly within VS Code:
+1. Open VS Code and go to the **Extensions** view (`Ctrl+Shift+X` or `Cmd+Shift+X`).
+2. Search for `Tracybot`.
+3. Click **Install**.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/TracyTeam/tracybot/main/vscode-extension/install.sh | bash
-```
-
-#### Windows
-
-```powershell
-irm https://raw.githubusercontent.com/TracyTeam/tracybot/main/vscode-extension/install.ps1 | iex
-```
-
-The install scripts use the `code` CLI, so make sure the VS Code command line tools are available first.
+Alternatively, visit the [Tracybot VS Code Marketplace page](https://marketplace.visualstudio.com/items?itemName=TracyTeam.tracybot-extension) and follow the instructions on the marketplace page.
 
 ### 2. Open Your Repository in VS Code
 
 When the extension activates, it adds an `AI Blame` status bar item on the right side of VS Code.
 
-If Tracybot has not been initialized in that repository yet, the extension offers to run initialization for you.
+If Tracybot has not been initialized in the open repository yet, the extension offers to run initialization for you.
 
 If you prefer to initialize from the terminal instead, run:
 
@@ -163,19 +161,6 @@ You can install it either:
 - Globally at `~/.config/opencode/plugin/tracybot-oc.js`
 - Per project at `.opencode/plugin/tracybot-oc.js`
 
-If you want to install the released plugin directly from the terminal instead of using the VS Code prompt:
-
-#### Linux and macOS
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/TracyTeam/tracybot/main/opencode-plugin/install.sh | bash
-```
-
-#### Windows
-
-```powershell
-irm https://raw.githubusercontent.com/TracyTeam/tracybot/main/opencode-plugin/install.ps1 | iex
-```
 
 ### 4. Start Using AI Blame
 
