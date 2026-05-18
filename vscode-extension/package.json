@@ -32,8 +32,7 @@
   },
   "homepage": "https://github.com/TracyTeam/tracybot/blob/main/vscode-extension/README.md",
   "activationEvents": [
-    "onStartupFinished",
-    "onLanguage:*"
+    "onStartupFinished"
   ],
   "main": "./out/extension.js",
   "contributes": {
