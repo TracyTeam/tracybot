@@ -12,6 +12,7 @@ def run_git(args, capture=False, check=False, env=None):
         result = subprocess.run(
             ["git"] + args,
             text=True,
+            encoding='utf-8',
             stdout=subprocess.PIPE if capture else None,
             stderr=subprocess.DEVNULL,
             check=check,
@@ -134,7 +135,7 @@ def build_chain_from_commits(commits_list, origin_commit):
             cmd.extend(["-p", parent])
         cmd.extend(["-m", msg])
 
-        result = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env)
+        result = subprocess.run(cmd, text=True, encoding='utf-8', stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env)
         new_commit = (result.stdout or "").strip()
         
         if new_commit:

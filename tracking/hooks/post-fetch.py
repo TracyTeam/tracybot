@@ -16,6 +16,7 @@ def run_git(args, capture=False, check=False):
         result = subprocess.run(
             ["git"] + args,
             text=True,
+            encoding='utf-8',
             stdout=subprocess.PIPE if capture else None,
             stderr=subprocess.DEVNULL,
             check=check

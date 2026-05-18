@@ -18,6 +18,7 @@ def run_git(repo, args, capture=False, check=False):
         result = subprocess.run(
             ["git", "-C", repo] + args,
             text=True,
+            encoding='utf-8',
             capture_output=capture,
             check=check
         )
@@ -134,7 +135,7 @@ def main():
     # -------------------------------
     # CONFIG FILE
     # -------------------------------
-    with open(tracy_dir / "config", "w") as f:
+    with open(tracy_dir / "config", "w", encoding='utf-8') as f:
         f.write(f"TRACY_SNAPSHOT_SCRIPT={script_source.as_posix()}\n")
 
     # -------------------------------
