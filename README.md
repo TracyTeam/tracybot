@@ -4,7 +4,7 @@
 [![License](https://img.shields.io/github/license/TracyTeam/tracybot?style=flat-square)](LICENSE) 
 [![VSC Extension Build](https://img.shields.io/github/actions/workflow/status/TracyTeam/tracybot/build-vs.yml?style=flat-square&logo=github)](https://github.com/TracyTeam/tracybot/actions) 
 [![OC Plugin Build](https://img.shields.io/github/actions/workflow/status/TracyTeam/tracybot/build-oc.yml?style=flat-square&logo=github)](https://github.com/TracyTeam/tracybot/actions) 
-[![VS Code Marketplace Version](https://vsmarketplacebadges.dev/version-short/TracyTeam.Tracybot.svg?style=flat-square&logo=visual-studio-code)](https://marketplace.visualstudio.com/items?itemName=TracyTeam.tracybot-extension)
+[![VS Code Marketplace Version](https://vsmarketplacebadges.dev/version-short/TracyTeam.tracybot-extension.svg?style=flat-square&logo=visual-studio-code)](https://marketplace.visualstudio.com/items?itemName=TracyTeam.tracybot-extension)
 
 ![Representative](./public/representative.png)
 
