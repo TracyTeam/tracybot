@@ -2,8 +2,8 @@
 
 [![GitHub Release](https://img.shields.io/github/v/release/TracyTeam/tracybot?style=flat-square)](https://github.com/TracyTeam/tracybot/releases/latest) 
 [![License](https://img.shields.io/github/license/TracyTeam/tracybot?style=flat-square)](LICENSE) 
-[![VSC Extension Build](https://img.shields.io/github/actions/workflow/status/TracyTeam/tracybot/build-vs.yml?style=flat-square&logo=github)](https://github.com/TracyTeam/tracybot/actions) 
-[![OC Plugin Build](https://img.shields.io/github/actions/workflow/status/TracyTeam/tracybot/build-oc.yml?style=flat-square&logo=github)](https://github.com/TracyTeam/tracybot/actions) 
+[![VSC Extension Build](https://img.shields.io/github/actions/workflow/status/TracyTeam/tracybot/build-vs.yml?style=flat-square&logo=github&label=VSC%20Build)](https://github.com/TracyTeam/tracybot/actions/workflows/build-vs.yml) 
+[![OC Plugin Build](https://img.shields.io/github/actions/workflow/status/TracyTeam/tracybot/build-oc.yml?style=flat-square&logo=github&label=OC%20Build)](https://github.com/TracyTeam/tracybot/actions/workflows/build-oc.yml) 
 [![VS Code Marketplace Version](https://vsmarketplacebadges.dev/version-short/TracyTeam.tracybot-extension.svg?style=flat-square&logo=visual-studio-code)](https://marketplace.visualstudio.com/items?itemName=TracyTeam.tracybot-extension)
 
 ![Representative](./public/representative.png)
