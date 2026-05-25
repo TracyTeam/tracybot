@@ -66,7 +66,7 @@ export async function checkOpencode(context: vscode.ExtensionContext): Promise<v
     );
 
     if (action === 'View Supported Agents') {
-      vscode.env.openExternal(vscode.Uri.parse('https://github.com/TracyTeam/tracybot'));
+      vscode.env.openExternal(vscode.Uri.parse('https://github.com/TracyTeam/tracybot#supported-agents-and-editors'));
     } else if (action === 'Don\'t Show Again') {
       await context.globalState.update(SKIP_OPENCODE_MISSING_KEY, true);
     }
