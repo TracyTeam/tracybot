@@ -60,11 +60,14 @@ export async function checkOpencode(context: vscode.ExtensionContext): Promise<v
     if (context.globalState.get<boolean>(SKIP_OPENCODE_MISSING_KEY)) { return; }
 
     const action = await vscode.window.showInformationMessage(
-      'Tracybot AI change tracing requires a supported agent. If you wish to trace AI changes, install one of the supported agents listed at https://github.com/TracyTeam/tracybot',
+      'Tracybot AI change tracing requires a supported agent.',
+      'View Supported Agents',
       'Don\'t Show Again'
     );
 
-    if (action === 'Don\'t Show Again') {
+    if (action === 'View Supported Agents') {
+      vscode.env.openExternal(vscode.Uri.parse('https://github.com/TracyTeam/tracybot'));
+    } else if (action === 'Don\'t Show Again') {
       await context.globalState.update(SKIP_OPENCODE_MISSING_KEY, true);
     }
     return;
