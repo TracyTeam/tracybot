@@ -18,15 +18,16 @@ Tracybot is a tool that traces AI-generated code back to the prompts that create
 - **Audit Trail** - Review AI interactions to verify, debug, or understand code origins
 - **Team Sync** - Push traces to remote for team collaboration
 
-## Architecture
+## Supported Agents and Editors
 
-Tracybot consists of three components that work together:
+### Supported Agents
+- **OpenCode CLI** — Install the [opencode-plugin](./opencode-plugin/README.md) to automatically record snapshots during AI interactions. 
+Requires OpenCode CLI to be installed - https://opencode.ai
 
-- **[opencode-plugin](./opencode-plugin/README.md)** - Plugin for opencode CLI that records snapshots during AI interactions
-- **[vscode-extension](./vscode-extension/README.md)** - VS Code extension to view AI blame information
-- **[tracybot-tracking](./tracking/README.md)** - Git hooks and scripts for state tracking using hidden commits and synced git notes
+### Supported Editors
+- **VS Code** — Install the [vscode-extension](./vscode-extension/README.md) to view AI blame information. 
+Available on the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=TracyTeam.tracybot-extension).
 
-More information, including the requirements that resulted in these architectural decisions, are on the [wiki](https://github.com/TracyTeam/tracybot/wiki/Architecture).
 
 ## Quick Start
 
@@ -70,6 +71,16 @@ You can install it either:
 ### 4. Start Using AI Blame
 
 After OpenCode makes changes in an initialized repository, Tracybot records snapshots automatically. Click `AI Blame` in VS Code to inspect the prompt history behind the current file.
+
+## Architecture
+
+Tracybot consists of three components that work together:
+
+- **[opencode-plugin](./opencode-plugin/README.md)** - Plugin for opencode CLI that records snapshots during AI interactions
+- **[vscode-extension](./vscode-extension/README.md)** - VS Code extension to view AI blame information
+- **[tracybot-tracking](./tracking/README.md)** - Git hooks and scripts for state tracking using hidden commits and synced git notes
+
+More information, including the requirements that resulted in these architectural decisions, are on the [wiki](https://github.com/TracyTeam/tracybot/wiki/Architecture).
 
 ## Troubleshooting
 
