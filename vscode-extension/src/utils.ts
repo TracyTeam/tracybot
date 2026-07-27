@@ -1,6 +1,10 @@
 import * as vscode from 'vscode';
 import pLimit from 'p-limit';
 import { spawn } from "child_process";
+import { randomUUID } from "crypto";
+import { tmpdir } from "os";
+import { join, basename } from "path";
+import { writeFile, unlink } from "fs/promises";
 
 import { bleu } from 'bleu-score';
 import { Change, CommitInfo, DiffHunk, History } from "./history/types";
@@ -23,7 +27,9 @@ function tokenizeHunk(text: string): string {
   return tokens.join(' ');
 }
 
-export async function runGit(repoPath: string, args: string[]): Promise<string> {
+// acceptExitCodes defaults to [0] — pass e.g. [0, 1] for `git diff --no-index`,
+// which uses exit code 1 to mean "a diff was found" rather than "an error".
+export async function runGit(repoPath: string, args: string[], acceptExitCodes: number[] = [0]): Promise<string> {
   return PROCESS_LIMIT(() => {
     return new Promise((resolve, reject) => {
       const proc = spawn("git", ["-C", repoPath, ...args]);
@@ -34,7 +40,7 @@ export async function runGit(repoPath: string, args: string[]): Promise<string> 
       proc.stderr.on("data", (data) => { stderr += data.toString(); });
 
       proc.on("close", (code) => {
-        if (code === 0) {
+        if (code !== null && acceptExitCodes.includes(code)) {
           resolve(stdout.trim());
         } else {
           reject(new Error(`Command failed: git -C ${repoPath} ${args.join(" ")}\n${stderr}`));
@@ -44,6 +50,21 @@ export async function runGit(repoPath: string, args: string[]): Promise<string> 
       proc.on("error", reject);
     });
   });
+}
+
+// Plain `git diff <tree>` only compares tracked content — an untracked file
+// has no index entry, so git reports it as fully deleted relative to any
+// tree that had content at that path. Without this check, an AI-written file
+// the user hasn't `git add`ed yet (a completely normal state — e.g.
+// reviewing AI Blame before deciding whether to stage/commit) looks like the
+// user deleted everything the AI wrote, wiping its attribution entirely.
+export async function isPathTracked(repoPath: string, filePath: string): Promise<boolean> {
+  try {
+    await runGit(repoPath, ["ls-files", "--error-unmatch", "--", filePath]);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function getTracyRefCommit(repoPath: string, tracyId: string): Promise<string | null> {
@@ -62,6 +83,97 @@ export async function getTracyLocalRefCommit(repoPath: string, tracyId: string):
   }
 }
 
+// Extracts DiffHunks from a single-file unified diff (--unified=0), assigning
+// significance/bleuScore/content the same way getDiff does. Doesn't track a
+// "current file" header — callers that already know which single path they
+// diffed (e.g. getUntrackedFileDiff) don't need it.
+function parseSingleFileHunks(output: string): DiffHunk[] {
+  const hunks: DiffHunk[] = [];
+  let currentHunk: DiffHunk | null = null;
+  let oldHunkLines: string[] = [];
+  let newHunkLines: string[] = [];
+
+  const finalizeHunk = () => {
+    if (!currentHunk) { return; }
+    const { isSignificant, bleuScore } = computeHunkSignificance(oldHunkLines, newHunkLines);
+    currentHunk.isSignificant = isSignificant;
+    currentHunk.bleuScore = bleuScore;
+    currentHunk.addedLines = newHunkLines;
+    currentHunk.removedLines = oldHunkLines;
+    hunks.push(currentHunk);
+  };
+
+  for (const line of output.split("\n")) {
+    if (line.startsWith("@@ ")) {
+      finalizeHunk();
+
+      const match = line.match(/^@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?/);
+      if (match) {
+        currentHunk = {
+          oldStart: parseInt(match[1], 10),
+          oldCount: match[2] !== undefined ? parseInt(match[2], 10) : 1,
+          newStart: parseInt(match[3], 10),
+          newCount: match[4] !== undefined ? parseInt(match[4], 10) : 1,
+        };
+        oldHunkLines = [];
+        newHunkLines = [];
+      }
+    } else if (currentHunk) {
+      if (line.startsWith("-")) {
+        oldHunkLines.push(line.substring(1));
+      } else if (line.startsWith("+")) {
+        newHunkLines.push(line.substring(1));
+      } else if (line.startsWith(" ") || line.startsWith("\\")) {
+        oldHunkLines.push(line.substring(1));
+        newHunkLines.push(line.substring(1));
+      }
+    }
+  }
+
+  finalizeHunk();
+  return hunks;
+}
+
+// Diffs a tree's blob content for filePath directly against the on-disk file,
+// bypassing the git index entirely (via --no-index) — this is what lets an
+// untracked file compare correctly instead of looking "deleted". See
+// isPathTracked's comment for why this case needs separate handling.
+async function getUntrackedFileDiff(
+  repoPath: string,
+  fromTree: string,
+  filePath: string
+): Promise<Map<string, DiffHunk[]>> {
+  const fileChanges = new Map<string, DiffHunk[]>();
+
+  let blobContent: string;
+  try {
+    blobContent = await runGit(repoPath, ["show", `${fromTree}:${filePath}`]);
+  } catch {
+    // Didn't exist at fromTree either — nothing to protect AI attribution against.
+    return fileChanges;
+  }
+
+  const tmpPath = join(tmpdir(), `tracybot-${randomUUID()}-${basename(filePath)}`);
+  try {
+    await writeFile(tmpPath, blobContent + "\n");
+
+    const output = await runGit(
+      repoPath,
+      ["diff", "--no-color", "--unified=0", "--no-index", "--", tmpPath, join(repoPath, filePath)],
+      [0, 1]
+    );
+
+    const hunks = parseSingleFileHunks(output);
+    if (hunks.length > 0) {
+      fileChanges.set(filePath, hunks);
+    }
+  } finally {
+    await unlink(tmpPath).catch(() => { /* best-effort cleanup */ });
+  }
+
+  return fileChanges;
+}
+
 // Returns a map of all files that changed between two trees
 // Computes per-hunk significance using BLEU similarity
 export async function getDiff(
@@ -70,6 +182,10 @@ export async function getDiff(
   toTree: string | "WORKING_TREE",
   filePath?: string
 ): Promise<Map<string, DiffHunk[]>> {
+  if (toTree === "WORKING_DIR" && filePath && !(await isPathTracked(repoPath, filePath))) {
+    return getUntrackedFileDiff(repoPath, fromTree, filePath);
+  }
+
   const args = ["diff", "--no-color", "--unified=0"];
 
   if (toTree === "WORKING_DIR") {
@@ -101,7 +217,11 @@ export async function getDiff(
     if (line.startsWith("diff --git a/")) {
       // Save previous hunk if exists
       if (currentHunk && currentFile) {
-        currentHunk.isSignificant = computeHunkSignificance(oldHunkLines, newHunkLines);
+        const { isSignificant, bleuScore } = computeHunkSignificance(oldHunkLines, newHunkLines);
+        currentHunk.isSignificant = isSignificant;
+        currentHunk.bleuScore = bleuScore;
+        currentHunk.addedLines = newHunkLines;
+        currentHunk.removedLines = oldHunkLines;
         fileChanges.get(currentFile)!.push(currentHunk);
       }
 
@@ -119,7 +239,11 @@ export async function getDiff(
     } else if (line.startsWith("@@ ") && currentFile) {
       // Save previous hunk if exists
       if (currentHunk) {
-        currentHunk.isSignificant = computeHunkSignificance(oldHunkLines, newHunkLines);
+        const { isSignificant, bleuScore } = computeHunkSignificance(oldHunkLines, newHunkLines);
+        currentHunk.isSignificant = isSignificant;
+        currentHunk.bleuScore = bleuScore;
+        currentHunk.addedLines = newHunkLines;
+        currentHunk.removedLines = oldHunkLines;
         fileChanges.get(currentFile)!.push(currentHunk);
       }
 
@@ -150,7 +274,11 @@ export async function getDiff(
 
   // Don't forget the last hunk
   if (currentHunk && currentFile) {
-    currentHunk.isSignificant = computeHunkSignificance(oldHunkLines, newHunkLines);
+    const { isSignificant, bleuScore } = computeHunkSignificance(oldHunkLines, newHunkLines);
+    currentHunk.isSignificant = isSignificant;
+    currentHunk.bleuScore = bleuScore;
+    currentHunk.addedLines = newHunkLines;
+    currentHunk.removedLines = oldHunkLines;
     fileChanges.get(currentFile)!.push(currentHunk);
   }
 
@@ -158,27 +286,26 @@ export async function getDiff(
 }
 
 // Compute significance of a hunk by comparing old and new content using BLEU
-function computeHunkSignificance(oldLines: string[], newLines: string[]): boolean {
+function computeHunkSignificance(oldLines: string[], newLines: string[]): { isSignificant: boolean; bleuScore: number | null } {
   if (oldLines.length === 0 && newLines.length === 0) {
-    return false;
+    return { isSignificant: false, bleuScore: null };
+  }
+
+  // If only additions (oldCount would be 0), it's significant — BLEU has no reference to compare against
+  if (oldLines.length === 0) {
+    return { isSignificant: true, bleuScore: null };
+  }
+
+  // If only deletions (newCount would be 0), it's significant — BLEU has no hypothesis to compare
+  if (newLines.length === 0) {
+    return { isSignificant: true, bleuScore: null };
   }
 
   const oldContent = oldLines.join("\n");
   const newContent = newLines.join("\n");
-
-  // If only additions (oldCount would be 0), it's significant
-  if (oldLines.length === 0) {
-    return true;
-  }
-
-  // If only deletions (newCount would be 0), it's significant
-  if (newLines.length === 0) {
-    return true;
-  }
-
   const score = bleu(tokenizeHunk(oldContent), tokenizeHunk(newContent), 4);
 
-  return score <= SIMILARITY_THRESHOLD;
+  return { isSignificant: score <= SIMILARITY_THRESHOLD, bleuScore: score };
 }
 
 // Map line numbers from an old tree to their 
@@ -305,6 +432,14 @@ export function groupChangesByFile(changes: Change[]): History["files"] {
         lines: change.lines,
         ghostLines: change.ghostLines,
         originCommitHash: change.originCommitHash,
+        taskletId: change.taskletId,
+        sessionId: change.sessionId,
+        questions: change.questions,
+        taskletGeneratedAt: change.taskletGeneratedAt,
+        buildCompletedAt: change.buildCompletedAt,
+        originCommitAuthorDate: change.originCommitAuthorDate,
+        originCommitCommitterDate: change.originCommitCommitterDate,
+        diffHunks: change.diffHunks,
       }))
     });
   }

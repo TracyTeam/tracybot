@@ -163,6 +163,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                 const assistantMsgs = allMessages.filter((message) =>
                     message.info.role === "assistant" && message.info.parentID === userMsg.info.id
                 )
+                const lastAssistantMsg = assistantMsgs[assistantMsgs.length - 1]
                 return {
                     id: `plan_${idx}`,
                     model: getFormattedModel(userMsg.info.model),
@@ -171,6 +172,10 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                         .map(message => getTextFromParts(message.parts))
                         .filter(text => text.trim().length > 0)
                         .join("\n\n---\n\n"),
+                    promptCreatedAt: userMsg.info.time.created,
+                    responseCompletedAt: lastAssistantMsg?.info.role === "assistant"
+                        ? lastAssistantMsg.info.time.completed ?? null
+                        : null,
                 }
             })
 
@@ -184,6 +189,7 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
         )
 
 
+        const lastBuildAssistantMsg = buildAssistantMsgs[buildAssistantMsgs.length - 1]
         const buildOutput: BuildOutput = {
             id: `build_${planOutputs.length}`,
             model: getFormattedModel(buildUserMsg.info.model),
@@ -192,6 +198,10 @@ export const MyPlugin: Plugin = async (input: PluginInput) => {
                 .map(message => getTextFromParts(message.parts))
                 .filter(text => text.trim().length > 0)
                 .join("\n\n---\n\n"),
+            promptCreatedAt: buildUserMsg.info.time.created,
+            responseCompletedAt: lastBuildAssistantMsg?.info.role === "assistant"
+                ? lastBuildAssistantMsg.info.time.completed ?? null
+                : null,
         }
 
         const tasklet: Tasklet = {
