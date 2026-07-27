@@ -36,6 +36,11 @@ __pycache__
 
 # tests
 test/mock-repository
+test/research-mode-mock
+.vscode-test
+
+# Cloudflare Workers local dev cache
+.wrangler
 
 # Repomix outputs
 repomix*.xml

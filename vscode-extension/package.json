@@ -44,6 +44,10 @@
       {
         "command": "tracybot-extension.invalidateCache",
         "title": "Tracybot: Invalidate History Cache"
+      },
+      {
+        "command": "tracybot-extension.reviewResearchDigest",
+        "title": "Tracybot: Review Research Mode Data"
       }
     ],
     "keybindings": [
@@ -53,7 +57,38 @@
         "mac": "cmd+shift+0",
         "when": "editorTextFocus"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Tracybot Research Mode",
+      "properties": {
+        "tracybot.researchMode.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Share your Tasklet history for a study on AI-assisted coding behavior. You can disable this at any time."
+        },
+        "tracybot.researchMode.consentTier": {
+          "type": "number",
+          "enum": [1, 2, 3],
+          "enumDescriptions": [
+            "Stats only (model, timestamps, line counts)",
+            "+ prompt/response text (fenced code redacted)",
+            "+ code diffs touched by each Tasklet"
+          ],
+          "default": 1,
+          "description": "How much detail to share, if Research Mode is enabled."
+        },
+        "tracybot.researchMode.projectTag": {
+          "type": "string",
+          "default": "",
+          "description": "A participant-chosen alias for this project — never the real repo name."
+        },
+        "tracybot.researchMode.repoUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Optional: share this repo's URL so researchers can check later if it's open source. Leave blank to omit."
+        }
+      }
+    }
   },
   "scripts": {
     "clean": "rm -rf out assets init.py tracking",
@@ -64,6 +99,7 @@
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",
     "test": "vscode-test",
+    "test:unit": "tsc -p ./ && node --test out/research/**/*.test.js",
     "package": "vsce package -o out/tracybot-extension.vsix",
     "deploy": "npm run package && code --install-extension out/tracybot-extension.vsix"
   },
