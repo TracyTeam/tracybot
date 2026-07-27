@@ -3,6 +3,34 @@ import { getOrCreateParticipantId, isResearchModeEnabled } from './consent';
 
 const SKIP_PROMPT_KEY = 'tracybot.skipResearchModePrompt';
 
+interface TierPickItem extends vscode.QuickPickItem {
+  tier: 1 | 2 | 3;
+}
+
+// Shown inline as part of opting in, not buried in Settings afterward — a
+// setting nobody finds might as well not exist, but the choice still has to
+// be an actual choice (see each item's detail), not a pre-picked default.
+const TIER_OPTIONS: TierPickItem[] = [
+  {
+    tier: 1,
+    label: 'Stats only',
+    description: 'model, timestamps, line counts',
+    detail: 'No prompt text, no code is shared.',
+  },
+  {
+    tier: 2,
+    label: '+ Prompt and response text',
+    description: 'fenced code blocks redacted',
+    detail: 'Also shares what you asked the AI and what it replied.',
+  },
+  {
+    tier: 3,
+    label: '+ Code diffs',
+    description: 'only the lines each AI edit touched',
+    detail: 'Also shares the actual code each AI-generated Tasklet changed.',
+  },
+];
+
 export async function checkResearchModeConsent(context: vscode.ExtensionContext): Promise<void> {
   if (isResearchModeEnabled()) { return; }
   if (context.globalState.get<boolean>(SKIP_PROMPT_KEY)) { return; }
@@ -16,19 +44,24 @@ export async function checkResearchModeConsent(context: vscode.ExtensionContext)
   );
 
   if (action === 'I agree to share my data') {
-    await vscode.workspace.getConfiguration('tracybot.researchMode')
-      .update('enabled', true, vscode.ConfigurationTarget.Global);
+    const chosen = await vscode.window.showQuickPick(TIER_OPTIONS, {
+      title: 'Tracybot Research Mode — choose how much to share',
+      placeHolder: 'You can change this anytime in Settings → Tracybot Research Mode',
+      ignoreFocusOut: true,
+    });
+
+    // Dismissed (Escape) without picking — fall back to the most
+    // conservative tier rather than leaving some other prior value in place.
+    const tier = chosen?.tier ?? 1;
+
+    const config = vscode.workspace.getConfiguration('tracybot.researchMode');
+    await config.update('enabled', true, vscode.ConfigurationTarget.Global);
+    await config.update('consentTier', tier, vscode.ConfigurationTarget.Global);
     getOrCreateParticipantId(context);
 
-    const followUpAction = await vscode.window.showInformationMessage(
-      "Research Mode enabled at Tier 1 (stats only — no prompt text or code shared). " +
-      "Want to share more? Raise the 'Consent Tier' setting anytime.",
-      'Adjust Sharing Level'
+    vscode.window.showInformationMessage(
+      `Research Mode enabled at Tier ${tier}. Change this anytime in Settings → Tracybot Research Mode.`
     );
-
-    if (followUpAction === 'Adjust Sharing Level') {
-      await vscode.commands.executeCommand('workbench.action.openSettings', 'tracybot.researchMode.consentTier');
-    }
   } else if (action === 'Never Show Again') {
     await context.globalState.update(SKIP_PROMPT_KEY, true);
   }
