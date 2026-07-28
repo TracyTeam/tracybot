@@ -403,6 +403,12 @@ describe("buildTaskletResearchPayloads", () => {
     assert.equal(payloads[0].agent_source, "claude-code");
   });
 
+  test("agent_source is threaded through for a codex Tasklet", () => {
+    const history = makeHistory([{ path: "src/app.ts", tasklets: [makeTasklet({ agentSource: "codex" })] }]);
+    const payloads = buildTaskletResearchPayloads(history, 1, PARTICIPANT, SUBMITTED_AT);
+    assert.equal(payloads[0].agent_source, "codex");
+  });
+
   test("agent_source defaults to opencode when missing (pre-existing cached History)", () => {
     const history = makeHistory([{ path: "src/app.ts", tasklets: [makeTasklet({ agentSource: undefined })] }]);
     const payloads = buildTaskletResearchPayloads(history, 1, PARTICIPANT, SUBMITTED_AT);

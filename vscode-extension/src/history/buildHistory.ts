@@ -222,7 +222,7 @@ interface TaskletMessagesResult {
   questions?: TaskletQuestion[];
   taskletGeneratedAt?: number | null;
   buildCompletedAt?: number | null;
-  agentSource: "opencode" | "claude-code";
+  agentSource: "opencode" | "claude-code" | "codex";
 }
 
 // Dispatches on the parsed object's `source` field so History's downstream
@@ -244,18 +244,20 @@ function buildTaskletMessages(tasklet_str: string): TaskletMessagesResult {
     return { messages: [], title: "skill issue", agentSource: "opencode" };
   }
 
-  if (tasklet_obj.source === "claude-code") {
-    return parseClaudeCodeTurn(tasklet_obj);
+  if (tasklet_obj.source === "claude-code" || tasklet_obj.source === "codex") {
+    return parseFlatTurn(tasklet_obj, tasklet_obj.source);
   }
 
   return parseOpenCodeTasklet(tasklet_obj, tasklet_str);
 }
 
-// Claude Code has no Plan/Build split — the whole turn is recorded under the
-// "build" stage so downstream consumers (Research Mode's has_build/
-// build_prompt fields in particular) keep working without needing to know a
-// second agent shape exists.
-function parseClaudeCodeTurn(turn: any): TaskletMessagesResult {
+// Claude Code and Codex both lack OpenCode's Plan/Build split, and both
+// produce the same flat {prompt, response, ...} shape (see ClaudeTurn /
+// CodexTurn in their respective plugin packages) — the whole turn is
+// recorded under the "build" stage so downstream consumers (Research Mode's
+// has_build/build_prompt fields in particular) keep working without needing
+// to know which non-OpenCode agent shape they're looking at.
+function parseFlatTurn(turn: any, agentSource: "claude-code" | "codex"): TaskletMessagesResult {
   const messages: TaskletMessage[] = [
     { stage: "build", type: "prompt", model: turn.model, message: turn.prompt ?? "" },
     { stage: "build", type: "response", model: turn.model, message: turn.response ?? "" },
@@ -263,13 +265,13 @@ function parseClaudeCodeTurn(turn: any): TaskletMessagesResult {
 
   return {
     messages,
-    title: turn.prompt ?? "Claude Code edit",
+    title: turn.prompt ?? `${agentSource} edit`,
     taskletId: turn.id,
     sessionId: turn.sessionId,
     questions: [],
     taskletGeneratedAt: turn.promptCreatedAt ?? null,
     buildCompletedAt: turn.responseCompletedAt ?? null,
-    agentSource: "claude-code",
+    agentSource,
   };
 }
 

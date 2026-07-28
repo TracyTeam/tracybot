@@ -58,9 +58,16 @@ describe("submitRequestSchema", () => {
     assert.equal(result.success, true);
   });
 
-  test("rejects an unknown agent_source", () => {
+  test("accepts agent_source: codex", () => {
     const result = submitRequestSchema.safeParse({
       payloads: [makeTier1Payload({ agent_source: "codex" })],
+    });
+    assert.equal(result.success, true);
+  });
+
+  test("rejects an unknown agent_source", () => {
+    const result = submitRequestSchema.safeParse({
+      payloads: [makeTier1Payload({ agent_source: "cursor" })],
     });
     assert.equal(result.success, false);
   });

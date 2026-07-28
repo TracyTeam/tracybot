@@ -1,6 +1,6 @@
 # Research Mode
 
-Research Mode is an opt-in feature that lets a Tracybot user share their Tasklet history for a research study on AI-assisted coding behavior. It is off by default and can be disabled at any time. Works with both supported agents ([opencode-plugin](../opencode-plugin/README.md) and [claude-code-plugin](../claude-code-plugin/README.md)) — each payload records which one produced it via `agent_source`.
+Research Mode is an opt-in feature that lets a Tracybot user share their Tasklet history for a research study on AI-assisted coding behavior. It is off by default and can be disabled at any time. Works with all three supported agents ([opencode-plugin](../opencode-plugin/README.md), [claude-code-plugin](../claude-code-plugin/README.md), [codex-plugin](../codex-plugin/README.md)) — each payload records which one produced it via `agent_source`.
 
 ## Consent
 
@@ -66,5 +66,9 @@ A rebuild-and-submit attempt happens on extension activation, on opening a repos
 ## Local development
 
 - `test/generate-research-mode-mock.sh` creates a throwaway repo with one OpenCode-shaped Tasklet (with `id`/`sessionId`/timestamps) that `buildResearchPayloads` can key on — unlike `test/generate-mock-repository.py`, which predates Research Mode and produces plain-string Tasklet descriptions with no `taskletId`.
-- `test/generate-claude-code-mock.sh` does the same for a Claude Code-shaped Tasklet (`source: "claude-code"`), without needing real Claude Code hooks configured.
+- `test/generate-claude-code-mock.sh` / `test/generate-codex-mock.sh` do the same for a Claude Code- or Codex-shaped Tasklet (`source: "claude-code"` / `"codex"`), without needing real hooks configured for either.
 - `research-collector-worker/` is deployed independently via `wrangler deploy`; see its `wrangler.jsonc` and `src/secrets.d.ts` for the two required secrets (`SUBMIT_KEY`, `GITHUB_TOKEN`).
+
+## A note on unverified transcript parsing
+
+Both `claude-code-plugin` and `codex-plugin` extract prompt text by parsing each agent's `transcript_path` JSONL file. `claude-code-plugin`'s parser has been checked against a real transcript; `codex-plugin`'s has not (see its own README) — if Codex-sourced Tasklets show up with an empty `build_prompt`, start there.

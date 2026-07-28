@@ -38,6 +38,7 @@ __pycache__
 test/mock-repository
 test/research-mode-mock
 test/claude-code-mock
+test/codex-mock
 .vscode-test
 
 # Cloudflare Workers local dev cache

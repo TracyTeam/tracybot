@@ -4,7 +4,7 @@ export interface BaseTaskletPayload {
   participant_id: string;      // pseudonymous, generated locally on opt-in
   tasklet_id: string;
   session_id: string;
-  agent_source: "opencode" | "claude-code";
+  agent_source: "opencode" | "claude-code" | "codex";
   repo_url: string | null;     // only if participant opts to share it
   generated_at: ISODateString; // Tasklet creation time (first prompt)
   submitted_at: ISODateString; // when it left the participant's machine

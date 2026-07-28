@@ -397,7 +397,7 @@ export async function getUserName(repoPath: string): Promise<string> {
   }
 }
 
-const AI_AUTHOR_EMAILS = new Set(["opencode", "claude-code"]);
+const AI_AUTHOR_EMAILS = new Set(["opencode", "claude-code", "codex"]);
 
 export function isAiChange(commit: CommitInfo): boolean {
   return AI_AUTHOR_EMAILS.has(commit.authorEmail.toLowerCase());

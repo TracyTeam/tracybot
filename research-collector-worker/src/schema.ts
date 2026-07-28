@@ -9,7 +9,7 @@ const basePayload = z.object({
   participant_id: z.string().min(1),
   tasklet_id: z.string().min(1),
   session_id: z.string(),
-  agent_source: z.enum(["opencode", "claude-code"]),
+  agent_source: z.enum(["opencode", "claude-code", "codex"]),
   repo_url: z.string().nullable(),
   generated_at: z.string(),
   submitted_at: z.string(),

@@ -54,7 +54,7 @@ const historySchema = z.object({
           originCommitAuthorDate: z.string().optional(),
           originCommitCommitterDate: z.string().optional(),
           diffHunks: z.array(diffHunkSchema).optional(),
-          agentSource: z.enum(["opencode", "claude-code"]).optional(),
+          agentSource: z.enum(["opencode", "claude-code", "codex"]).optional(),
         })
       )
     })
@@ -94,7 +94,7 @@ export interface Change {
   originCommitAuthorDate?: string;
   originCommitCommitterDate?: string;
   diffHunks?: DiffHunk[];
-  agentSource?: "opencode" | "claude-code";
+  agentSource?: "opencode" | "claude-code" | "codex";
 }
 
 // Extends the base Tasklet type from History with runtime-only UI state

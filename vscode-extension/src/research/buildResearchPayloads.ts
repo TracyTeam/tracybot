@@ -11,7 +11,7 @@ interface TaskletGroup {
   key: string;
   taskletId: string;
   sessionId?: string;
-  agentSource: "opencode" | "claude-code";
+  agentSource: "opencode" | "claude-code" | "codex";
   messages: TaskletMessage[];
   questions: TaskletQuestion[];
   taskletGeneratedAt: number | null;
