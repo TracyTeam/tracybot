@@ -3,9 +3,9 @@ import { extractLastUserPrompt } from "./transcript"
 import path from "path"
 import os from "os"
 
-// These test the parser's assumed schema, not a real Codex transcript — see
-// the "UNVERIFIED" comment in transcript.ts. If real Codex data turns out to
-// be shaped differently, these tests (and the parser) need updating together.
+// Fixtures match a real Codex rollout transcript's shape (verified against
+// an actual session) — payload.role/content, not entry.type like Claude
+// Code, and "input_text"/"output_text" content-block types, not "text".
 
 const tmpFiles: string[] = []
 
@@ -22,21 +22,35 @@ async function writeTranscript(lines: unknown[]): Promise<string> {
     return p
 }
 
-test("extracts a plain string content user message", async () => {
+function responseItem(payload: unknown) {
+    return { timestamp: "2026-07-28T00:00:00.000Z", type: "response_item", payload }
+}
+
+test("extracts a user message, ignoring developer instruction messages", async () => {
     const p = await writeTranscript([
-        { type: "user", message: { role: "user", content: "add a prime checker" } },
-        { type: "assistant", message: { role: "assistant", content: "done" } },
+        responseItem({ type: "message", role: "developer", content: [{ type: "input_text", text: "<system instructions>" }] }),
+        responseItem({ type: "message", role: "user", content: [{ type: "input_text", text: "add a prime checker" }] }),
+        responseItem({ type: "message", role: "assistant", content: [{ type: "output_text", text: "done" }] }),
     ])
     expect(await extractLastUserPrompt(p)).toBe("add a prime checker")
 })
 
 test("picks the LAST user message, not the first", async () => {
     const p = await writeTranscript([
-        { type: "user", message: { role: "user", content: "first prompt" } },
-        { type: "assistant", message: { role: "assistant", content: "ok" } },
-        { type: "user", message: { role: "user", content: "second prompt" } },
+        responseItem({ type: "message", role: "user", content: [{ type: "input_text", text: "first prompt" }] }),
+        responseItem({ type: "message", role: "assistant", content: [{ type: "output_text", text: "ok" }] }),
+        responseItem({ type: "message", role: "user", content: [{ type: "input_text", text: "second prompt" }] }),
     ])
     expect(await extractLastUserPrompt(p)).toBe("second prompt")
+})
+
+test("ignores non-message response_item entries (reasoning, custom_tool_call)", async () => {
+    const p = await writeTranscript([
+        responseItem({ type: "message", role: "user", content: [{ type: "input_text", text: "the real prompt" }] }),
+        { timestamp: "t", type: "response_item", payload: { type: "reasoning", id: "rs_1", summary: [] } },
+        { timestamp: "t", type: "response_item", payload: { type: "custom_tool_call", name: "exec", input: "ls" } },
+    ])
+    expect(await extractLastUserPrompt(p)).toBe("the real prompt")
 })
 
 test("returns empty string for a missing file rather than throwing", async () => {
@@ -45,7 +59,7 @@ test("returns empty string for a missing file rather than throwing", async () =>
 
 test("skips malformed lines instead of throwing", async () => {
     const p = path.join(os.tmpdir(), `codex-transcript-test-malformed-${Date.now()}.jsonl`)
-    await Bun.write(p, "not json\n" + JSON.stringify({ type: "user", message: { role: "user", content: "ok prompt" } }))
+    await Bun.write(p, "not json\n" + JSON.stringify(responseItem({ type: "message", role: "user", content: [{ type: "input_text", text: "ok prompt" }] })))
     tmpFiles.push(p)
     expect(await extractLastUserPrompt(p)).toBe("ok prompt")
 })
