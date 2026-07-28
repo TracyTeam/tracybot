@@ -19,6 +19,8 @@ export interface PlanOutput {
     model: string
     prompt: string
     response: string
+    promptCreatedAt: number
+    responseCompletedAt: number | null
 }
 
 export interface BuildOutput {
@@ -26,6 +28,8 @@ export interface BuildOutput {
     model: string
     prompt: string
     response: string
+    promptCreatedAt: number
+    responseCompletedAt: number | null
 }
 
 export interface Question {

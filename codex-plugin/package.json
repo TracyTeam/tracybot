@@ -1,0 +1,19 @@
+{
+  "name": "tracybot-codex",
+  "module": "src/index.ts",
+  "type": "module",
+  "private": true,
+  "dependencies": {},
+  "devDependencies": {
+    "@types/bun": "^1.3.11",
+    "tsup": "^8.5.1"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "scripts": {
+    "build": "tsup",
+    "deploy": "bun scripts/deploy.js",
+    "test": "bun test"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "tracybot-research-collector",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-26",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "kv_namespaces": [
+    { "binding": "RATE_LIMIT", "id": "e76b47540bea4a0189ca3c41eac6fcef" }
+  ]
+}

@@ -6,6 +6,11 @@ import { getBlameViewHtml } from './blameView';
 import { getRepoPath, mergeRemoteNotes } from './utils';
 import { checkOpencode } from './pluginCheck';
 import { checkTracyInit } from './tracyInitCheck';
+import { checkResearchModeConsent } from './research/researchModeCheck';
+import { getConsentTier, getParticipantContext, isResearchModeEnabled } from './research/consent';
+import { clearPendingPayloads, getPendingPayloads, getTodaysSentCount, queueTaskletForSubmission } from './research/queue';
+import { buildTaskletResearchPayloads } from './research/buildResearchPayloads';
+import { submitPayloads } from './research/collectorRepo';
 
 // History data — populated asynchronously when the extension activates
 let history: History | undefined;
@@ -82,12 +87,61 @@ async function buildHistoryAndSet(ctx: vscode.ExtensionContext): Promise<void> {
       fileTaskletsMap = buildFileTaskletsMap(history);
 
       await ctx.workspaceState.update('tracybot.buildHistoryCache', getSerializedCache());
+      await processNewTaskletsForResearch(ctx, result);
     } finally {
       buildHistoryLock = null;
     }
   })();
 
   await buildHistoryLock;
+}
+
+// Status bar item showing today's Research Mode digest — only visible when enabled
+let researchStatusBarItem: vscode.StatusBarItem;
+
+function updateResearchStatusBar(ctx: vscode.ExtensionContext): void {
+  if (!isResearchModeEnabled()) {
+    researchStatusBarItem.hide();
+    return;
+  }
+
+  const count = getTodaysSentCount(ctx.globalState);
+  const label = `Sent ${count} tasklet${count === 1 ? '' : 's'} today`;
+  researchStatusBarItem.text = `$(cloud-upload) ${label}`;
+  researchStatusBarItem.tooltip = `${label} — click to review`;
+  researchStatusBarItem.show();
+}
+
+// Builds a research payload for every Tasklet in the freshly-built history and
+// queues it locally (queueTaskletForSubmission is idempotent per taskletId, so
+// re-running this on every history rebuild is safe). Then makes a best-effort
+// attempt to push everything pending to the collector repo — failures (no
+// network, no token configured yet, push rejected) just leave the queue as-is
+// for the next history rebuild to retry, so this is safe to call often.
+async function processNewTaskletsForResearch(ctx: vscode.ExtensionContext, h: History): Promise<void> {
+  if (!isResearchModeEnabled()) { return; }
+
+  const participant = getParticipantContext(ctx);
+  const payloads = buildTaskletResearchPayloads(h, getConsentTier(), participant);
+
+  for (const payload of payloads) {
+    await queueTaskletForSubmission(ctx.globalState, payload);
+  }
+
+  await trySubmitPendingPayloads(ctx);
+  updateResearchStatusBar(ctx);
+}
+
+async function trySubmitPendingPayloads(ctx: vscode.ExtensionContext): Promise<void> {
+  const pending = getPendingPayloads(ctx.globalState);
+  if (pending.length === 0) { return; }
+
+  try {
+    const sentIds = await submitPayloads(pending);
+    await clearPendingPayloads(ctx.globalState, sentIds);
+  } catch (err) {
+    console.error('Tracybot Research Mode: failed to submit pending payloads, will retry later.', err);
+  }
 }
 
 // Returns the relative path for a document, or undefined if outside the workspace
@@ -130,6 +184,7 @@ export async function activate(context: vscode.ExtensionContext) {
   const runInitialChecks = () => {
     checkTracyInit(context);
     checkOpencode(context);
+    checkResearchModeConsent(context);
   };
 
   runInitialChecks();
@@ -141,6 +196,44 @@ export async function activate(context: vscode.ExtensionContext) {
   statusBarItem.tooltip = 'Open AI Blame view for the current file';
   statusBarItem.show();
   context.subscriptions.push(statusBarItem);
+
+  // Research Mode digest — only visible once the participant has opted in
+  researchStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 99);
+  researchStatusBarItem.command = 'tracybot-extension.reviewResearchDigest';
+  context.subscriptions.push(researchStatusBarItem);
+  updateResearchStatusBar(context);
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('tracybot-extension.reviewResearchDigest', async () => {
+      const count = getTodaysSentCount(context.globalState);
+      const pending = getPendingPayloads(context.globalState);
+
+      const action = await vscode.window.showInformationMessage(
+        `Tracybot Research Mode: sent ${count} tasklet${count === 1 ? '' : 's'} today. ` +
+        `${pending.length} total pending.`,
+        'View Pending Data',
+        'Disable Research Mode'
+      );
+
+      if (action === 'View Pending Data') {
+        const doc = await vscode.workspace.openTextDocument({
+          content: JSON.stringify(pending, null, 2),
+          language: 'json',
+        });
+        await vscode.window.showTextDocument(doc);
+      } else if (action === 'Disable Research Mode') {
+        await vscode.workspace.getConfiguration('tracybot.researchMode')
+          .update('enabled', false, vscode.ConfigurationTarget.Global);
+        vscode.window.showInformationMessage('Tracybot Research Mode disabled.');
+        updateResearchStatusBar(context);
+      }
+    }),
+    vscode.workspace.onDidChangeConfiguration(e => {
+      if (e.affectsConfiguration('tracybot.researchMode.enabled')) {
+        updateResearchStatusBar(context);
+      }
+    })
+  );
 
   // get cache from the workspaceState
   hydrateCache(context.workspaceState.get<Record<string, Change[]>>('tracybot.buildHistoryCache'));
@@ -232,12 +325,17 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   };
 
-  // Merge remote notes into local after any git state change (e.g. after autofetch)
+  // Runs on any git state change (commits, checkouts, staging, autofetch, ...):
+  // merges remote notes, then rebuilds history so a commit — the natural
+  // "this AI edit is now finalized" signal — triggers Research Mode's
+  // queue-and-submit without the user having to click AI Blame or reopen the
+  // project first.
   const syncNotesOnStateChange = async () => {
     const repoPath = await getRepoPath();
     if (repoPath) {
       await mergeRemoteNotes(repoPath);
     }
+    refreshHistory();
   };
 
   // clearCache — clears the history cache

@@ -1,4 +1,4 @@
-import { Change, CommitInfo, DiffHunk, History, TaskletMessage } from "./types";
+import { Change, CommitInfo, DiffHunk, History, TaskletMessage, TaskletQuestion } from "./types";
 import {
   getActiveTracyId,
   getCommitTree,
@@ -23,7 +23,7 @@ export function hydrateCache(serialized: Record<string, Change[]> | undefined) {
 
   const entries: [string, Change[]][] = Object.entries(serialized).map(([k, changes]) => [
     k,
-    changes.map(c => ({ ...c, ghostLines: c.ghostLines ?? [] })),
+    changes.map(c => ({ ...c, ghostLines: c.ghostLines ?? [], diffHunks: c.diffHunks ?? [] })),
   ]);
   commitHistoryCache = new Map(entries);
 }
@@ -42,7 +42,7 @@ async function getMainCommits(repoPath: string): Promise<CommitInfo[]> {
   const output = await runGit(repoPath, [
     "log",
     "--reverse",
-    `--format=%H${DELIMITER}%ae${DELIMITER}%an${DELIMITER}%s${DELIMITER}%b${DELIMITER}%P${DELIMITER}%T%x00`,
+    `--format=%H${DELIMITER}%ae${DELIMITER}%an${DELIMITER}%s${DELIMITER}%b${DELIMITER}%P${DELIMITER}%T${DELIMITER}%aI${DELIMITER}%cI%x00`,
   ]);
 
   if (!output) {
@@ -57,12 +57,12 @@ async function getMainCommits(repoPath: string): Promise<CommitInfo[]> {
     }
 
     const parts = trimmed.split(DELIMITER);
-    if (parts.length < 7) {
-      console.warn(`Skipping malformed commit line: expected 7 fields, got ${parts.length}`);
+    if (parts.length < 9) {
+      console.warn(`Skipping malformed commit line: expected 9 fields, got ${parts.length}`);
       continue;
     }
 
-    const [hash, authorEmail, authorName, message, description, parentHash, treeHash] = parts;
+    const [hash, authorEmail, authorName, message, description, parentHash, treeHash, authorDate, committerDate] = parts;
 
     if (!treeHash) {
       console.warn(`Missing treeHash for commit ${hash}, fetching directly`);
@@ -78,7 +78,9 @@ async function getMainCommits(repoPath: string): Promise<CommitInfo[]> {
         message,
         description,
         parentHash: parentHash || null,
-        treeHash: fetchedTree
+        treeHash: fetchedTree,
+        authorDate,
+        committerDate
       });
       continue;
     }
@@ -89,7 +91,9 @@ async function getMainCommits(repoPath: string): Promise<CommitInfo[]> {
       message,
       description,
       parentHash: parentHash || null,
-      treeHash
+      treeHash,
+      authorDate,
+      committerDate
     });
   }
 
@@ -157,11 +161,11 @@ async function getTracyChain(repoPath: string, startCommit: string): Promise<Com
     visited.add(currentHash);
 
     try {
-      // Commit info in format: hash|email|name|subject|body|parent|tree
+      // Commit info in format: hash|email|name|subject|body|parent|tree|authorDate|committerDate
       const output = await runGit(repoPath, [
         "log",
         "-1",
-        `--format=%H${DELIMITER}%ae${DELIMITER}%an${DELIMITER}%s${DELIMITER}%b${DELIMITER}%P${DELIMITER}%T`,
+        `--format=%H${DELIMITER}%ae${DELIMITER}%an${DELIMITER}%s${DELIMITER}%b${DELIMITER}%P${DELIMITER}%T${DELIMITER}%aI${DELIMITER}%cI`,
         currentHash
       ]);
 
@@ -169,7 +173,7 @@ async function getTracyChain(repoPath: string, startCommit: string): Promise<Com
         continue;
       }
 
-      const [hash, authorEmail, authorName, message, description, parentHash, treeHash] = output.split(DELIMITER);
+      const [hash, authorEmail, authorName, message, description, parentHash, treeHash, authorDate, committerDate] = output.split(DELIMITER);
       commits.push({
         hash,
         authorEmail,
@@ -177,7 +181,9 @@ async function getTracyChain(repoPath: string, startCommit: string): Promise<Com
         message,
         description,
         parentHash: parentHash || null,
-        treeHash: treeHash
+        treeHash: treeHash,
+        authorDate,
+        committerDate
       });
 
       // Stop traversal at commits reachable from refs/heads — those are origin
@@ -208,22 +214,70 @@ async function getTracyChain(repoPath: string, startCommit: string): Promise<Com
   return commits.reverse();
 }
 
-function buildTaskletMessages(tasklet_str: string): { messages: TaskletMessage[], title: string } {
+interface TaskletMessagesResult {
+  messages: TaskletMessage[];
+  title: string;
+  taskletId?: string;
+  sessionId?: string;
+  questions?: TaskletQuestion[];
+  taskletGeneratedAt?: number | null;
+  buildCompletedAt?: number | null;
+  agentSource: "opencode" | "claude-code" | "codex";
+}
+
+// Dispatches on the parsed object's `source` field so History's downstream
+// logic (line tracking, ownership, Research Mode extraction) never has to
+// know which agent produced a given snapshot — every agent's description
+// gets normalized into the same TaskletMessagesResult shape here, once.
+function buildTaskletMessages(tasklet_str: string): TaskletMessagesResult {
   let tasklet_obj: any;
-  let messages: TaskletMessage[] = [];
-  let title = "skill issue";
 
   try {
     tasklet_obj = JSON.parse(tasklet_str);
   } catch (e) {
     console.error(`Could not parse tasklet: ${tasklet_str}`);
-    return { messages, title };
+    return { messages: [], title: "skill issue", agentSource: "opencode" };
   }
 
   if (!tasklet_obj) {
     console.error(`Could not parse tasklet: ${tasklet_str}`);
-    return { messages, title };
+    return { messages: [], title: "skill issue", agentSource: "opencode" };
   }
+
+  if (tasklet_obj.source === "claude-code" || tasklet_obj.source === "codex") {
+    return parseFlatTurn(tasklet_obj, tasklet_obj.source);
+  }
+
+  return parseOpenCodeTasklet(tasklet_obj, tasklet_str);
+}
+
+// Claude Code and Codex both lack OpenCode's Plan/Build split, and both
+// produce the same flat {prompt, response, ...} shape (see ClaudeTurn /
+// CodexTurn in their respective plugin packages) — the whole turn is
+// recorded under the "build" stage so downstream consumers (Research Mode's
+// has_build/build_prompt fields in particular) keep working without needing
+// to know which non-OpenCode agent shape they're looking at.
+function parseFlatTurn(turn: any, agentSource: "claude-code" | "codex"): TaskletMessagesResult {
+  const messages: TaskletMessage[] = [
+    { stage: "build", type: "prompt", model: turn.model, message: turn.prompt ?? "" },
+    { stage: "build", type: "response", model: turn.model, message: turn.response ?? "" },
+  ];
+
+  return {
+    messages,
+    title: turn.prompt ?? `${agentSource} edit`,
+    taskletId: turn.id,
+    sessionId: turn.sessionId,
+    questions: [],
+    taskletGeneratedAt: turn.promptCreatedAt ?? null,
+    buildCompletedAt: turn.responseCompletedAt ?? null,
+    agentSource,
+  };
+}
+
+function parseOpenCodeTasklet(tasklet_obj: any, tasklet_str: string): TaskletMessagesResult {
+  let messages: TaskletMessage[] = [];
+  let title = "skill issue";
 
   title = tasklet_obj.title ?? "skill issue";
 
@@ -264,7 +318,22 @@ function buildTaskletMessages(tasklet_str: string): { messages: TaskletMessage[]
     messages.push({ stage: "build", type: "response", model: tasklet_obj.buildOutput?.model, message: appendQuestions(tasklet_obj.buildOutput?.response ?? "", tasklet_obj.buildOutput?.id) });
   }
 
-  return { messages, title };
+  // Tasklet started at the first plan prompt, or the build prompt if there was no plan stage
+  const firstPlanPrompt = Array.isArray(tasklet_obj.planOutputs) ? tasklet_obj.planOutputs[0] : undefined;
+  const taskletGeneratedAt: number | null =
+    firstPlanPrompt?.promptCreatedAt ?? tasklet_obj.buildOutput?.promptCreatedAt ?? null;
+  const buildCompletedAt: number | null = tasklet_obj.buildOutput?.responseCompletedAt ?? null;
+
+  return {
+    messages,
+    title,
+    taskletId: tasklet_obj.id,
+    sessionId: tasklet_obj.sessionId,
+    questions: allQuestions,
+    taskletGeneratedAt,
+    buildCompletedAt,
+    agentSource: "opencode",
+  };
 }
 
 async function extractChangesFromSnapshotChain(
@@ -272,11 +341,11 @@ async function extractChangesFromSnapshotChain(
   chain: CommitInfo[],
   baseTree: string,
   targetTree: string | "WORKING_DIR",
-  originCommitHash?: string
+  originCommit?: CommitInfo
 ): Promise<Change[]> {
   const results = await Promise.all(
     chain.map(async (snapshot, index) => {
-      return extractSnapshot(repoPath, snapshot, chain, baseTree, index, targetTree, originCommitHash);
+      return extractSnapshot(repoPath, snapshot, chain, baseTree, index, targetTree, originCommit);
     })
   );
 
@@ -290,13 +359,22 @@ async function extractSnapshot(
   baseTree: string,
   index: number,
   targetTree: string | "WORKING_DIR",
-  originCommitHash?: string
+  originCommit?: CommitInfo
 ): Promise<Change[]> {
   if (!isAiChange(snapshot)) {
     return [];
   }
 
-  const { messages, title } = buildTaskletMessages(snapshot.description);
+  const {
+    messages,
+    title,
+    taskletId,
+    sessionId,
+    questions,
+    taskletGeneratedAt,
+    buildCompletedAt,
+    agentSource,
+  } = buildTaskletMessages(snapshot.description);
   let diffFromTree = index > 0 ? chain[index - 1].treeHash : baseTree;
 
   if (snapshot.parentHash) {
@@ -357,7 +435,16 @@ async function extractSnapshot(
           name: title,
           tasklet_messages: messages,
           snapshotHash: snapshot.hash,
-          originCommitHash: originCommitHash,
+          originCommitHash: originCommit?.hash,
+          taskletId,
+          sessionId,
+          questions,
+          taskletGeneratedAt,
+          buildCompletedAt,
+          originCommitAuthorDate: originCommit?.authorDate,
+          originCommitCommitterDate: originCommit?.committerDate,
+          diffHunks: hunks,
+          agentSource,
         } as Change;
       }
 
@@ -456,7 +543,7 @@ async function buildCommittedHistory(
           tracyChain,
           prevTree,
           mainCommit.treeHash,
-          mainCommit.hash
+          mainCommit
         );
 
         accumulatedChanges.push(...newChanges);
