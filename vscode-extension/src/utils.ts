@@ -397,8 +397,10 @@ export async function getUserName(repoPath: string): Promise<string> {
   }
 }
 
+const AI_AUTHOR_EMAILS = new Set(["opencode", "claude-code"]);
+
 export function isAiChange(commit: CommitInfo): boolean {
-  return commit.authorEmail.toLowerCase() === "opencode";
+  return AI_AUTHOR_EMAILS.has(commit.authorEmail.toLowerCase());
 }
 
 export function groupChangesByFile(changes: Change[]): History["files"] {
@@ -440,6 +442,7 @@ export function groupChangesByFile(changes: Change[]): History["files"] {
         originCommitAuthorDate: change.originCommitAuthorDate,
         originCommitCommitterDate: change.originCommitCommitterDate,
         diffHunks: change.diffHunks,
+        agentSource: change.agentSource,
       }))
     });
   }

@@ -222,24 +222,60 @@ interface TaskletMessagesResult {
   questions?: TaskletQuestion[];
   taskletGeneratedAt?: number | null;
   buildCompletedAt?: number | null;
+  agentSource: "opencode" | "claude-code";
 }
 
+// Dispatches on the parsed object's `source` field so History's downstream
+// logic (line tracking, ownership, Research Mode extraction) never has to
+// know which agent produced a given snapshot — every agent's description
+// gets normalized into the same TaskletMessagesResult shape here, once.
 function buildTaskletMessages(tasklet_str: string): TaskletMessagesResult {
   let tasklet_obj: any;
-  let messages: TaskletMessage[] = [];
-  let title = "skill issue";
 
   try {
     tasklet_obj = JSON.parse(tasklet_str);
   } catch (e) {
     console.error(`Could not parse tasklet: ${tasklet_str}`);
-    return { messages, title };
+    return { messages: [], title: "skill issue", agentSource: "opencode" };
   }
 
   if (!tasklet_obj) {
     console.error(`Could not parse tasklet: ${tasklet_str}`);
-    return { messages, title };
+    return { messages: [], title: "skill issue", agentSource: "opencode" };
   }
+
+  if (tasklet_obj.source === "claude-code") {
+    return parseClaudeCodeTurn(tasklet_obj);
+  }
+
+  return parseOpenCodeTasklet(tasklet_obj, tasklet_str);
+}
+
+// Claude Code has no Plan/Build split — the whole turn is recorded under the
+// "build" stage so downstream consumers (Research Mode's has_build/
+// build_prompt fields in particular) keep working without needing to know a
+// second agent shape exists.
+function parseClaudeCodeTurn(turn: any): TaskletMessagesResult {
+  const messages: TaskletMessage[] = [
+    { stage: "build", type: "prompt", model: turn.model, message: turn.prompt ?? "" },
+    { stage: "build", type: "response", model: turn.model, message: turn.response ?? "" },
+  ];
+
+  return {
+    messages,
+    title: turn.prompt ?? "Claude Code edit",
+    taskletId: turn.id,
+    sessionId: turn.sessionId,
+    questions: [],
+    taskletGeneratedAt: turn.promptCreatedAt ?? null,
+    buildCompletedAt: turn.responseCompletedAt ?? null,
+    agentSource: "claude-code",
+  };
+}
+
+function parseOpenCodeTasklet(tasklet_obj: any, tasklet_str: string): TaskletMessagesResult {
+  let messages: TaskletMessage[] = [];
+  let title = "skill issue";
 
   title = tasklet_obj.title ?? "skill issue";
 
@@ -294,6 +330,7 @@ function buildTaskletMessages(tasklet_str: string): TaskletMessagesResult {
     questions: allQuestions,
     taskletGeneratedAt,
     buildCompletedAt,
+    agentSource: "opencode",
   };
 }
 
@@ -334,6 +371,7 @@ async function extractSnapshot(
     questions,
     taskletGeneratedAt,
     buildCompletedAt,
+    agentSource,
   } = buildTaskletMessages(snapshot.description);
   let diffFromTree = index > 0 ? chain[index - 1].treeHash : baseTree;
 
@@ -404,6 +442,7 @@ async function extractSnapshot(
           originCommitAuthorDate: originCommit?.authorDate,
           originCommitCommitterDate: originCommit?.committerDate,
           diffHunks: hunks,
+          agentSource,
         } as Change;
       }
 
