@@ -4,7 +4,7 @@ export interface BaseTaskletPayload {
   participant_id: string;      // pseudonymous, generated locally on opt-in
   tasklet_id: string;
   session_id: string;
-  project_tag: string;         // participant-chosen alias, never the real repo name
+  agent_source: "opencode" | "claude-code";
   repo_url: string | null;     // only if participant opts to share it
   generated_at: ISODateString; // Tasklet creation time (first prompt)
   submitted_at: ISODateString; // when it left the participant's machine
@@ -60,6 +60,5 @@ export type TaskletResearchPayload = Tier1Payload | Tier2Payload | Tier3Payload;
 
 export interface ParticipantContext {
   participantId: string;
-  projectTag: string;
   repoUrl: string | null;
 }

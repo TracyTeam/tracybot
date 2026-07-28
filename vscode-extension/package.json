@@ -77,11 +77,6 @@
           "default": 1,
           "description": "How much detail to share, if Research Mode is enabled."
         },
-        "tracybot.researchMode.projectTag": {
-          "type": "string",
-          "default": "",
-          "description": "A participant-chosen alias for this project — never the real repo name."
-        },
         "tracybot.researchMode.repoUrl": {
           "type": "string",
           "default": "",

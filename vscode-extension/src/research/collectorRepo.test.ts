@@ -8,7 +8,7 @@ function makePayload(overrides: Partial<Tier1Payload> = {}): Tier1Payload {
     participant_id: "p_test",
     tasklet_id: "tasklet-1",
     session_id: "session-1",
-    project_tag: "test-alias",
+    agent_source: "opencode",
     repo_url: null,
     generated_at: "2026-07-24T10:00:00.000Z",
     submitted_at: "2026-07-24T15:00:00.000Z",

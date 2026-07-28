@@ -37,7 +37,6 @@ export function getParticipantContext(context: vscode.ExtensionContext): Partici
 
   return {
     participantId: getOrCreateParticipantId(context),
-    projectTag: config.get<string>('projectTag', ''),
     repoUrl: repoUrl.length > 0 ? repoUrl : null,
   };
 }

@@ -1,6 +1,6 @@
 # Research Mode
 
-Research Mode is an opt-in feature that lets a Tracybot user share their Tasklet history for a research study on AI-assisted coding behavior. It is off by default and can be disabled at any time.
+Research Mode is an opt-in feature that lets a Tracybot user share their Tasklet history for a research study on AI-assisted coding behavior. It is off by default and can be disabled at any time. Works with both supported agents ([opencode-plugin](../opencode-plugin/README.md) and [claude-code-plugin](../claude-code-plugin/README.md)) — each payload records which one produced it via `agent_source`.
 
 ## Consent
 
@@ -61,10 +61,10 @@ A rebuild-and-submit attempt happens on extension activation, on opening a repos
 |---|---|---|
 | `tracybot.researchMode.enabled` | `false` | Master opt-in switch |
 | `tracybot.researchMode.consentTier` | `1` | `1`, `2`, or `3` — see tiers above |
-| `tracybot.researchMode.projectTag` | `""` | Participant-chosen alias for the project, never the real repo name |
 | `tracybot.researchMode.repoUrl` | `""` | Optional — shared only if the participant fills this in, lets researchers later check if a repo is open source |
 
 ## Local development
 
-- `test/generate-research-mode-mock.sh` creates a throwaway repo with one Tasklet in the modern JSON format (with `id`/`sessionId`/timestamps) that `buildResearchPayloads` can key on — unlike `test/generate-mock-repository.py`, which predates Research Mode and produces plain-string Tasklet descriptions with no `taskletId`.
+- `test/generate-research-mode-mock.sh` creates a throwaway repo with one OpenCode-shaped Tasklet (with `id`/`sessionId`/timestamps) that `buildResearchPayloads` can key on — unlike `test/generate-mock-repository.py`, which predates Research Mode and produces plain-string Tasklet descriptions with no `taskletId`.
+- `test/generate-claude-code-mock.sh` does the same for a Claude Code-shaped Tasklet (`source: "claude-code"`), without needing real Claude Code hooks configured.
 - `research-collector-worker/` is deployed independently via `wrangler deploy`; see its `wrangler.jsonc` and `src/secrets.d.ts` for the two required secrets (`SUBMIT_KEY`, `GITHUB_TOKEN`).

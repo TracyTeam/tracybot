@@ -11,6 +11,7 @@ interface TaskletGroup {
   key: string;
   taskletId: string;
   sessionId?: string;
+  agentSource: "opencode" | "claude-code";
   messages: TaskletMessage[];
   questions: TaskletQuestion[];
   taskletGeneratedAt: number | null;
@@ -43,6 +44,9 @@ function groupByTasklet(history: History): TaskletGroup[] {
           key: tasklet.taskletId,
           taskletId: tasklet.taskletId,
           sessionId: tasklet.sessionId,
+          // Defaults to "opencode" for cached History built before agentSource
+          // existed — the only agent that could have produced it back then.
+          agentSource: tasklet.agentSource ?? "opencode",
           messages: tasklet.messages,
           questions: tasklet.questions ?? [],
           taskletGeneratedAt: tasklet.taskletGeneratedAt ?? null,
@@ -138,7 +142,7 @@ function buildBasePayload(group: TaskletGroup, participant: ParticipantContext, 
     participant_id: participant.participantId,
     tasklet_id: group.taskletId,
     session_id: group.sessionId ?? "",
-    project_tag: participant.projectTag,
+    agent_source: group.agentSource,
     repo_url: participant.repoUrl,
     generated_at: generatedAt,
     submitted_at: submittedAt,

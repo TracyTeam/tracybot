@@ -7,7 +7,7 @@ function makeTier1Payload(overrides: Record<string, unknown> = {}) {
     participant_id: "p_test",
     tasklet_id: "tasklet-1",
     session_id: "session-1",
-    project_tag: "test-alias",
+    agent_source: "opencode",
     repo_url: null,
     generated_at: "2026-07-24T10:00:00.000Z",
     submitted_at: "2026-07-24T15:00:00.000Z",
@@ -47,6 +47,20 @@ describe("submitRequestSchema", () => {
   test("rejects an unknown consent_level", () => {
     const result = submitRequestSchema.safeParse({
       payloads: [makeTier1Payload({ consent_level: 4 })],
+    });
+    assert.equal(result.success, false);
+  });
+
+  test("accepts agent_source: claude-code", () => {
+    const result = submitRequestSchema.safeParse({
+      payloads: [makeTier1Payload({ agent_source: "claude-code" })],
+    });
+    assert.equal(result.success, true);
+  });
+
+  test("rejects an unknown agent_source", () => {
+    const result = submitRequestSchema.safeParse({
+      payloads: [makeTier1Payload({ agent_source: "codex" })],
     });
     assert.equal(result.success, false);
   });

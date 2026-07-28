@@ -6,7 +6,6 @@ import { ParticipantContext, Tier2Payload, Tier3Payload } from "./types";
 
 const PARTICIPANT: ParticipantContext = {
   participantId: "p_test",
-  projectTag: "test-alias",
   repoUrl: null,
 };
 const SUBMITTED_AT = "2026-07-24T15:00:00.000Z";
@@ -54,7 +53,7 @@ describe("buildTaskletResearchPayloads", () => {
     assert.equal(p.tasklet_id, "tasklet-1");
     assert.equal(p.session_id, "session-1");
     assert.equal(p.participant_id, "p_test");
-    assert.equal(p.project_tag, "test-alias");
+    assert.equal(p.agent_source, "opencode");
     assert.equal(p.repo_url, null);
     assert.equal(p.submitted_at, SUBMITTED_AT);
     assert.equal(p.generated_at, new Date(1_753_350_000_000).toISOString());
@@ -396,6 +395,18 @@ describe("buildTaskletResearchPayloads", () => {
     const payloads = buildTaskletResearchPayloads(history, 1, PARTICIPANT, SUBMITTED_AT);
     assert.equal(payloads[0].model_provider, "openai");
     assert.equal(payloads[0].model_id, "gpt-5");
+  });
+
+  test("agent_source is threaded through for a claude-code Tasklet", () => {
+    const history = makeHistory([{ path: "src/app.ts", tasklets: [makeTasklet({ agentSource: "claude-code" })] }]);
+    const payloads = buildTaskletResearchPayloads(history, 1, PARTICIPANT, SUBMITTED_AT);
+    assert.equal(payloads[0].agent_source, "claude-code");
+  });
+
+  test("agent_source defaults to opencode when missing (pre-existing cached History)", () => {
+    const history = makeHistory([{ path: "src/app.ts", tasklets: [makeTasklet({ agentSource: undefined })] }]);
+    const payloads = buildTaskletResearchPayloads(history, 1, PARTICIPANT, SUBMITTED_AT);
+    assert.equal(payloads[0].agent_source, "opencode");
   });
 
   test("empty history produces no payloads", () => {
