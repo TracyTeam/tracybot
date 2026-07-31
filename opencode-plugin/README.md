@@ -6,7 +6,7 @@ An OpenCode plugin that records snapshots of your codebase after each AI interac
 
 The plugin intercepts AI responses and invokes the Tracy tracking system to create hidden Git commits that preserve the state of your code before and after each agent interaction. 
 
-If you are using Tracybot normally, install the [VS Code extension](../vscode-extension/README.md) first. It can prompt to install this plugin globally or for the current project. Manual installation methods are also provided below.
+If you are using Tracybot normally, install the [VS Code extension](../vscode-extension/README.md) first — it detects OpenCode and installs this plugin globally automatically. Manual installation methods are also provided below.
 
 ## Features
 

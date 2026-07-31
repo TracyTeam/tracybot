@@ -11,6 +11,8 @@ The extension queries the Git repository to reconstruct the history of AI intera
 2. Extracting metadata from commit objects
 3. Building a timeline that maps code changes to AI interactions
 
+It also handles setup automatically: initializing Tracybot in a newly opened repository, and installing the plugin for whichever supported agent (OpenCode, Claude Code, Codex) is detected on your machine. No setup steps are required beyond installing the extension itself.
+
 ## Installation
 
 Installing the extension is the recommended way to get started with Tracybot.
@@ -44,9 +46,7 @@ irm https://raw.githubusercontent.com/TracyTeam/tracybot/main/vscode-extension/i
 ## Usage
 
 1. Open a Git repository in VS Code.
-2. If Tracybot has not been initialized in that repository yet, the extension initializes it automatically.
-3. Whichever supported agent's CLI is detected (OpenCode, Claude Code, Codex), the extension installs its plugin automatically — no confirmation needed. Tracybot records which agent produced each Tasklet.
-4. Click the `AI Blame` status bar item, or run `Tracybot: Open AI Blame window` from the command palette.
+2. Click the `AI Blame` status bar item, or run `Tracybot: Open AI Blame window` from the command palette.
 
 ## Requirements
 
@@ -63,55 +63,17 @@ Displays the history of AI-generated code changes in a dedicated editor tab. The
 - **Tasklet details**: Click on any highlighted line to see the originating tasklet, including which agent (OpenCode, Claude Code, or Codex) produced it
   - For OpenCode, a tasklet consists of 0 or more plan prompts followed by a build prompt
   - Claude Code and Codex have no separate planning stage, so their tasklets are a single prompt/response turn
-  - A tasklet Zod schema is available under `src/history/types.ts`
 - **File history**: View all tasklets that modified the current version of the file
 
 ## Research Mode
 
-An optional, opt-in feature to share your Tasklet history for a research study on AI-assisted coding behavior. Off by default, and can be disabled at any time from Settings. See [docs/research-mode.md](https://github.com/TracyTeam/tracybot/blob/main/docs/research-mode.md) in the main repository for what's collected and how consent works.
+An optional, opt-in feature to share your Tasklet history for a research study on AI-assisted coding behavior. Off by default, decided per-repository, and can be disabled at any time from the Research Mode status bar item. See [docs/research-mode.md](https://github.com/TracyTeam/tracybot/blob/main/docs/research-mode.md) in the main repository for what's collected and how consent works.
 
 ## Keybindings
 
 - `Cmd+Shift+0` (Mac) / `Ctrl+Shift+0` (Windows/Linux) - Open AI Blame window
 
-## Getting Started for Developers
+## Contributing
 
-### Install Dependencies
-
-```bash
-npm install
-```
-
-### Build the Extension
-
-```bash
-npm run compile
-```
-
-### Package the Extension (build VSCE package)
-
-```bash
-npm run package
-```
-
-### Deploy the Extension (build and install VSCE package)
-
-```bash
-npm run deploy
-```
-
-### Launch in Debug Mode
-
-Open `src/extension.ts` in VS Code and press `F5` to launch the extension debugger.
-
-### Install a Packaged VSIX Manually
-
-A VSIX package can be installed from the CLI:
-```bash
-code --install-extension vscode-extension.vsix
-```
-
-Build outputs are stored in `./out/`.
-
-Latest released `vscode-extension.vsix` can be downloaded from the [latest release](https://github.com/TracyTeam/tracybot/releases/latest).
+Building or debugging the extension from source? See [DEVELOPMENT.md](https://github.com/TracyTeam/tracybot/blob/main/vscode-extension/DEVELOPMENT.md).
 
