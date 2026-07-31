@@ -57,37 +57,7 @@
         "mac": "cmd+shift+0",
         "when": "editorTextFocus"
       }
-    ],
-    "configuration": {
-      "title": "Tracybot Research Mode",
-      "properties": {
-        "tracybot.researchMode.enabled": {
-          "type": "boolean",
-          "default": false,
-          "description": "Share your Tasklet history for a study on AI-assisted coding behavior. You can disable this at any time."
-        },
-        "tracybot.researchMode.consentTier": {
-          "type": "number",
-          "enum": [
-            1,
-            2,
-            3
-          ],
-          "enumDescriptions": [
-            "Stats only (model, timestamps, line counts)",
-            "+ prompt/response text (fenced code redacted)",
-            "+ code diffs touched by each Tasklet"
-          ],
-          "default": 1,
-          "description": "How much detail to share, if Research Mode is enabled."
-        },
-        "tracybot.researchMode.repoUrl": {
-          "type": "string",
-          "default": "",
-          "description": "Optional: share this repo's URL so researchers can check later if it's open source. Leave blank to omit."
-        }
-      }
-    }
+    ]
   },
   "scripts": {
     "clean": "rm -rf out assets init.py tracking",
