@@ -1,21 +1,14 @@
 import * as vscode from 'vscode';
 import { randomUUID } from 'crypto';
 import { ParticipantContext } from './types';
+import { getConsentTierForRepo, getRepoUrlForRepo, isResearchModeEnabledForRepo } from './repoConsent';
 
 const PARTICIPANT_ID_KEY = 'tracybot.researchMode.participantId';
 
-function getConfig() {
-  return vscode.workspace.getConfiguration('tracybot.researchMode');
-}
-
-export function isResearchModeEnabled(): boolean {
-  return getConfig().get<boolean>('enabled', false);
-}
-
-export function getConsentTier(): 1 | 2 | 3 {
-  const tier = getConfig().get<number>('consentTier', 1);
-  return tier === 2 || tier === 3 ? tier : 1;
-}
+// Enabled/tier/repoUrl are per-repository (see repoConsent.ts) — re-exported
+// here so callers only need one import for "am I collecting, and how much".
+export const isResearchModeEnabled = isResearchModeEnabledForRepo;
+export const getConsentTier = getConsentTierForRepo;
 
 // Generated locally on opt-in, stored per-machine (not per-workspace) since a
 // participant is a single person, not a single repo — and never derived from
@@ -31,12 +24,9 @@ export function getOrCreateParticipantId(context: vscode.ExtensionContext): stri
   return generated;
 }
 
-export function getParticipantContext(context: vscode.ExtensionContext): ParticipantContext {
-  const config = getConfig();
-  const repoUrl = config.get<string>('repoUrl', '').trim();
-
+export function getParticipantContext(context: vscode.ExtensionContext, repoPath: string): ParticipantContext {
   return {
     participantId: getOrCreateParticipantId(context),
-    repoUrl: repoUrl.length > 0 ? repoUrl : null,
+    repoUrl: getRepoUrlForRepo(repoPath),
   };
 }
