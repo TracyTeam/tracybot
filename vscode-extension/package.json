@@ -1,7 +1,7 @@
 {
   "name": "tracybot-extension",
   "displayName": "Tracybot",
-  "version": "1.1.4",
+  "version": "1.2.0",
   "publisher": "TracyTeam",
   "description": "Tracing agent prompts to code",
   "icon": "media/icon.png",
@@ -68,7 +68,11 @@
         },
         "tracybot.researchMode.consentTier": {
           "type": "number",
-          "enum": [1, 2, 3],
+          "enum": [
+            1,
+            2,
+            3
+          ],
           "enumDescriptions": [
             "Stats only (model, timestamps, line counts)",
             "+ prompt/response text (fenced code redacted)",
