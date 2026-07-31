@@ -40,7 +40,7 @@ Available on the [VS Code Marketplace](https://marketplace.visualstudio.com/item
 
 ### 1. Install the VS Code Extension
 
-This is the entry point to Tracybot. The extension can open AI Blame, prompt to initialize Tracybot in the current repository, and offer to install an agent plugin.
+This is the entry point to Tracybot. The extension can open AI Blame, prompt to initialize Tracybot in the current repository, and automatically installs plugins for any supported agent it detects on your machine.
 
 You can install the extension directly within VS Code:
 1. Open VS Code and go to the **Extensions** view (`Ctrl+Shift+X` or `Cmd+Shift+X`).
@@ -66,15 +66,15 @@ Requirements:
 - Python 3 available as `python3` or `python`
 - An `origin` remote is optional; it is only needed for syncing Tracy refs and notes with a remote
 
-### 3. Install an Agent Plugin
+### 3. Agent Plugins Install Automatically
 
-If the VS Code extension is installed, it will prompt you to install the OpenCode plugin when it is missing. Whichever agent you use, install its matching plugin:
+If the VS Code extension is installed, it detects whichever supported agent CLIs you already have (OpenCode, Claude Code, Codex) and installs their plugins for you automatically — no confirmation needed, since installing Tracybot is itself your opt-in to AI change tracing. It also re-checks once a day, so an agent you install later gets picked up without needing to reload VS Code.
 
-- **OpenCode** — [opencode-plugin](./opencode-plugin/README.md), installed at `~/.config/opencode/plugin/tracybot-oc.js` (global) or `.opencode/plugin/tracybot-oc.js` (per project)
+- **OpenCode** — [opencode-plugin](./opencode-plugin/README.md), installed at `~/.config/opencode/plugin/tracybot-oc.js`
 - **Claude Code** — [claude-code-plugin](./claude-code-plugin/README.md), installed via hooks in `~/.claude/settings.json`
 - **Codex CLI** — [codex-plugin](./codex-plugin/README.md), installed via hooks in `~/.codex/hooks.json`
 
-You can install more than one if you use multiple agents — Tracybot records which one produced each Tasklet.
+Using more than one agent works fine — Tracybot records which one produced each Tasklet.
 
 ### 4. Start Using AI Blame
 
