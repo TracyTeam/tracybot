@@ -16,8 +16,16 @@ interface HookAgentConfig {
   hookScriptFilename: string;
   installDir: string;
   postToolUseMatcher: string;
-  skipCheckKey: string;
+  failureCooldownKey: string;
 }
+
+// A failed install (e.g. Bun missing) shouldn't be retried on every single
+// activation — that would spam an error message the user can't act on
+// immediately. But it also can't be a permanent skip, or a user who fixes
+// the underlying problem (installs Bun) would never get auto-installed,
+// silently defeating the daily re-check in extension.ts. So failures get a
+// cooldown, not a permanent flag.
+const FAILURE_RETRY_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
 const AGENTS: HookAgentConfig[] = [
   {
@@ -28,7 +36,7 @@ const AGENTS: HookAgentConfig[] = [
     hookScriptFilename: 'tracybot-cc-hook.js',
     installDir: path.join(homedir(), '.claude', 'tracybot'),
     postToolUseMatcher: 'Edit|Write|MultiEdit',
-    skipCheckKey: 'tracybot.skipClaudeCodeCheck',
+    failureCooldownKey: 'tracybot.claudeCodeInstallFailureAt',
   },
   {
     id: 'codex',
@@ -38,7 +46,7 @@ const AGENTS: HookAgentConfig[] = [
     hookScriptFilename: 'tracybot-codex-hook.js',
     installDir: path.join(homedir(), '.codex', 'tracybot'),
     postToolUseMatcher: 'apply_patch|Edit|Write',
-    skipCheckKey: 'tracybot.skipCodexCheck',
+    failureCooldownKey: 'tracybot.codexInstallFailureAt',
   },
 ];
 
@@ -136,7 +144,8 @@ function installHooks(agent: HookAgentConfig, scriptPath: string, bunPath: strin
 // just happened, and an error notification if it fails — neither requires a
 // click to dismiss or to proceed.
 async function checkAgent(context: vscode.ExtensionContext, agent: HookAgentConfig): Promise<void> {
-  if (context.globalState.get<boolean>(agent.skipCheckKey)) { return; }
+  const lastFailureAt = context.globalState.get<number>(agent.failureCooldownKey);
+  if (lastFailureAt && Date.now() - lastFailureAt < FAILURE_RETRY_COOLDOWN_MS) { return; }
 
   const scriptPath = path.join(agent.installDir, agent.hookScriptFilename);
   const existingBunPath = resolveBunPath();
@@ -145,20 +154,16 @@ async function checkAgent(context: vscode.ExtensionContext, agent: HookAgentConf
   }
 
   try {
-    const bunPath = existingBunPath;
-    if (!bunPath) {
-      throw new Error('Bun is required to run this plugin. Install it from https://bun.sh, then reload the window.');
+    if (!existingBunPath) {
+      throw new Error('Bun is required to run this plugin. Install it from https://bun.sh — Tracybot will pick it up automatically.');
     }
 
     const installedScriptPath = await downloadHookScript(agent);
-    installHooks(agent, installedScriptPath, bunPath);
+    installHooks(agent, installedScriptPath, existingBunPath);
 
     vscode.window.showInformationMessage(`Tracybot: ${agent.displayName} plugin installed.`);
   } catch (error) {
-    // Don't retry-and-reannounce this failure on every future activation —
-    // once is enough to inform the user something needs fixing (e.g. Bun
-    // missing); they can re-trigger by reloading once it's resolved.
-    await context.globalState.update(agent.skipCheckKey, true);
+    await context.globalState.update(agent.failureCooldownKey, Date.now());
     vscode.window.showErrorMessage(
       `Failed to install Tracybot ${agent.displayName} plugin: ${error instanceof Error ? error.message : String(error)}`
     );
