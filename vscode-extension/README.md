@@ -44,8 +44,8 @@ irm https://raw.githubusercontent.com/TracyTeam/tracybot/main/vscode-extension/i
 ## Usage
 
 1. Open a Git repository in VS Code.
-2. If Tracybot has not been initialized in that repository yet, the extension offers to run initialization for you.
-3. If the OpenCode plugin is missing, the extension offers to install it globally or for the current workspace. Using Claude Code or Codex CLI instead? Install [claude-code-plugin](https://github.com/TracyTeam/tracybot/tree/main/claude-code-plugin) or [codex-plugin](https://github.com/TracyTeam/tracybot/tree/main/codex-plugin) — Tracybot records which agent produced each Tasklet either way.
+2. If Tracybot has not been initialized in that repository yet, the extension initializes it automatically.
+3. Whichever supported agent's CLI is detected (OpenCode, Claude Code, Codex), the extension installs its plugin automatically — no confirmation needed. Tracybot records which agent produced each Tasklet.
 4. Click the `AI Blame` status bar item, or run `Tracybot: Open AI Blame window` from the command palette.
 
 ## Requirements
