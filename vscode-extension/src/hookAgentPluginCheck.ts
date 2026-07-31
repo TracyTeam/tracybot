@@ -86,10 +86,14 @@ function hasHookCommand(hookList: any[] | undefined, command: string): boolean {
   return (hookList ?? []).some((entry: any) => (entry.hooks ?? []).some((h: any) => h.command === command));
 }
 
+// Checks both hooks installHooks() manages — checking only PostToolUse would
+// report "already configured" (and skip forever) even if Stop were somehow
+// missing, e.g. a user manually edited the config and removed just that one.
 function isAlreadyConfigured(agent: HookAgentConfig, scriptPath: string, bunPath: string): boolean {
   const config = loadHooksConfig(agent.hooksConfigPath);
   if (!config?.hooks) { return false; }
-  return hasHookCommand(config.hooks.PostToolUse, `${bunPath} ${scriptPath} post-tool-use`);
+  return hasHookCommand(config.hooks.PostToolUse, `${bunPath} ${scriptPath} post-tool-use`)
+    && hasHookCommand(config.hooks.Stop, `${bunPath} ${scriptPath} stop`);
 }
 
 async function downloadHookScript(agent: HookAgentConfig): Promise<string> {
