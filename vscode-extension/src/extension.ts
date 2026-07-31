@@ -169,13 +169,6 @@ function getDisplayLineMapForDocument(document: vscode.TextDocument): Map<number
 // Status bar item that opens the blame panel when clicked
 let statusBarItem: vscode.StatusBarItem;
 
-// Agent detection (checkOpencode/checkHookBasedAgents) only runs on
-// activation or opening a new repo, so an agent installed mid-session (VS
-// Code windows often stay open for days) wouldn't be picked up until the
-// next reload. This re-runs the same idempotent checks once a day for
-// windows that stay open that long, without polling any more often than that.
-const AGENT_RECHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
-
 // Activate function
 export async function activate(context: vscode.ExtensionContext) {
   // git extension is a hard requirement for some functions
@@ -197,12 +190,6 @@ export async function activate(context: vscode.ExtensionContext) {
   };
 
   runInitialChecks();
-
-  const agentRecheckTimer = setInterval(() => {
-    checkOpencode(context);
-    checkHookBasedAgents(context);
-  }, AGENT_RECHECK_INTERVAL_MS);
-  context.subscriptions.push({ dispose: () => clearInterval(agentRecheckTimer) });
 
   // Status bar button — always visible, click opens the blame panel
   statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
