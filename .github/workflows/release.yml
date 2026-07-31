@@ -130,3 +130,55 @@ jobs:
           tag_name: ${{ needs.create-release.outputs.tag }}
           files: opencode-plugin/dist/tracybot-oc.js
 
+  # Builds and uploads Claude Code plugin to latest release
+  publish-cc:
+    name: Build & Upload Claude Code Plugin
+    needs: create-release
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: claude-code-plugin
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.create-release.outputs.tag }}
+
+      - uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - run: bun install
+      - run: bun run build
+
+      - name: Upload Claude Code Plugin Asset to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.create-release.outputs.tag }}
+          files: claude-code-plugin/dist/tracybot-cc-hook.js
+
+  # Builds and uploads Codex plugin to latest release
+  publish-codex:
+    name: Build & Upload Codex Plugin
+    needs: create-release
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: codex-plugin
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.create-release.outputs.tag }}
+
+      - uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - run: bun install
+      - run: bun run build
+
+      - name: Upload Codex Plugin Asset to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.create-release.outputs.tag }}
+          files: codex-plugin/dist/tracybot-codex-hook.js
+
