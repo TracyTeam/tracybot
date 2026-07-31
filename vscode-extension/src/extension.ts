@@ -5,6 +5,7 @@ import { History, TaskletUI, LineMap, Change } from './history/types';
 import { getBlameViewHtml } from './blameView';
 import { getRepoPath, mergeRemoteNotes } from './utils';
 import { checkOpencode } from './pluginCheck';
+import { checkHookBasedAgents } from './hookAgentPluginCheck';
 import { checkTracyInit } from './tracyInitCheck';
 import { checkResearchModeConsent } from './research/researchModeCheck';
 import { getConsentTier, getParticipantContext, isResearchModeEnabled } from './research/consent';
@@ -184,6 +185,7 @@ export async function activate(context: vscode.ExtensionContext) {
   const runInitialChecks = () => {
     checkTracyInit(context);
     checkOpencode(context);
+    checkHookBasedAgents(context);
     checkResearchModeConsent(context);
   };
 
