@@ -274,6 +274,48 @@ describe("buildTaskletResearchPayloads", () => {
       assert.ok(!payloads[0].build_response.includes("const x"));
     });
 
+    test("redacts home-directory paths (e.g. from markdown file links) outside code fences", () => {
+      const messages: TaskletMessage[] = [
+        { stage: "plan", type: "prompt", model: "anthropic/claude-sonnet-4-6", message: "Plan this" },
+        { stage: "plan", type: "response", model: "anthropic/claude-sonnet-4-6", message: "ok" },
+        { stage: "build", type: "prompt", model: "anthropic/claude-sonnet-4-6", message: "Build it" },
+        {
+          stage: "build", type: "response", model: "anthropic/claude-sonnet-4-6",
+          message: "I edited [utils.ts](/Users/esme/projects/secret-client/src/utils.ts) and " +
+            "also touched ~/work/other-project/config.json. See /home/esme/notes.md too.",
+        },
+      ];
+      const history = makeHistory([{ path: "src/app.ts", tasklets: [makeTasklet({ messages })] }]);
+      const payloads = buildTaskletResearchPayloads(history, 2, PARTICIPANT, SUBMITTED_AT) as Tier2Payload[];
+
+      assert.ok(!payloads[0].build_response.includes("esme"), "username should not leak");
+      assert.ok(!payloads[0].build_response.includes("secret-client"), "local project name should not leak");
+      assert.ok(!payloads[0].build_response.includes("other-project"), "local project name should not leak");
+      assert.equal(
+        payloads[0].build_response,
+        "I edited [utils.ts](<path omitted>) and also touched <path omitted>. See <path omitted> too."
+      );
+    });
+
+    test("leaves unrelated URLs and in-repo relative paths untouched", () => {
+      const messages: TaskletMessage[] = [
+        { stage: "plan", type: "prompt", model: "anthropic/claude-sonnet-4-6", message: "Plan this" },
+        { stage: "plan", type: "response", model: "anthropic/claude-sonnet-4-6", message: "ok" },
+        { stage: "build", type: "prompt", model: "anthropic/claude-sonnet-4-6", message: "Build it" },
+        {
+          stage: "build", type: "response", model: "anthropic/claude-sonnet-4-6",
+          message: "See https://example.com/Users/docs for reference; edited src/utils.ts.",
+        },
+      ];
+      const history = makeHistory([{ path: "src/app.ts", tasklets: [makeTasklet({ messages })] }]);
+      const payloads = buildTaskletResearchPayloads(history, 2, PARTICIPANT, SUBMITTED_AT) as Tier2Payload[];
+
+      assert.equal(
+        payloads[0].build_response,
+        "See https://example.com/Users/docs for reference; edited src/utils.ts."
+      );
+    });
+
     test("extracts structured questions_answers independent of message text", () => {
       const history = makeHistory([
         {
