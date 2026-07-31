@@ -126,6 +126,15 @@ function installHooks(agent: HookAgentConfig, scriptPath: string, bunPath: strin
   fs.writeFileSync(agent.hooksConfigPath, JSON.stringify(config, null, 2) + '\n');
 }
 
+// No confirmation prompt — installing Tracybot is itself the user's opt-in to
+// AI change tracing (that's the extension's whole stated purpose), so asking
+// again per detected agent is redundant friction, not extra consent. This
+// only wires up local, on-device tracking (hidden git commits) — nothing
+// leaves the machine from this step alone; that's what Research Mode's own,
+// separately-gated consent flow is for. Still surfaces a non-blocking
+// notification after installing, so the user isn't left unaware of what
+// just happened, and an error notification if it fails — neither requires a
+// click to dismiss or to proceed.
 async function checkAgent(context: vscode.ExtensionContext, agent: HookAgentConfig): Promise<void> {
   if (context.globalState.get<boolean>(agent.skipCheckKey)) { return; }
 
@@ -135,30 +144,23 @@ async function checkAgent(context: vscode.ExtensionContext, agent: HookAgentConf
     return;
   }
 
-  const action = await vscode.window.showInformationMessage(
-    `Tracybot ${agent.displayName} plugin is not installed. Would you like to install now?`,
-    'Install', 'Ignore', 'Never Show Again'
-  );
-
-  if (action === 'Never Show Again') {
-    await context.globalState.update(agent.skipCheckKey, true);
-    return;
-  }
-  if (action !== 'Install') { return; }
-
   try {
-    const bunPath = existingBunPath ?? resolveBunPath();
+    const bunPath = existingBunPath;
     if (!bunPath) {
-      throw new Error('Bun is required to run this plugin. Install it from https://bun.sh, then try again.');
+      throw new Error('Bun is required to run this plugin. Install it from https://bun.sh, then reload the window.');
     }
 
     const installedScriptPath = await downloadHookScript(agent);
     installHooks(agent, installedScriptPath, bunPath);
 
-    vscode.window.showInformationMessage(`Tracybot ${agent.displayName} plugin installed.`);
+    vscode.window.showInformationMessage(`Tracybot: ${agent.displayName} plugin installed.`);
   } catch (error) {
+    // Don't retry-and-reannounce this failure on every future activation —
+    // once is enough to inform the user something needs fixing (e.g. Bun
+    // missing); they can re-trigger by reloading once it's resolved.
+    await context.globalState.update(agent.skipCheckKey, true);
     vscode.window.showErrorMessage(
-      `Failed to install ${agent.displayName} plugin: ${error instanceof Error ? error.message : String(error)}`
+      `Failed to install Tracybot ${agent.displayName} plugin: ${error instanceof Error ? error.message : String(error)}`
     );
   }
 }
