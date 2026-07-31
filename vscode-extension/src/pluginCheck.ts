@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { homedir } from 'os';
 import { spawn } from 'child_process';
+import { detectAnyHookAgent } from './hookAgentPluginCheck';
 
 const PLUGIN_FILENAME = 'tracybot-oc.js';
 const PLUGIN_URL = 'https://github.com/TracyTeam/tracybot/releases/latest/download/tracybot-oc.js';
@@ -57,6 +58,12 @@ export async function checkOpencode(context: vscode.ExtensionContext): Promise<v
 
   const opencodeAvailable = await findOpencode();
   if (!opencodeAvailable) {
+    // Claude Code or Codex being installed is enough — this message (and its
+    // "requires a supported agent" wording) is only accurate when none of
+    // the three are present. Those two get their own install prompts from
+    // checkHookBasedAgents; this function only owns OpenCode's.
+    if (await detectAnyHookAgent()) { return; }
+
     if (context.globalState.get<boolean>(SKIP_OPENCODE_MISSING_KEY)) { return; }
 
     const action = await vscode.window.showInformationMessage(

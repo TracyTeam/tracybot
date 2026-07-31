@@ -1,0 +1,182 @@
+import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
+import { homedir } from 'os';
+import { spawn, execSync } from 'child_process';
+
+// Claude Code and Codex both install via merging a hooks config JSON (unlike
+// OpenCode's single-file-drop plugin — see pluginCheck.ts), so this is one
+// generic, parameterized checker/installer for both rather than duplicated
+// per-agent logic.
+interface HookAgentConfig {
+  id: string;
+  displayName: string;
+  cliCommand: string;
+  hooksConfigPath: string;
+  hookScriptFilename: string;
+  installDir: string;
+  postToolUseMatcher: string;
+  skipCheckKey: string;
+}
+
+const AGENTS: HookAgentConfig[] = [
+  {
+    id: 'claude-code',
+    displayName: 'Claude Code',
+    cliCommand: 'claude',
+    hooksConfigPath: path.join(homedir(), '.claude', 'settings.json'),
+    hookScriptFilename: 'tracybot-cc-hook.js',
+    installDir: path.join(homedir(), '.claude', 'tracybot'),
+    postToolUseMatcher: 'Edit|Write|MultiEdit',
+    skipCheckKey: 'tracybot.skipClaudeCodeCheck',
+  },
+  {
+    id: 'codex',
+    displayName: 'Codex CLI',
+    cliCommand: 'codex',
+    hooksConfigPath: path.join(homedir(), '.codex', 'hooks.json'),
+    hookScriptFilename: 'tracybot-codex-hook.js',
+    installDir: path.join(homedir(), '.codex', 'tracybot'),
+    postToolUseMatcher: 'apply_patch|Edit|Write',
+    skipCheckKey: 'tracybot.skipCodexCheck',
+  },
+];
+
+function findCli(command: string): Promise<boolean> {
+  return new Promise(resolve => {
+    const proc = spawn(command, ['--version'], { stdio: 'ignore' });
+    proc.on('close', code => resolve(code === 0));
+    proc.on('error', () => resolve(false));
+  });
+}
+
+// Same rationale as the plugin packages' own deploy.js: a hook's execution
+// environment isn't guaranteed to have the same PATH as an interactive
+// shell, so an absolute path is resolved once here and baked into the hook
+// command rather than relying on a bare `bun` at hook-run time.
+function resolveBunPath(): string | undefined {
+  try {
+    return execSync('command -v bun', { encoding: 'utf8' }).trim();
+  } catch {
+    const fallback = path.join(homedir(), '.bun', 'bin', 'bun');
+    return fs.existsSync(fallback) ? fallback : undefined;
+  }
+}
+
+// undefined = file doesn't exist yet (fine, starts empty).
+// null = file exists but isn't valid JSON (caller must not overwrite it).
+function loadHooksConfig(configPath: string): any {
+  if (!fs.existsSync(configPath)) { return {}; }
+  try {
+    return JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function hasHookCommand(hookList: any[] | undefined, command: string): boolean {
+  return (hookList ?? []).some((entry: any) => (entry.hooks ?? []).some((h: any) => h.command === command));
+}
+
+function isAlreadyConfigured(agent: HookAgentConfig, scriptPath: string, bunPath: string): boolean {
+  const config = loadHooksConfig(agent.hooksConfigPath);
+  if (!config?.hooks) { return false; }
+  return hasHookCommand(config.hooks.PostToolUse, `${bunPath} ${scriptPath} post-tool-use`);
+}
+
+async function downloadHookScript(agent: HookAgentConfig): Promise<string> {
+  const destPath = path.join(agent.installDir, agent.hookScriptFilename);
+  fs.mkdirSync(agent.installDir, { recursive: true });
+
+  const url = `https://github.com/TracyTeam/tracybot/releases/latest/download/${agent.hookScriptFilename}`;
+  const response = await fetch(url);
+  if (!response.ok) { throw new Error(`Plugin download failed: (${response.status})`); }
+
+  fs.writeFileSync(destPath, Buffer.from(await response.arrayBuffer()));
+  return destPath;
+}
+
+// Merges into any existing hooks config rather than overwriting it — mirrors
+// each plugin's own scripts/deploy.js exactly, so a user who later runs that
+// script manually (e.g. for development) sees the same idempotent behavior.
+function installHooks(agent: HookAgentConfig, scriptPath: string, bunPath: string): void {
+  const config = loadHooksConfig(agent.hooksConfigPath);
+  if (config === null) {
+    throw new Error(`${agent.hooksConfigPath} exists but isn't valid JSON — fix or remove it, then try again.`);
+  }
+
+  config.hooks ??= {};
+
+  config.hooks.PostToolUse ??= [];
+  const postToolUseCommand = `${bunPath} ${scriptPath} post-tool-use`;
+  if (!hasHookCommand(config.hooks.PostToolUse, postToolUseCommand)) {
+    config.hooks.PostToolUse.push({
+      matcher: agent.postToolUseMatcher,
+      hooks: [{ type: 'command', command: postToolUseCommand }],
+    });
+  }
+
+  config.hooks.Stop ??= [];
+  const stopCommand = `${bunPath} ${scriptPath} stop`;
+  if (!hasHookCommand(config.hooks.Stop, stopCommand)) {
+    config.hooks.Stop.push({ hooks: [{ type: 'command', command: stopCommand }] });
+  }
+
+  fs.mkdirSync(path.dirname(agent.hooksConfigPath), { recursive: true });
+  fs.writeFileSync(agent.hooksConfigPath, JSON.stringify(config, null, 2) + '\n');
+}
+
+async function checkAgent(context: vscode.ExtensionContext, agent: HookAgentConfig): Promise<void> {
+  if (context.globalState.get<boolean>(agent.skipCheckKey)) { return; }
+
+  const scriptPath = path.join(agent.installDir, agent.hookScriptFilename);
+  const existingBunPath = resolveBunPath();
+  if (existingBunPath && fs.existsSync(scriptPath) && isAlreadyConfigured(agent, scriptPath, existingBunPath)) {
+    return;
+  }
+
+  const action = await vscode.window.showInformationMessage(
+    `Tracybot ${agent.displayName} plugin is not installed. Would you like to install now?`,
+    'Install', 'Ignore', 'Never Show Again'
+  );
+
+  if (action === 'Never Show Again') {
+    await context.globalState.update(agent.skipCheckKey, true);
+    return;
+  }
+  if (action !== 'Install') { return; }
+
+  try {
+    const bunPath = existingBunPath ?? resolveBunPath();
+    if (!bunPath) {
+      throw new Error('Bun is required to run this plugin. Install it from https://bun.sh, then try again.');
+    }
+
+    const installedScriptPath = await downloadHookScript(agent);
+    installHooks(agent, installedScriptPath, bunPath);
+
+    vscode.window.showInformationMessage(`Tracybot ${agent.displayName} plugin installed.`);
+  } catch (error) {
+    vscode.window.showErrorMessage(
+      `Failed to install ${agent.displayName} plugin: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
+// Exported so pluginCheck.ts's OpenCode-specific "no supported agent found"
+// fallback can check these two before showing that message — otherwise a
+// Claude Code- or Codex-only user (no OpenCode) would incorrectly be told
+// they have no supported agent at all.
+export async function detectAnyHookAgent(): Promise<boolean> {
+  const results = await Promise.all(AGENTS.map(agent => findCli(agent.cliCommand)));
+  return results.some(Boolean);
+}
+
+export async function checkHookBasedAgents(context: vscode.ExtensionContext): Promise<void> {
+  for (const agent of AGENTS) {
+    const available = await findCli(agent.cliCommand);
+    if (!available) { continue; }
+
+    await checkAgent(context, agent);
+  }
+}
