@@ -9,6 +9,7 @@ import { checkHookBasedAgents } from './hookAgentPluginCheck';
 import { checkTracyInit } from './tracyInitCheck';
 import { checkResearchModeConsent } from './research/researchModeCheck';
 import { getConsentTier, getParticipantContext, isResearchModeEnabled } from './research/consent';
+import { writeRepoConsent } from './research/repoConsent';
 import { clearPendingPayloads, getPendingPayloads, getTodaysSentCount, queueTaskletForSubmission } from './research/queue';
 import { buildTaskletResearchPayloads } from './research/buildResearchPayloads';
 import { submitPayloads } from './research/collectorRepo';
@@ -88,7 +89,7 @@ async function buildHistoryAndSet(ctx: vscode.ExtensionContext): Promise<void> {
       fileTaskletsMap = buildFileTaskletsMap(history);
 
       await ctx.workspaceState.update('tracybot.buildHistoryCache', getSerializedCache());
-      await processNewTaskletsForResearch(ctx, result);
+      await processNewTaskletsForResearch(ctx, result, repoPath);
     } finally {
       buildHistoryLock = null;
     }
@@ -97,11 +98,13 @@ async function buildHistoryAndSet(ctx: vscode.ExtensionContext): Promise<void> {
   await buildHistoryLock;
 }
 
-// Status bar item showing today's Research Mode digest — only visible when enabled
+// Status bar item showing today's Research Mode digest — only visible when
+// the currently open repo has enabled it (consent is per-repo, see repoConsent.ts)
 let researchStatusBarItem: vscode.StatusBarItem;
 
-function updateResearchStatusBar(ctx: vscode.ExtensionContext): void {
-  if (!isResearchModeEnabled()) {
+async function updateResearchStatusBar(ctx: vscode.ExtensionContext): Promise<void> {
+  const repoPath = await getRepoPath();
+  if (!repoPath || !isResearchModeEnabled(repoPath)) {
     researchStatusBarItem.hide();
     return;
   }
@@ -119,18 +122,18 @@ function updateResearchStatusBar(ctx: vscode.ExtensionContext): void {
 // attempt to push everything pending to the collector repo — failures (no
 // network, no token configured yet, push rejected) just leave the queue as-is
 // for the next history rebuild to retry, so this is safe to call often.
-async function processNewTaskletsForResearch(ctx: vscode.ExtensionContext, h: History): Promise<void> {
-  if (!isResearchModeEnabled()) { return; }
+async function processNewTaskletsForResearch(ctx: vscode.ExtensionContext, h: History, repoPath: string): Promise<void> {
+  if (!isResearchModeEnabled(repoPath)) { return; }
 
-  const participant = getParticipantContext(ctx);
-  const payloads = buildTaskletResearchPayloads(h, getConsentTier(), participant);
+  const participant = getParticipantContext(ctx, repoPath);
+  const payloads = buildTaskletResearchPayloads(h, getConsentTier(repoPath), participant);
 
   for (const payload of payloads) {
     await queueTaskletForSubmission(ctx.globalState, payload);
   }
 
   await trySubmitPendingPayloads(ctx);
-  updateResearchStatusBar(ctx);
+  await updateResearchStatusBar(ctx);
 }
 
 async function trySubmitPendingPayloads(ctx: vscode.ExtensionContext): Promise<void> {
@@ -216,7 +219,7 @@ export async function activate(context: vscode.ExtensionContext) {
   researchStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 99);
   researchStatusBarItem.command = 'tracybot-extension.reviewResearchDigest';
   context.subscriptions.push(researchStatusBarItem);
-  updateResearchStatusBar(context);
+  await updateResearchStatusBar(context);
 
   context.subscriptions.push(
     vscode.commands.registerCommand('tracybot-extension.reviewResearchDigest', async () => {
@@ -227,7 +230,7 @@ export async function activate(context: vscode.ExtensionContext) {
         `Tracybot Research Mode: sent ${count} tasklet${count === 1 ? '' : 's'} today. ` +
         `${pending.length} total pending.`,
         'View Pending Data',
-        'Disable Research Mode'
+        'Disable for This Repo'
       );
 
       if (action === 'View Pending Data') {
@@ -236,16 +239,13 @@ export async function activate(context: vscode.ExtensionContext) {
           language: 'json',
         });
         await vscode.window.showTextDocument(doc);
-      } else if (action === 'Disable Research Mode') {
-        await vscode.workspace.getConfiguration('tracybot.researchMode')
-          .update('enabled', false, vscode.ConfigurationTarget.Global);
-        vscode.window.showInformationMessage('Tracybot Research Mode disabled.');
-        updateResearchStatusBar(context);
-      }
-    }),
-    vscode.workspace.onDidChangeConfiguration(e => {
-      if (e.affectsConfiguration('tracybot.researchMode.enabled')) {
-        updateResearchStatusBar(context);
+      } else if (action === 'Disable for This Repo') {
+        const repoPath = await getRepoPath();
+        if (repoPath) {
+          writeRepoConsent(repoPath, { decision: 'declined' });
+        }
+        vscode.window.showInformationMessage('Tracybot Research Mode disabled for this repository.');
+        await updateResearchStatusBar(context);
       }
     })
   );

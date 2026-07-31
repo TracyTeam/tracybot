@@ -4,11 +4,11 @@ Research Mode is an opt-in feature that lets a Tracybot user share their Tasklet
 
 ## Consent
 
-On first activation, the VS Code extension shows a one-time prompt:
+Consent is **per repository**, not machine-wide — agreeing to share one project's Tasklet history doesn't enroll every other repo opened afterward. The first time a repo is opened (and once per repo thereafter, until a decision is made), the VS Code extension shows a prompt:
 
-> Help improve Tracybot: share your Tasklet history for a study on AI-assisted coding behavior?
+> Help improve Tracybot: share this repository's Tasklet history for a study on AI-assisted coding behavior?
 
-Agreeing enables Research Mode at **Tier 1** (the most conservative tier) and generates a random, per-machine `participant_id` that is never derived from git identity (`user.name`/`user.email`). The tier can be raised at any time via `tracybot.researchMode.consentTier` in Settings, and Research Mode can be disabled at any time (status bar → "Disable Research Mode", or the setting directly).
+Agreeing shows a Tier picker (Tier 1, the most conservative, is the default if dismissed) and generates a random, per-machine `participant_id` that is never derived from git identity (`user.name`/`user.email`) — the participant identity is shared across repos even though the enable/tier decision isn't. The decision (`enabled` + tier, or `declined`) is stored in that repo's `.git/tracybot/research-consent.json` — inside `.git` so it's never itself tracked or pushed by that repo's own history — and can be changed anytime from the Research Mode status bar item ("Disable for This Repo").
 
 ### Consent tiers
 
@@ -57,11 +57,13 @@ A rebuild-and-submit attempt happens on extension activation, on opening a repos
 
 ## Configuration reference
 
-| Setting | Default | Purpose |
-|---|---|---|
-| `tracybot.researchMode.enabled` | `false` | Master opt-in switch |
-| `tracybot.researchMode.consentTier` | `1` | `1`, `2`, or `3` — see tiers above |
-| `tracybot.researchMode.repoUrl` | `""` | Optional — shared only if the participant fills this in, lets researchers later check if a repo is open source |
+Stored per-repo in `.git/tracybot/research-consent.json` (see `vscode-extension/src/research/repoConsent.ts`), not as VS Code Settings:
+
+| Field | Purpose |
+|---|---|
+| `decision` | `"enabled"` or `"declined"` — absent entirely means undecided (prompt shows next time the repo is opened) |
+| `consentTier` | `1`, `2`, or `3` — see tiers above; only present when `decision` is `"enabled"` |
+| `repoUrl` | Optional, not currently set through any UI — lets researchers later check if a repo is open source, if manually added to the file |
 
 ## Local development
 
