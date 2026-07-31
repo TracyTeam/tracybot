@@ -7,8 +7,13 @@ import { detectAnyHookAgent } from './hookAgentPluginCheck';
 
 const PLUGIN_FILENAME = 'tracybot-oc.js';
 const PLUGIN_URL = 'https://github.com/TracyTeam/tracybot/releases/latest/download/tracybot-oc.js';
-const SKIP_CHECK_KEY = 'tracybot.skipPluginCheck';
 const SKIP_OPENCODE_MISSING_KEY = 'tracybot.skipOpencodeMissingCheck';
+
+// Same rationale as hookAgentPluginCheck.ts: a failed install gets a cooldown,
+// not a permanent skip, so a transient failure can't permanently defeat the
+// daily re-check in extension.ts.
+const INSTALL_FAILURE_COOLDOWN_KEY = 'tracybot.opencodeInstallFailureAt';
+const FAILURE_RETRY_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
 function getGlobalPluginPath(): string {
   return path.join(homedir(), '.config', 'opencode', 'plugin', PLUGIN_FILENAME);
@@ -45,7 +50,8 @@ async function findOpencode(): Promise<boolean> {
 }
 
 export async function checkOpencode(context: vscode.ExtensionContext): Promise<void> {
-  if (context.globalState.get<boolean>(SKIP_CHECK_KEY)) { return; }
+  const lastFailureAt = context.globalState.get<number>(INSTALL_FAILURE_COOLDOWN_KEY);
+  if (lastFailureAt && Date.now() - lastFailureAt < FAILURE_RETRY_COOLDOWN_MS) { return; }
 
   const opencodeAvailable = await findOpencode();
   if (!opencodeAvailable) {
@@ -86,7 +92,7 @@ export async function checkOpencode(context: vscode.ExtensionContext): Promise<v
     await installPluginTo(path.dirname(installPath));
     vscode.window.showInformationMessage(`Tracybot: OpenCode plugin installed to ${installPath}.`);
   } catch (error) {
-    await context.globalState.update(SKIP_CHECK_KEY, true);
+    await context.globalState.update(INSTALL_FAILURE_COOLDOWN_KEY, Date.now());
     vscode.window.showErrorMessage(
       `Failed to install Tracybot OpenCode plugin: ${error instanceof Error ? error.message : String(error)}`
     );
