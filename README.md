@@ -68,7 +68,7 @@ Requirements:
 
 ### 3. Agent Plugins Install Automatically
 
-If the VS Code extension is installed, it detects whichever supported agent CLIs you already have (OpenCode, Claude Code, Codex) and installs their plugins for you automatically — no confirmation needed, since installing Tracybot is itself your opt-in to AI change tracing. It also re-checks once a day, so an agent you install later gets picked up without needing to reload VS Code.
+If the VS Code extension is installed, it detects whichever supported agent CLIs you already have (OpenCode, Claude Code, Codex) and installs their plugins automatically. It also re-checks once a day, so an agent you install later gets picked up without needing to reload VS Code.
 
 - **OpenCode** — [opencode-plugin](./opencode-plugin/README.md), installed at `~/.config/opencode/plugin/tracybot-oc.js`
 - **Claude Code** — [claude-code-plugin](./claude-code-plugin/README.md), installed via hooks in `~/.claude/settings.json`
