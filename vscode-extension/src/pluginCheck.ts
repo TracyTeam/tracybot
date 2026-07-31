@@ -10,15 +10,6 @@ const PLUGIN_URL = 'https://github.com/TracyTeam/tracybot/releases/latest/downlo
 const SKIP_CHECK_KEY = 'tracybot.skipPluginCheck';
 const SKIP_OPENCODE_MISSING_KEY = 'tracybot.skipOpencodeMissingCheck';
 
-const Actions = {
-  InstallGlobally: 'Install Globally',
-  InstallForProject: 'Install for Project',
-  Ignore: 'Ignore',
-  NeverShowAgain: 'Never Show Again',
-} as const;
-
-type Action = (typeof Actions)[keyof typeof Actions];
-
 function getGlobalPluginPath(): string {
   return path.join(homedir(), '.config', 'opencode', 'plugin', PLUGIN_FILENAME);
 }
@@ -85,38 +76,19 @@ export async function checkOpencode(context: vscode.ExtensionContext): Promise<v
   const projectPath = getProjectPluginPath();
   if (projectPath && fs.existsSync(projectPath)) { return; }
 
-  const buttons: Action[] = [Actions.InstallGlobally];
-  if (projectPath) { buttons.push(Actions.InstallForProject); }
-  buttons.push(Actions.Ignore, Actions.NeverShowAgain);
-
-  const action = await vscode.window.showInformationMessage(
-    'Tracybot OpenCode plugin is not installed. Would you like to install now?',
-    ...buttons
-  );
-
-  if (action === Actions.NeverShowAgain) {
-    await context.globalState.update(SKIP_CHECK_KEY, true);
-    return;
-  }
-
-  // skip and catch-all for sanity
-  if (action !== Actions.InstallGlobally && action !== Actions.InstallForProject) { return; }
+  // No confirmation prompt — same rationale as checkHookBasedAgents: installing
+  // Tracybot already signals consent to trace AI changes, so this just installs
+  // globally (matching the other two agents' user-level install location) and
+  // tells the user afterward, without blocking on a click.
+  const installPath = getGlobalPluginPath();
 
   try {
-    let installPath;
-    if (action === Actions.InstallGlobally) {
-      installPath = getGlobalPluginPath();
-    } else {
-      if (!projectPath) { throw new Error("Not in a workspace."); }
-
-      installPath = projectPath;
-    }
-
     await installPluginTo(path.dirname(installPath));
-    vscode.window.showInformationMessage(`Tracybot OpenCode plugin installed to ${installPath}.`);
+    vscode.window.showInformationMessage(`Tracybot: OpenCode plugin installed to ${installPath}.`);
   } catch (error) {
+    await context.globalState.update(SKIP_CHECK_KEY, true);
     vscode.window.showErrorMessage(
-      `Failed to install plugin: ${error instanceof Error ? error.message : String(error)}`
+      `Failed to install Tracybot OpenCode plugin: ${error instanceof Error ? error.message : String(error)}`
     );
   }
 }
