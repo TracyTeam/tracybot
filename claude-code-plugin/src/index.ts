@@ -1,6 +1,6 @@
 import { markFileEdited, readPendingTurn, clearPendingTurn } from "./state"
 import { extractTurnContext } from "./transcript"
-import { getRepoRoot, resolveTracyPath, detectPythonCommand, runTracySnapshot } from "./tracy"
+import { getRepoRootForEditedFiles, resolveTracyPath, detectPythonCommand, runTracySnapshot } from "./tracy"
 import type { ClaudeTurn } from "./types"
 
 const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit"])
@@ -38,7 +38,9 @@ async function handleStop(): Promise<void> {
     const pending = await readPendingTurn(input.session_id)
     if (!pending || pending.editedFiles.length === 0) return // nothing edited this turn — mirrors OpenCode's toolCount > 0 gate
 
-    const repoRoot = await getRepoRoot(input.cwd)
+    // Derived from the actual edited files, not input.cwd — see
+    // getRepoRootForEditedFiles for why the hook's own cwd can't be trusted.
+    const repoRoot = await getRepoRootForEditedFiles(pending.editedFiles)
     if (!repoRoot) return
 
     const tracyPath = await resolveTracyPath(repoRoot)

@@ -18,6 +18,14 @@ export interface CodexTurn {
 // than parse an unconfirmed patch format, this only tracks *whether* an edit
 // happened this turn, which is all the gating logic (mirroring OpenCode's
 // toolCount > 0) actually needs.
+//
+// repoRoot is resolved from the hook's cwd at PostToolUse time (right when
+// the edit happens) and reused as-is at Stop, rather than re-resolving cwd
+// at Stop time — a session's shell cwd can drift after the edit (e.g. a
+// later, unrelated `cd` into a different repo to run some diagnostic
+// command), and Stop firing with that drifted cwd would snapshot the wrong
+// repo entirely.
 export interface PendingTurnState {
   edited: boolean
+  repoRoot?: string
 }

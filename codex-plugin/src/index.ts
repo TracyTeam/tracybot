@@ -32,7 +32,10 @@ async function handlePostToolUse(): Promise<void> {
     const input = await readStdinJson<ToolEventInput>()
     if (!input.tool_name || !EDIT_TOOLS.has(input.tool_name)) return
 
-    await markEdited(input.session_id)
+    // Resolved now, at the moment of the actual edit, rather than at Stop —
+    // see PendingTurnState.repoRoot for why Stop's own cwd can't be trusted.
+    const repoRoot = await getRepoRoot(input.cwd)
+    await markEdited(input.session_id, repoRoot)
 }
 
 async function handleStop(): Promise<void> {
@@ -41,7 +44,7 @@ async function handleStop(): Promise<void> {
     const pending = await readPendingTurn(input.session_id)
     if (!pending?.edited) return // nothing edited this turn — mirrors OpenCode's toolCount > 0 gate
 
-    const repoRoot = await getRepoRoot(input.cwd)
+    const repoRoot = pending.repoRoot
     if (!repoRoot) return
 
     const tracyPath = await resolveTracyPath(repoRoot)

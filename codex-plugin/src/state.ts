@@ -10,8 +10,8 @@ function statePath(sessionId: string): string {
     return path.join(os.tmpdir(), `tracybot-codex-turn-${sessionId}.json`)
 }
 
-export async function markEdited(sessionId: string): Promise<void> {
-    const state: PendingTurnState = { edited: true }
+export async function markEdited(sessionId: string, repoRoot: string | undefined): Promise<void> {
+    const state: PendingTurnState = { edited: true, repoRoot }
     await Bun.write(statePath(sessionId), JSON.stringify(state))
 }
 

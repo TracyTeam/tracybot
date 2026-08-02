@@ -66,6 +66,21 @@ export async function getRepoRoot(cwd: string): Promise<string | undefined> {
     }
 }
 
+// The hook event's own `cwd` is not a reliable "which repo is this turn
+// about" signal — it reflects whatever the session's shell happens to be in
+// at Stop time, which drifts on an ordinary `cd` (e.g. running a diagnostic
+// command in a different repo) with no actual edit involved. The edited
+// files themselves are the only ground truth for that, so the repo root is
+// derived from them instead — tried in order in case an earlier one no
+// longer resolves (e.g. a since-deleted file).
+export async function getRepoRootForEditedFiles(editedFiles: string[]): Promise<string | undefined> {
+    for (const file of editedFiles) {
+        const repoRoot = await getRepoRoot(path.dirname(file))
+        if (repoRoot) return repoRoot
+    }
+    return undefined
+}
+
 // Same shape of call opencode-plugin/claude-code-plugin make — tracy.py
 // itself doesn't care which agent produced the description, only that it's
 // a string.
