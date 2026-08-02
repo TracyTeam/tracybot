@@ -501,15 +501,24 @@ export async function getRepoPath(): Promise<string | undefined> {
     return git.repositories[0].rootUri.fsPath;
   }
 
-  // If there are multiple repos, try to find the one containing the active file
+  // If there are multiple repos, try to find the one containing the active file.
+  // For a repo nested inside another repo (e.g. a project cloned into a
+  // subfolder of a parent repo), the active file's path is a prefix match for
+  // BOTH — picking the first match (in whatever order git.repositories
+  // happens to enumerate) can resolve to the outer, wrong repo instead of the
+  // inner one that actually contains the file. The most specific match (the
+  // longest matching rootUri) is always the correct, innermost repo.
   const activeEditor = vscode.window.activeTextEditor;
   if (activeEditor) {
-    const repo = git.repositories.find((r: { rootUri: vscode.Uri }) =>
+    const matchingRepos = git.repositories.filter((r: { rootUri: vscode.Uri }) =>
       activeEditor.document.uri.fsPath.startsWith(r.rootUri.fsPath)
     );
 
-    if (repo) {
-      return repo.rootUri.fsPath;
+    if (matchingRepos.length > 0) {
+      const mostSpecific = matchingRepos.reduce((a: { rootUri: vscode.Uri }, b: { rootUri: vscode.Uri }) =>
+        b.rootUri.fsPath.length > a.rootUri.fsPath.length ? b : a
+      );
+      return mostSpecific.rootUri.fsPath;
     }
   }
 
