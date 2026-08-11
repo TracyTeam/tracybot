@@ -4,6 +4,7 @@ import * as path from 'path';
 import { homedir } from 'os';
 import { spawn, execSync } from 'child_process';
 import { clearFailureCooldown, notifyFailureOnce } from './failureCooldown';
+import { getBunInstallCommand } from './bunInstall';
 
 // Claude Code and Codex both install via merging a hooks config JSON (unlike
 // OpenCode's single-file-drop plugin — see pluginCheck.ts), so this is one
@@ -62,6 +63,19 @@ function resolveBunPath(): string | undefined {
     const fallback = path.join(homedir(), '.bun', 'bin', 'bun');
     return fs.existsSync(fallback) ? fallback : undefined;
   }
+}
+
+// Runs Bun's own official installer in a visible integrated terminal — not a
+// silent background process — so the user sees the script's own output and
+// it runs in their normal shell environment, matching how they'd run it
+// themselves. Deliberately doesn't try to detect completion or auto-reverify:
+// the terminal is async/interactive, and checkHookBasedAgents already
+// re-checks on every activation/repo-open, so the next one picks it up on
+// its own once Bun is actually installed — no extra wiring needed here.
+function installBun(): void {
+  const terminal = vscode.window.createTerminal('Install Bun');
+  terminal.sendText(getBunInstallCommand());
+  terminal.show();
 }
 
 // undefined = file doesn't exist yet (fine, starts empty).
@@ -149,10 +163,12 @@ async function checkAgent(context: vscode.ExtensionContext, agent: HookAgentConf
   }
 
   if (!existingBunPath) {
-    await notifyFailureOnce(context.globalState, agent.failureCooldownKey, () => {
-      vscode.window.showErrorMessage(
-        `Failed to install Tracybot ${agent.displayName} plugin: Bun is required to run this plugin. Install it from https://bun.sh — Tracybot will pick it up automatically.`
+    await notifyFailureOnce(context.globalState, agent.failureCooldownKey, async () => {
+      const action = await vscode.window.showErrorMessage(
+        `Failed to install Tracybot ${agent.displayName} plugin: Bun is required to run this plugin.`,
+        'Install Bun'
       );
+      if (action === 'Install Bun') { installBun(); }
     });
     return;
   }
