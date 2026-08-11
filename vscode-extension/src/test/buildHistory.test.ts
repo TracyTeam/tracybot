@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { execSync } from 'child_process';
-import { buildHistory } from '../history/buildHistory';
+import { buildHistory, describeBuildHistoryFailure } from '../history/buildHistory';
 
 function makeTempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'tracybot-build-history-'));
@@ -45,5 +45,12 @@ suite('buildHistory failure reasons', () => {
     const result = await buildHistory(undefined);
     assert.strictEqual(result.ok, false);
     if (!result.ok) { assert.strictEqual(result.reason, 'no-repo-path'); }
+  });
+
+  test('no repoPath has an actionable AI Blame message', () => {
+    assert.strictEqual(
+      describeBuildHistoryFailure('no-repo-path'),
+      'AI Blame: No repository found for the current workspace.'
+    );
   });
 });

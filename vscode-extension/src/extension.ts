@@ -65,6 +65,16 @@ async function buildHistoryAndSet(ctx: vscode.ExtensionContext): Promise<void> {
 
   const repoPath = await getRepoPath();
   if (!repoPath) {
+    // getRepoPath() relies on VS Code's Git API and therefore returns
+    // undefined before buildHistory() can classify the failure itself. Keep
+    // the UI state in sync with that result so AI Blame reports the useful
+    // "no repository" message instead of falling back to build-error (or,
+    // worse, rendering attribution cached for a previously open repo).
+    lastBuildHistoryFailureReason = 'no-repo-path';
+    history = undefined;
+    lineMap = new Map();
+    displayLineMap = new Map();
+    fileTaskletsMap = new Map();
     return;
   }
 
@@ -78,6 +88,10 @@ async function buildHistoryAndSet(ctx: vscode.ExtensionContext): Promise<void> {
       if (!result.ok) {
         console.error('Failed to build history:', result.reason);
         lastBuildHistoryFailureReason = result.reason;
+        history = undefined;
+        lineMap = new Map();
+        displayLineMap = new Map();
+        fileTaskletsMap = new Map();
         return;
       }
 
