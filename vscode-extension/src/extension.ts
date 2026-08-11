@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 
-import { buildHistory, hydrateCache, getSerializedCache, clearCache } from './history/buildHistory';
-import { History, TaskletUI, LineMap, Change } from './history/types';
+import { buildHistory, describeBuildHistoryFailure, hydrateCache, getSerializedCache, clearCache } from './history/buildHistory';
+import { BuildHistoryFailureReason, History, TaskletUI, LineMap, Change } from './history/types';
 import { getBlameViewHtml } from './blameView';
 import { getRepoPath, mergeRemoteNotes } from './utils';
 import { checkOpencode } from './pluginCheck';
@@ -17,6 +17,7 @@ import { submitPayloads } from './research/collectorRepo';
 // History data — populated asynchronously when the extension activates
 let history: History | undefined;
 let buildHistoryLock: Promise<void> | null = null;
+let lastBuildHistoryFailureReason: BuildHistoryFailureReason | undefined;
 
 // Maps a relative file path to a map of line number -> Tasklet
 // Built once after history loads; updated on each blameAI invocation
@@ -74,22 +75,24 @@ async function buildHistoryAndSet(ctx: vscode.ExtensionContext): Promise<void> {
       const result = await buildHistory(repoPath);
       console.log(`History build time: ${Date.now() - time}ms`);
 
-      if (!result) {
-        console.error('Failed to build history');
+      if (!result.ok) {
+        console.error('Failed to build history:', result.reason);
+        lastBuildHistoryFailureReason = result.reason;
         return;
       }
 
-      result.files.forEach(file =>
+      lastBuildHistoryFailureReason = undefined;
+      result.history.files.forEach(file =>
         file.tasklets.forEach(t => (t as TaskletUI).selected = false)
       );
 
-      history = result as unknown as { files: { path: string; tasklets: TaskletUI[] }[] } & History;
+      history = result.history as unknown as { files: { path: string; tasklets: TaskletUI[] }[] } & History;
       lineMap = buildLineMap(history);
       displayLineMap = new Map(lineMap);
       fileTaskletsMap = buildFileTaskletsMap(history);
 
       await ctx.workspaceState.update('tracybot.buildHistoryCache', getSerializedCache());
-      await processNewTaskletsForResearch(ctx, result, repoPath);
+      await processNewTaskletsForResearch(ctx, result.history, repoPath);
     } finally {
       buildHistoryLock = null;
     }
@@ -328,7 +331,7 @@ export async function activate(context: vscode.ExtensionContext) {
       );
 
       if (!history) {
-        vscode.window.showErrorMessage('AI Blame: Failed to build history.');
+        vscode.window.showErrorMessage(describeBuildHistoryFailure(lastBuildHistoryFailureReason ?? 'build-error'));
         return;
       }
 

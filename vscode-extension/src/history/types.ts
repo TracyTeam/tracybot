@@ -64,6 +64,12 @@ export type History = z.infer<typeof historySchema>;
 export type TaskletMessage = z.infer<typeof taskletMessage>
 export type TaskletQuestion = z.infer<typeof taskletQuestion>
 
+export type BuildHistoryFailureReason = 'no-repo-path' | 'not-a-git-repo' | 'no-commits' | 'no-head-tree' | 'build-error';
+
+export type BuildHistoryResult =
+  | { ok: true; history: History }
+  | { ok: false; reason: BuildHistoryFailureReason };
+
 export interface CommitInfo {
   hash: string;
   authorEmail: string;
