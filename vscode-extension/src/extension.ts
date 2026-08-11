@@ -7,9 +7,9 @@ import { getRepoPath, mergeRemoteNotes } from './utils';
 import { checkOpencode } from './pluginCheck';
 import { checkHookBasedAgents } from './hookAgentPluginCheck';
 import { checkTracyInit } from './tracyInitCheck';
-import { checkResearchModeConsent } from './research/researchModeCheck';
+import { checkResearchModeConsent, enableResearchModeForRepo, pickResearchModeTier } from './research/researchModeCheck';
 import { getConsentTier, getParticipantContext, isResearchModeEnabled } from './research/consent';
-import { writeRepoConsent } from './research/repoConsent';
+import { readRepoConsent, writeRepoConsent } from './research/repoConsent';
 import { clearPendingPayloads, getPendingPayloads, getTodaysSentCount, queueTaskletForSubmission } from './research/queue';
 import { buildTaskletResearchPayloads } from './research/buildResearchPayloads';
 import { submitPayloads } from './research/collectorRepo';
@@ -221,8 +221,39 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(researchStatusBarItem);
   await updateResearchStatusBar(context);
 
+  // Same command whether reached from the status bar (only visible once
+  // enabled) or the Command Palette (always available, no "when" clause) —
+  // it branches on the current repo's consent state so undecided/declined
+  // repos have a real entry point too, not just enabled ones.
   context.subscriptions.push(
     vscode.commands.registerCommand('tracybot-extension.reviewResearchDigest', async () => {
+      const repoPath = await getRepoPath();
+      if (!repoPath) {
+        vscode.window.showInformationMessage('Tracybot Research Mode: open a folder inside a git repository first.');
+        return;
+      }
+
+      const consent = readRepoConsent(repoPath);
+
+      if (!consent) {
+        await checkResearchModeConsent(context);
+        await updateResearchStatusBar(context);
+        return;
+      }
+
+      if (consent.decision === 'declined') {
+        const action = await vscode.window.showInformationMessage(
+          'Research Mode is currently declined for this repository.',
+          'Re-enable',
+          'Keep Declined'
+        );
+        if (action === 'Re-enable') {
+          await enableResearchModeForRepo(context, repoPath);
+          await updateResearchStatusBar(context);
+        }
+        return;
+      }
+
       const count = getTodaysSentCount(context.globalState);
       const pending = getPendingPayloads(context.globalState);
 
@@ -230,6 +261,7 @@ export async function activate(context: vscode.ExtensionContext) {
         `Tracybot Research Mode: sent ${count} tasklet${count === 1 ? '' : 's'} today. ` +
         `${pending.length} total pending.`,
         'View Pending Data',
+        'Change Tier',
         'Disable for This Repo'
       );
 
@@ -239,11 +271,16 @@ export async function activate(context: vscode.ExtensionContext) {
           language: 'json',
         });
         await vscode.window.showTextDocument(doc);
-      } else if (action === 'Disable for This Repo') {
-        const repoPath = await getRepoPath();
-        if (repoPath) {
-          writeRepoConsent(repoPath, { decision: 'declined' });
+      } else if (action === 'Change Tier') {
+        const tier = await pickResearchModeTier();
+        // Dismissed: leave the existing tier untouched — this is a change,
+        // not a fresh opt-in, so it shouldn't silently downgrade to Tier 1.
+        if (tier !== undefined) {
+          writeRepoConsent(repoPath, { ...consent, consentTier: tier });
+          vscode.window.showInformationMessage(`Research Mode tier changed to Tier ${tier} for this repository.`);
         }
+      } else if (action === 'Disable for This Repo') {
+        writeRepoConsent(repoPath, { decision: 'declined' });
         vscode.window.showInformationMessage('Tracybot Research Mode disabled for this repository.');
         await updateResearchStatusBar(context);
       }

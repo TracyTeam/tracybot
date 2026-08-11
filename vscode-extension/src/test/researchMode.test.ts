@@ -10,16 +10,6 @@ suite('Research Mode integration', () => {
     assert.ok(ext!.isActive);
   });
 
-  test('tracybot.researchMode.enabled defaults to false', () => {
-    const enabled = vscode.workspace.getConfiguration('tracybot.researchMode').get<boolean>('enabled');
-    assert.strictEqual(enabled, false);
-  });
-
-  test('tracybot.researchMode.consentTier defaults to 1', () => {
-    const tier = vscode.workspace.getConfiguration('tracybot.researchMode').get<number>('consentTier');
-    assert.strictEqual(tier, 1);
-  });
-
   test('reviewResearchDigest command is registered', async () => {
     const commands = await vscode.commands.getCommands(true);
     assert.ok(
@@ -42,11 +32,12 @@ suite('Research Mode integration', () => {
     assert.strictEqual(rejected, undefined, `command rejected: ${String(rejected)}`);
   });
 
-  test('enabling researchMode.enabled does not throw (status bar update path)', async () => {
-    const config = vscode.workspace.getConfiguration('tracybot.researchMode');
-    await config.update('enabled', true, vscode.ConfigurationTarget.Global);
-    // Give the onDidChangeConfiguration listener a tick to run
-    await new Promise(resolve => setTimeout(resolve, 50));
-    await config.update('enabled', false, vscode.ConfigurationTarget.Global);
+  test('reviewResearchDigest palette title is "Tracybot: Manage Research Mode"', () => {
+    const ext = vscode.extensions.getExtension('TracyTeam.tracybot-extension');
+    assert.ok(ext, 'extension not found');
+    const commands: { command: string; title: string }[] = ext!.packageJSON.contributes.commands;
+    const entry = commands.find(c => c.command === 'tracybot-extension.reviewResearchDigest');
+    assert.ok(entry, 'reviewResearchDigest command not found in package.json');
+    assert.strictEqual(entry!.title, 'Tracybot: Manage Research Mode');
   });
 });

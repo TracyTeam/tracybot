@@ -47,7 +47,7 @@
       },
       {
         "command": "tracybot-extension.reviewResearchDigest",
-        "title": "Tracybot: Review Research Mode Data"
+        "title": "Tracybot: Manage Research Mode"
       }
     ],
     "keybindings": [
