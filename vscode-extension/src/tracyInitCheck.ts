@@ -3,12 +3,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { spawn } from 'child_process';
 import { getRepoPath } from './utils';
+import { clearFailureCooldown, notifyFailureOnce } from './failureCooldown';
 
 // A failed init (e.g. no Python) gets a cooldown, not a permanent skip — same
 // rationale as hookAgentPluginCheck.ts: a since-fixed problem (Python
 // installed later) should get picked up again, not stay silenced forever.
 const INIT_FAILURE_COOLDOWN_KEY = 'tracybot.tracyInitFailureAt';
-const FAILURE_RETRY_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
 async function findPython(): Promise<string> {
   for (const cmd of ['python3', 'python']) {
@@ -32,23 +32,24 @@ async function findPython(): Promise<string> {
 // consent. Still surfaces a non-blocking notification once it's done, and an
 // error notification if it fails — neither requires a click to proceed.
 export async function checkTracyInit(context: vscode.ExtensionContext): Promise<void> {
-  const lastFailureAt = context.globalState.get<number>(INIT_FAILURE_COOLDOWN_KEY);
-  if (lastFailureAt && Date.now() - lastFailureAt < FAILURE_RETRY_COOLDOWN_MS) { return; }
-
   const repoPath = await getRepoPath();
   if (!repoPath) { return; }
 
   const tracyConfig = path.join(repoPath, '.git', 'tracybot', 'config');
-  if (fs.existsSync(tracyConfig)) { return; }
+  if (fs.existsSync(tracyConfig)) {
+    await clearFailureCooldown(context.globalState, INIT_FAILURE_COOLDOWN_KEY);
+    return;
+  }
 
   let python: string;
   try {
     python = await findPython();
   } catch (err) {
-    await context.globalState.update(INIT_FAILURE_COOLDOWN_KEY, Date.now());
-    vscode.window.showErrorMessage(
-      `Failed to initialize Tracybot in this repository: ${err instanceof Error ? err.message : String(err)}`
-    );
+    await notifyFailureOnce(context.globalState, INIT_FAILURE_COOLDOWN_KEY, () => {
+      vscode.window.showErrorMessage(
+        `Failed to initialize Tracybot in this repository: ${err instanceof Error ? err.message : String(err)}`
+      );
+    });
     return;
   }
 
@@ -63,11 +64,13 @@ export async function checkTracyInit(context: vscode.ExtensionContext): Promise<
       proc.on('error', reject);
     });
 
+    await clearFailureCooldown(context.globalState, INIT_FAILURE_COOLDOWN_KEY);
     vscode.window.showInformationMessage('Tracybot: repository initialized.');
   } catch (error) {
-    await context.globalState.update(INIT_FAILURE_COOLDOWN_KEY, Date.now());
-    vscode.window.showErrorMessage(
-      `Failed to initialize Tracybot in this repository: ${error instanceof Error ? error.message : String(error)}`
-    );
+    await notifyFailureOnce(context.globalState, INIT_FAILURE_COOLDOWN_KEY, () => {
+      vscode.window.showErrorMessage(
+        `Failed to initialize Tracybot in this repository: ${error instanceof Error ? error.message : String(error)}`
+      );
+    });
   }
 }

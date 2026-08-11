@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { homedir } from 'os';
 import { spawn, execSync } from 'child_process';
+import { clearFailureCooldown, notifyFailureOnce } from './failureCooldown';
 
 // Claude Code and Codex both install via merging a hooks config JSON (unlike
 // OpenCode's single-file-drop plugin — see pluginCheck.ts), so this is one
@@ -18,14 +19,6 @@ interface HookAgentConfig {
   postToolUseMatcher: string;
   failureCooldownKey: string;
 }
-
-// A failed install (e.g. Bun missing) shouldn't be retried on every single
-// activation — that would spam an error message the user can't act on
-// immediately. But it also can't be a permanent skip, or a user who fixes
-// the underlying problem (installs Bun) would never get auto-installed,
-// silently defeating the daily re-check in extension.ts. So failures get a
-// cooldown, not a permanent flag.
-const FAILURE_RETRY_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
 const AGENTS: HookAgentConfig[] = [
   {
@@ -148,29 +141,34 @@ function installHooks(agent: HookAgentConfig, scriptPath: string, bunPath: strin
 // just happened, and an error notification if it fails — neither requires a
 // click to dismiss or to proceed.
 async function checkAgent(context: vscode.ExtensionContext, agent: HookAgentConfig): Promise<void> {
-  const lastFailureAt = context.globalState.get<number>(agent.failureCooldownKey);
-  if (lastFailureAt && Date.now() - lastFailureAt < FAILURE_RETRY_COOLDOWN_MS) { return; }
-
   const scriptPath = path.join(agent.installDir, agent.hookScriptFilename);
   const existingBunPath = resolveBunPath();
   if (existingBunPath && fs.existsSync(scriptPath) && isAlreadyConfigured(agent, scriptPath, existingBunPath)) {
+    await clearFailureCooldown(context.globalState, agent.failureCooldownKey);
+    return;
+  }
+
+  if (!existingBunPath) {
+    await notifyFailureOnce(context.globalState, agent.failureCooldownKey, () => {
+      vscode.window.showErrorMessage(
+        `Failed to install Tracybot ${agent.displayName} plugin: Bun is required to run this plugin. Install it from https://bun.sh — Tracybot will pick it up automatically.`
+      );
+    });
     return;
   }
 
   try {
-    if (!existingBunPath) {
-      throw new Error('Bun is required to run this plugin. Install it from https://bun.sh — Tracybot will pick it up automatically.');
-    }
-
     const installedScriptPath = await downloadHookScript(agent);
     installHooks(agent, installedScriptPath, existingBunPath);
 
+    await clearFailureCooldown(context.globalState, agent.failureCooldownKey);
     vscode.window.showInformationMessage(`Tracybot: ${agent.displayName} plugin installed.`);
   } catch (error) {
-    await context.globalState.update(agent.failureCooldownKey, Date.now());
-    vscode.window.showErrorMessage(
-      `Failed to install Tracybot ${agent.displayName} plugin: ${error instanceof Error ? error.message : String(error)}`
-    );
+    await notifyFailureOnce(context.globalState, agent.failureCooldownKey, () => {
+      vscode.window.showErrorMessage(
+        `Failed to install Tracybot ${agent.displayName} plugin: ${error instanceof Error ? error.message : String(error)}`
+      );
+    });
   }
 }
 
