@@ -1,4 +1,4 @@
-import { Change, CommitInfo, DiffHunk, History, TaskletMessage, TaskletQuestion } from "./types";
+import { BuildHistoryFailureReason, BuildHistoryResult, Change, CommitInfo, DiffHunk, History, TaskletMessage, TaskletQuestion } from "./types";
 import {
   getActiveTracyId,
   getCommitTree,
@@ -746,30 +746,42 @@ function deduplicateAILines(changes: Change[]): Change[] {
   return result;
 }
 
-export async function buildHistory(repoPath: string | undefined): Promise<History | null> {
+export async function buildHistory(repoPath: string | undefined): Promise<BuildHistoryResult> {
   if (!repoPath) {
-    return null;
+    return { ok: false, reason: 'no-repo-path' };
   }
 
   try {
     await runGit(repoPath, ["rev-parse", "--is-inside-work-tree"]);
   } catch (error) {
     console.error("Not a valid git repository:", error);
-
-    return null;
+    return { ok: false, reason: 'not-a-git-repo' };
   }
 
   try {
-    const mainCommits = await getMainCommits(repoPath);
+    let mainCommits: CommitInfo[];
+    try {
+      mainCommits = await getMainCommits(repoPath);
+    } catch (error) {
+      // `git log` itself fails (exit 128, "does not have any commits yet")
+      // on a freshly-initialized repo — mainCommits.length === 0 below never
+      // actually fires for that case, getMainCommits throws first. Any other
+      // reason `git log` could fail here (the is-inside-work-tree check
+      // above already passed) is rare enough that folding it into
+      // "no commits" is an acceptable, much simpler trade-off than parsing
+      // git's stderr text.
+      console.error("Failed to read commit history (treating as no commits):", error);
+      return { ok: false, reason: 'no-commits' };
+    }
     if (mainCommits.length === 0) {
-      return null;
+      return { ok: false, reason: 'no-commits' };
     }
 
     const headCommitHash = await runGit(repoPath, ["rev-parse", "HEAD"]);
     const headTree = await getCommitTree(repoPath, headCommitHash);
 
     if (!headTree) {
-      return null;
+      return { ok: false, reason: 'no-head-tree' };
     }
 
     // Build committed AI changes first
@@ -790,11 +802,29 @@ export async function buildHistory(repoPath: string | undefined): Promise<Histor
     );
 
     return {
-      id: headCommitHash || "WORKING_DIR",
-      files: groupChangesByFile(deduplicateAILines(userConsumed)),
+      ok: true,
+      history: {
+        id: headCommitHash || "WORKING_DIR",
+        files: groupChangesByFile(deduplicateAILines(userConsumed)),
+      },
     };
   } catch (error) {
     console.error("Error building history:", error);
-    return null;
+    return { ok: false, reason: 'build-error' };
+  }
+}
+
+export function describeBuildHistoryFailure(reason: BuildHistoryFailureReason): string {
+  switch (reason) {
+    case 'not-a-git-repo':
+      return 'AI Blame: This needs to be a git repository.';
+    case 'no-commits':
+      return 'AI Blame: This repository has no commits yet.';
+    case 'no-repo-path':
+      return 'AI Blame: No repository found for the current workspace.';
+    case 'no-head-tree':
+    case 'build-error':
+    default:
+      return 'AI Blame: Failed to build history.';
   }
 }

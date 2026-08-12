@@ -47,7 +47,7 @@
       },
       {
         "command": "tracybot-extension.reviewResearchDigest",
-        "title": "Tracybot: Review Research Mode Data"
+        "title": "Tracybot: Manage Research Mode"
       }
     ],
     "keybindings": [
@@ -68,7 +68,7 @@
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",
     "test": "vscode-test",
-    "test:unit": "tsc -p ./ && node --test out/research/**/*.test.js",
+    "test:unit": "tsc -p ./ && node --test out/research/**/*.test.js out/*.test.js",
     "package": "vsce package -o out/tracybot-extension.vsix",
     "deploy": "npm run package && code --install-extension out/tracybot-extension.vsix"
   },

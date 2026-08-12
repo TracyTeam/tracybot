@@ -31,6 +31,35 @@ const TIER_OPTIONS: TierPickItem[] = [
   },
 ];
 
+// Exported (rather than exporting TIER_OPTIONS directly) so the Manage
+// Research Mode command in extension.ts can offer the exact same tier
+// picker for a Change Tier action, without duplicating how it's presented.
+export async function pickResearchModeTier(): Promise<1 | 2 | 3 | undefined> {
+  const chosen = await vscode.window.showQuickPick(TIER_OPTIONS, {
+    title: 'Tracybot Research Mode — choose how much to share',
+    placeHolder: 'You can change or disable this anytime from the Research Mode status bar item',
+    ignoreFocusOut: true,
+  });
+  return chosen?.tier;
+}
+
+// Shared by the initial opt-in prompt and by re-enabling a previously
+// declined repo (see extension.ts's Manage Research Mode command) — both
+// are "turn Research Mode on and pick a tier," differing only in what
+// prompted it.
+export async function enableResearchModeForRepo(context: vscode.ExtensionContext, repoPath: string): Promise<void> {
+  // Dismissed (Escape) without picking — fall back to the most conservative
+  // tier rather than leaving some other prior value in place.
+  const tier = (await pickResearchModeTier()) ?? 1;
+
+  writeRepoConsent(repoPath, { decision: 'enabled', consentTier: tier });
+  getOrCreateParticipantId(context);
+
+  vscode.window.showInformationMessage(
+    `Research Mode enabled at Tier ${tier} for this repository. Change or disable it anytime from the Research Mode status bar item.`
+  );
+}
+
 // Per-repository, not machine-wide (see repoConsent.ts) — agreeing to share
 // one project's Tasklet history shouldn't silently enroll every other repo
 // opened afterward. Each repo gets asked once: "declined" and "enabled" are
@@ -49,22 +78,7 @@ export async function checkResearchModeConsent(context: vscode.ExtensionContext)
   );
 
   if (action === 'I agree to share my data') {
-    const chosen = await vscode.window.showQuickPick(TIER_OPTIONS, {
-      title: 'Tracybot Research Mode — choose how much to share',
-      placeHolder: 'You can change or disable this anytime from the Research Mode status bar item',
-      ignoreFocusOut: true,
-    });
-
-    // Dismissed (Escape) without picking — fall back to the most
-    // conservative tier rather than leaving some other prior value in place.
-    const tier = chosen?.tier ?? 1;
-
-    writeRepoConsent(repoPath, { decision: 'enabled', consentTier: tier });
-    getOrCreateParticipantId(context);
-
-    vscode.window.showInformationMessage(
-      `Research Mode enabled at Tier ${tier} for this repository. Change or disable it anytime from the Research Mode status bar item.`
-    );
+    await enableResearchModeForRepo(context, repoPath);
   } else if (action === 'Never for this repo') {
     writeRepoConsent(repoPath, { decision: 'declined' });
   }

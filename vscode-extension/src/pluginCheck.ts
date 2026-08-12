@@ -4,6 +4,7 @@ import * as path from 'path';
 import { homedir } from 'os';
 import { spawn } from 'child_process';
 import { detectAnyHookAgent } from './hookAgentPluginCheck';
+import { clearFailureCooldown, notifyFailureOnce } from './failureCooldown';
 
 const PLUGIN_FILENAME = 'tracybot-oc.js';
 const PLUGIN_URL = 'https://github.com/TracyTeam/tracybot/releases/latest/download/tracybot-oc.js';
@@ -13,7 +14,6 @@ const SKIP_OPENCODE_MISSING_KEY = 'tracybot.skipOpencodeMissingCheck';
 // not a permanent skip, so a transient failure can't permanently defeat the
 // daily re-check in extension.ts.
 const INSTALL_FAILURE_COOLDOWN_KEY = 'tracybot.opencodeInstallFailureAt';
-const FAILURE_RETRY_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
 function getGlobalPluginPath(): string {
   return path.join(homedir(), '.config', 'opencode', 'plugin', PLUGIN_FILENAME);
@@ -50,9 +50,6 @@ async function findOpencode(): Promise<boolean> {
 }
 
 export async function checkOpencode(context: vscode.ExtensionContext): Promise<void> {
-  const lastFailureAt = context.globalState.get<number>(INSTALL_FAILURE_COOLDOWN_KEY);
-  if (lastFailureAt && Date.now() - lastFailureAt < FAILURE_RETRY_COOLDOWN_MS) { return; }
-
   const opencodeAvailable = await findOpencode();
   if (!opencodeAvailable) {
     // Claude Code or Codex being installed is enough — this message (and its
@@ -77,10 +74,16 @@ export async function checkOpencode(context: vscode.ExtensionContext): Promise<v
     return;
   }
 
-  if (fs.existsSync(getGlobalPluginPath())) { return; }
+  if (fs.existsSync(getGlobalPluginPath())) {
+    await clearFailureCooldown(context.globalState, INSTALL_FAILURE_COOLDOWN_KEY);
+    return;
+  }
 
   const projectPath = getProjectPluginPath();
-  if (projectPath && fs.existsSync(projectPath)) { return; }
+  if (projectPath && fs.existsSync(projectPath)) {
+    await clearFailureCooldown(context.globalState, INSTALL_FAILURE_COOLDOWN_KEY);
+    return;
+  }
 
   // No confirmation prompt — same rationale as checkHookBasedAgents: installing
   // Tracybot already signals consent to trace AI changes, so this just installs
@@ -90,11 +93,13 @@ export async function checkOpencode(context: vscode.ExtensionContext): Promise<v
 
   try {
     await installPluginTo(path.dirname(installPath));
+    await clearFailureCooldown(context.globalState, INSTALL_FAILURE_COOLDOWN_KEY);
     vscode.window.showInformationMessage(`Tracybot: OpenCode plugin installed to ${installPath}.`);
   } catch (error) {
-    await context.globalState.update(INSTALL_FAILURE_COOLDOWN_KEY, Date.now());
-    vscode.window.showErrorMessage(
-      `Failed to install Tracybot OpenCode plugin: ${error instanceof Error ? error.message : String(error)}`
-    );
+    await notifyFailureOnce(context.globalState, INSTALL_FAILURE_COOLDOWN_KEY, () => {
+      vscode.window.showErrorMessage(
+        `Failed to install Tracybot OpenCode plugin: ${error instanceof Error ? error.message : String(error)}`
+      );
+    });
   }
 }

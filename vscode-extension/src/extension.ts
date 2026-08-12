@@ -1,15 +1,15 @@
 import * as vscode from 'vscode';
 
-import { buildHistory, hydrateCache, getSerializedCache, clearCache } from './history/buildHistory';
-import { History, TaskletUI, LineMap, Change } from './history/types';
+import { buildHistory, describeBuildHistoryFailure, hydrateCache, getSerializedCache, clearCache } from './history/buildHistory';
+import { BuildHistoryFailureReason, History, TaskletUI, LineMap, Change } from './history/types';
 import { getBlameViewHtml } from './blameView';
 import { getRepoPath, mergeRemoteNotes } from './utils';
 import { checkOpencode } from './pluginCheck';
 import { checkHookBasedAgents } from './hookAgentPluginCheck';
 import { checkTracyInit } from './tracyInitCheck';
-import { checkResearchModeConsent } from './research/researchModeCheck';
+import { checkResearchModeConsent, enableResearchModeForRepo, pickResearchModeTier } from './research/researchModeCheck';
 import { getConsentTier, getParticipantContext, isResearchModeEnabled } from './research/consent';
-import { writeRepoConsent } from './research/repoConsent';
+import { readRepoConsent, writeRepoConsent } from './research/repoConsent';
 import { clearPendingPayloads, getPendingPayloads, getTodaysSentCount, queueTaskletForSubmission } from './research/queue';
 import { buildTaskletResearchPayloads } from './research/buildResearchPayloads';
 import { submitPayloads } from './research/collectorRepo';
@@ -17,6 +17,7 @@ import { submitPayloads } from './research/collectorRepo';
 // History data — populated asynchronously when the extension activates
 let history: History | undefined;
 let buildHistoryLock: Promise<void> | null = null;
+let lastBuildHistoryFailureReason: BuildHistoryFailureReason | undefined;
 
 // Maps a relative file path to a map of line number -> Tasklet
 // Built once after history loads; updated on each blameAI invocation
@@ -64,6 +65,16 @@ async function buildHistoryAndSet(ctx: vscode.ExtensionContext): Promise<void> {
 
   const repoPath = await getRepoPath();
   if (!repoPath) {
+    // getRepoPath() relies on VS Code's Git API and therefore returns
+    // undefined before buildHistory() can classify the failure itself. Keep
+    // the UI state in sync with that result so AI Blame reports the useful
+    // "no repository" message instead of falling back to build-error (or,
+    // worse, rendering attribution cached for a previously open repo).
+    lastBuildHistoryFailureReason = 'no-repo-path';
+    history = undefined;
+    lineMap = new Map();
+    displayLineMap = new Map();
+    fileTaskletsMap = new Map();
     return;
   }
 
@@ -74,22 +85,28 @@ async function buildHistoryAndSet(ctx: vscode.ExtensionContext): Promise<void> {
       const result = await buildHistory(repoPath);
       console.log(`History build time: ${Date.now() - time}ms`);
 
-      if (!result) {
-        console.error('Failed to build history');
+      if (!result.ok) {
+        console.error('Failed to build history:', result.reason);
+        lastBuildHistoryFailureReason = result.reason;
+        history = undefined;
+        lineMap = new Map();
+        displayLineMap = new Map();
+        fileTaskletsMap = new Map();
         return;
       }
 
-      result.files.forEach(file =>
+      lastBuildHistoryFailureReason = undefined;
+      result.history.files.forEach(file =>
         file.tasklets.forEach(t => (t as TaskletUI).selected = false)
       );
 
-      history = result as unknown as { files: { path: string; tasklets: TaskletUI[] }[] } & History;
+      history = result.history as unknown as { files: { path: string; tasklets: TaskletUI[] }[] } & History;
       lineMap = buildLineMap(history);
       displayLineMap = new Map(lineMap);
       fileTaskletsMap = buildFileTaskletsMap(history);
 
       await ctx.workspaceState.update('tracybot.buildHistoryCache', getSerializedCache());
-      await processNewTaskletsForResearch(ctx, result, repoPath);
+      await processNewTaskletsForResearch(ctx, result.history, repoPath);
     } finally {
       buildHistoryLock = null;
     }
@@ -221,8 +238,39 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(researchStatusBarItem);
   await updateResearchStatusBar(context);
 
+  // Same command whether reached from the status bar (only visible once
+  // enabled) or the Command Palette (always available, no "when" clause) —
+  // it branches on the current repo's consent state so undecided/declined
+  // repos have a real entry point too, not just enabled ones.
   context.subscriptions.push(
     vscode.commands.registerCommand('tracybot-extension.reviewResearchDigest', async () => {
+      const repoPath = await getRepoPath();
+      if (!repoPath) {
+        vscode.window.showInformationMessage('Tracybot Research Mode: open a folder inside a git repository first.');
+        return;
+      }
+
+      const consent = readRepoConsent(repoPath);
+
+      if (!consent) {
+        await checkResearchModeConsent(context);
+        await updateResearchStatusBar(context);
+        return;
+      }
+
+      if (consent.decision === 'declined') {
+        const action = await vscode.window.showInformationMessage(
+          'Research Mode is currently declined for this repository.',
+          'Re-enable',
+          'Keep Declined'
+        );
+        if (action === 'Re-enable') {
+          await enableResearchModeForRepo(context, repoPath);
+          await updateResearchStatusBar(context);
+        }
+        return;
+      }
+
       const count = getTodaysSentCount(context.globalState);
       const pending = getPendingPayloads(context.globalState);
 
@@ -230,6 +278,7 @@ export async function activate(context: vscode.ExtensionContext) {
         `Tracybot Research Mode: sent ${count} tasklet${count === 1 ? '' : 's'} today. ` +
         `${pending.length} total pending.`,
         'View Pending Data',
+        'Change Tier',
         'Disable for This Repo'
       );
 
@@ -239,11 +288,16 @@ export async function activate(context: vscode.ExtensionContext) {
           language: 'json',
         });
         await vscode.window.showTextDocument(doc);
-      } else if (action === 'Disable for This Repo') {
-        const repoPath = await getRepoPath();
-        if (repoPath) {
-          writeRepoConsent(repoPath, { decision: 'declined' });
+      } else if (action === 'Change Tier') {
+        const tier = await pickResearchModeTier();
+        // Dismissed: leave the existing tier untouched — this is a change,
+        // not a fresh opt-in, so it shouldn't silently downgrade to Tier 1.
+        if (tier !== undefined) {
+          writeRepoConsent(repoPath, { ...consent, consentTier: tier });
+          vscode.window.showInformationMessage(`Research Mode tier changed to Tier ${tier} for this repository.`);
         }
+      } else if (action === 'Disable for This Repo') {
+        writeRepoConsent(repoPath, { decision: 'declined' });
         vscode.window.showInformationMessage('Tracybot Research Mode disabled for this repository.');
         await updateResearchStatusBar(context);
       }
@@ -291,7 +345,7 @@ export async function activate(context: vscode.ExtensionContext) {
       );
 
       if (!history) {
-        vscode.window.showErrorMessage('AI Blame: Failed to build history.');
+        vscode.window.showErrorMessage(describeBuildHistoryFailure(lastBuildHistoryFailureReason ?? 'build-error'));
         return;
       }
 
