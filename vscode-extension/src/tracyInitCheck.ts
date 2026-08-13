@@ -26,6 +26,23 @@ async function findPython(): Promise<string> {
   throw new Error('Python is not installed or not available.');
 }
 
+// init.py writes TRACY_SNAPSHOT_SCRIPT as an absolute path into *this*
+// extension version's own directory (assets/tracking/tracy.py). VS Code
+// deletes the previous version's directory on every auto-update, so a repo
+// initialized under an older version silently ends up pointing at a script
+// that no longer exists. A missing config file's mere *existence* isn't
+// enough to call a repo "initialized" — the target it points to has to
+// still be there, or every future commit hook run fails to find it.
+function isTracySnapshotScriptValid(tracyConfigPath: string): boolean {
+  try {
+    const content = fs.readFileSync(tracyConfigPath, 'utf8');
+    const match = content.match(/^TRACY_SNAPSHOT_SCRIPT=(.+)$/m);
+    return !!match && fs.existsSync(match[1].trim());
+  } catch {
+    return false;
+  }
+}
+
 // No confirmation prompt — same rationale as hookAgentPluginCheck.ts:
 // installing Tracybot is itself the user's opt-in to AI change tracing, so
 // auto-initializing a detected repository is redundant friction, not extra
@@ -36,7 +53,7 @@ export async function checkTracyInit(context: vscode.ExtensionContext): Promise<
   if (!repoPath) { return; }
 
   const tracyConfig = path.join(repoPath, '.git', 'tracybot', 'config');
-  if (fs.existsSync(tracyConfig)) {
+  if (fs.existsSync(tracyConfig) && isTracySnapshotScriptValid(tracyConfig)) {
     await clearFailureCooldown(context.globalState, INIT_FAILURE_COOLDOWN_KEY);
     return;
   }
