@@ -209,3 +209,73 @@ suite('buildHistory significance filtering across a tracy-local chain', () => {
     );
   });
 });
+
+suite('buildHistory does not blanket-credit a whole hunk to one tasklet', () => {
+  test('a human commit bundling a tiny AI-line tweak with an unrelated adjacent comment only credits the AI line', async () => {
+    const dir = makeTempDir();
+    execSync('git init -q', { cwd: dir });
+    execSync('git config user.email test@example.com', { cwd: dir });
+    execSync('git config user.name Test', { cwd: dir });
+
+    const filePath = path.join(dir, 'app.py');
+    fs.writeFileSync(filePath, [
+      'def calculate_total(items):',
+      '    total = 0',
+      '    # end of discount check',
+      '    return total',
+      '',
+    ].join('\n'));
+    execSync('git add app.py && git commit -q -m init', { cwd: dir });
+    const baseCommit = execSync('git rev-parse HEAD', { cwd: dir, encoding: 'utf8' }).trim();
+
+    // tasklet1 (AI): inserts the discount-check line — a pure insertion,
+    // attributed outright.
+    fs.writeFileSync(filePath, [
+      'def calculate_total(items):',
+      '    total = 0',
+      '    if len(items) > 10:',
+      '    # end of discount check',
+      '    return total',
+      '',
+    ].join('\n'));
+    execSync('git add app.py', { cwd: dir });
+    const aiCommit = commitAiEdit(dir, baseCommit, 'tasklet-1', 'sess1', 'add a discount check', 1000);
+    execSync(`git update-ref refs/tracy-local/aaaa1111 ${aiCommit}`, { cwd: dir });
+
+    // Finalize tasklet1's chain into a real commit, the way the extension
+    // does on `git commit` — tracy-id note + refs/tracy/<id> pointing at
+    // the hidden AI commit.
+    execSync('git add -A && git commit -q -m "add discount check (AI assisted)"', { cwd: dir });
+    execSync('git notes add -m "tracy-id: aaaa1111" HEAD', { cwd: dir });
+    execSync(`git update-ref refs/tracy/aaaa1111 ${aiCommit}`, { cwd: dir });
+
+    // A later, separate human commit tweaks the AI-written line AND makes
+    // a trivial punctuation edit to the immediately adjacent comment (never
+    // AI-attributed), with no unchanged line between them — git bundles
+    // both into ONE hunk that's still similar enough overall to be
+    // "insignificant". Before the fix, the whole hunk's new lines
+    // (including the unrelated comment) were blanket-credited to tasklet1.
+    fs.writeFileSync(filePath, [
+      'def calculate_total(items):',
+      '    total = 0',
+      '    if len(items) >= 10:',
+      '    # end of discount check.',
+      '    return total',
+      '',
+    ].join('\n'));
+    execSync('git add -A && git commit -q -m "human tweak both lines"', { cwd: dir });
+
+    const result = await buildHistory(dir);
+    assert.strictEqual(result.ok, true);
+    if (!result.ok) { return; }
+
+    const file = result.history.files.find(f => f.path === 'app.py');
+    const tasklet = file?.tasklets.find(t => t.taskletId === 'tasklet-1');
+    assert.ok(tasklet, 'tasklet-1 should still be attributed to the discount-check line');
+    assert.deepStrictEqual(
+      tasklet!.lines,
+      [3],
+      'only the AI-written line should be credited — the adjacent comment (never AI-authored) must not be swept in'
+    );
+  });
+});

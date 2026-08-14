@@ -1,5 +1,6 @@
 import { BuildHistoryFailureReason, BuildHistoryResult, Change, CommitInfo, DiffHunk, History, TaskletMessage, TaskletQuestion } from "./types";
 import {
+  bleuSimilarity,
   getActiveTracyId,
   getCommitTree,
   getDiff,
@@ -8,7 +9,8 @@ import {
   groupChangesByFile,
   isAiChange,
   mapLinesToTree,
-  runGit
+  runGit,
+  SIMILARITY_THRESHOLD
 } from "../utils";
 
 const DELIMITER = "||#--TRACY--#||";
@@ -603,14 +605,50 @@ async function buildUncommittedChanges(
   return { uncommittedChanges: chainChanges.flat(), lastTracyTip };
 }
 
-// Drops lines that fall inside a significant modified or deleted hunk
-// Insignificant hunks preserve AI attribution - ALL new lines from the hunk are kept
+// Finds which new line in an insignificant hunk this specific old line's
+// content actually maps to, instead of crediting every new line in the
+// hunk. A restructuring (reorder, extract-and-move) can make git bundle a
+// wide, mostly-unrelated span of lines into one hunk that still scores as
+// "similar" overall (most of the text is still present, just reshuffled) —
+// blanket-crediting the whole hunk would then mislabel lines the tracked
+// line never had anything to do with. Exact (whitespace-insensitive) match
+// first, then the best BLEU-similar candidate above the same threshold
+// used to decide hunk significance.
+function findMatchingNewLineIndex(oldLineText: string, hunk: DiffHunk): number | null {
+  const addedLines = hunk.addedLines ?? [];
+  if (addedLines.length === 0) {
+    return null;
+  }
+
+  const normalize = (s: string) => s.replace(/\s+/g, '');
+  const normalizedOld = normalize(oldLineText);
+  const exactIndex = addedLines.findIndex(l => normalize(l) === normalizedOld);
+  if (exactIndex !== -1) {
+    return exactIndex;
+  }
+
+  let bestIndex = -1;
+  let bestScore = -1;
+  addedLines.forEach((candidate, i) => {
+    const score = bleuSimilarity(oldLineText, candidate);
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = i;
+    }
+  });
+
+  return bestScore > SIMILARITY_THRESHOLD ? bestIndex : null;
+}
+
+// Drops lines that fall inside a significant modified or deleted hunk.
+// Insignificant hunks preserve AI attribution only for the specific new
+// line this old line's content actually matches (see
+// findMatchingNewLineIndex) — not every new line in the hunk.
 // Pure insertions (oldCount = 0) never consume old lines, only shift subsequent ones
 // Also returns the new-tree positions of lines consumed by significant hunks so the
 // caller can record them as "ghost" attribution for the previous owner.
 function consumeAndShift(lines: number[], hunks: DiffHunk[]): { survivors: number[]; consumedNewPositions: number[] } {
   const survivingLines = new Set<number>();
-  const processedInsignificantHunks = new Set<DiffHunk>();
   const consumedHunks = new Set<DiffHunk>();
 
   const sortedLines = [...lines].sort((a, b) => a - b);
@@ -628,19 +666,25 @@ function consumeAndShift(lines: number[], hunks: DiffHunk[]): { survivors: numbe
 
     if (containingHunk) {
       if (containingHunk.isSignificant) {
-        // Significant hunk: consume the line (user override)
+        // Significant hunk: consume the line (user override). Ghost-tracked
+        // across the whole replaced block below, since a real rewrite has
+        // no specific "successor line" to point to.
         consumedHunks.add(containingHunk);
         continue;
-      } else {
-        // Insignificant hunk: preserve AI attribution for ALL new lines in the hunk
-        // Only process each hunk once to avoid duplicates
-        if (!processedInsignificantHunks.has(containingHunk)) {
-          for (let i = 0; i < containingHunk.newCount; i++) {
-            survivingLines.add(containingHunk.newStart + i);
-          }
-          processedInsignificantHunks.add(containingHunk);
-        }
-        // The current line is "absorbed" - no need to add individually
+      }
+
+      // Insignificant hunk: only credit the specific new line this old
+      // line's content matches. If nothing in the hunk resembles it
+      // anymore, drop it rather than guessing — deliberately not
+      // ghost-tracked either, to avoid the same blanket-crediting problem
+      // this function exists to avoid.
+      const oldLineText = containingHunk.removedLines?.[line - containingHunk.oldStart];
+      const matchIndex = oldLineText !== undefined
+        ? findMatchingNewLineIndex(oldLineText, containingHunk)
+        : null;
+
+      if (matchIndex !== null) {
+        survivingLines.add(containingHunk.newStart + matchIndex);
       }
     } else {
       // Line not in any hunk, apply shifts from all hunks before this line
