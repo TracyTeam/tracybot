@@ -378,12 +378,31 @@ async function extractSnapshot(
     agentSource,
   } = buildTaskletMessages(snapshot.description);
   let diffFromTree = index > 0 ? chain[index - 1].treeHash : baseTree;
+  // chain[index-1] (array-adjacent) is only a reliable stand-in for "this
+  // snapshot's actual parent" on a simple linear chain. getTracyChain()
+  // does a BFS over possibly-multiple parents to support squash-merged
+  // chains (see its doc comment above), so on a chain with a merge point,
+  // array-adjacent entries can be siblings from different branches rather
+  // than parent/child. Default to the array-adjacent check and only
+  // override it below once the real single parent is resolved.
+  let diffBaseIsAiAuthored = index > 0 && isAiChange(chain[index - 1]);
 
   if (snapshot.parentHash) {
-    const parentTree = await getCommitTree(repoPath, snapshot.parentHash);
+    const parentHashes = snapshot.parentHash.split(" ").filter(Boolean);
 
-    if (parentTree) {
-      diffFromTree = parentTree;
+    // A multi-parent parentHash (merge commit) isn't resolvable by
+    // getCommitTree (git rejects the space-joined string as a single
+    // revision), so diffFromTree already silently falls back to the
+    // array-adjacent tree above for that case — keep diffBaseIsAiAuthored
+    // consistent with whatever diffFromTree actually ends up being.
+    if (parentHashes.length === 1) {
+      const parentTree = await getCommitTree(repoPath, parentHashes[0]);
+
+      if (parentTree) {
+        diffFromTree = parentTree;
+        const actualParent = chain.find(c => c.hash === parentHashes[0]);
+        diffBaseIsAiAuthored = actualParent ? isAiChange(actualParent) : false;
+      }
     }
   }
 
@@ -393,16 +412,12 @@ async function extractSnapshot(
       const hunks = fileChangesMap.get(filePath) || [];
 
       // Only filter by significance when diffing against non-AI content
-      // (the real User->AI case). chain[0] is the last real, on-branch
-      // commit (pushed by getTracyChain() before it stops walking), so the
-      // first AI edit is at index 1, not 0 — "index > 0" alone isn't
-      // enough. Skipping the filter for AI->AI hops matters because a
-      // hunk diffed against the AI's OWN prior edit is very often
-      // textually close to it (small follow-up prompts, or just the
-      // unchanged surrounding context dominating the score), which isn't
-      // the "insignificant" case this filter exists to catch.
-      const diffsAgainstPriorAiEdit = index > 0 && isAiChange(chain[index - 1]);
-      const significantHunks = diffsAgainstPriorAiEdit ? hunks : hunks.filter(h => h.isSignificant);
+      // (the real User->AI case). Skipping the filter for AI->AI hops
+      // matters because a hunk diffed against the AI's OWN prior edit is
+      // very often textually close to it (small follow-up prompts, or
+      // just the unchanged surrounding context dominating the score),
+      // which isn't the "insignificant" case this filter exists to catch.
+      const significantHunks = diffBaseIsAiAuthored ? hunks : hunks.filter(h => h.isSignificant);
       const linesAtSnapshot: number[] = [];
       for (const hunk of significantHunks) {
         for (let i = 0; i < hunk.newCount; i++) {

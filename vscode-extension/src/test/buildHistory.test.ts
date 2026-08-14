@@ -279,3 +279,122 @@ suite('buildHistory does not blanket-credit a whole hunk to one tasklet', () => 
     );
   });
 });
+
+suite('buildHistory resolves significance against the real parent, not array adjacency', () => {
+  test('a squash-merged, two-branch chain still filters a tiny edit whose real parent is the base commit', async () => {
+    // getTracyChain() does a BFS over both parents of a squash-merge
+    // commit, so array-adjacent chain entries can be siblings from
+    // different branches rather than parent/child. Branch A's tiny edit
+    // (> 10 -> >= 10) has the real base commit as its parent and should be
+    // filtered as an insignificant User->AI change — even though branch
+    // B's unrelated AI commit can land array-adjacent to it after the BFS
+    // traversal reverses.
+    const dir = makeTempDir();
+    execSync('git init -q', { cwd: dir });
+    execSync('git config user.email test@example.com', { cwd: dir });
+    execSync('git config user.name Test', { cwd: dir });
+
+    const filePath = path.join(dir, 'app.py');
+    fs.writeFileSync(filePath, [
+      'def calculate_total(items):',
+      '    total = 0',
+      '    if len(items) > 10:',
+      '        total *= 0.9',
+      '    return total',
+      '',
+      'def helper():',
+      '    z = None',
+      '    return z',
+      '',
+    ].join('\n'));
+    execSync('git add app.py && git commit -q -m init', { cwd: dir });
+    const baseCommit = execSync('git rev-parse HEAD', { cwd: dir, encoding: 'utf8' }).trim();
+
+    // Branch A: a tiny, near-identical edit off the base commit.
+    fs.writeFileSync(filePath, [
+      'def calculate_total(items):',
+      '    total = 0',
+      '    if len(items) >= 10:',
+      '        total *= 0.9',
+      '    return total',
+      '',
+      'def helper():',
+      '    z = None',
+      '    return z',
+      '',
+    ].join('\n'));
+    execSync('git add app.py', { cwd: dir });
+    const commitA = commitAiEdit(dir, baseCommit, 'tasklet-A1', 'sessA', 'tiny tweak on branch A', 1000);
+
+    // Branch B: a substantial, unrelated edit, ALSO off the base commit.
+    execSync(`git read-tree ${baseCommit}^{tree}`, { cwd: dir });
+    fs.writeFileSync(filePath, [
+      'def calculate_total(items):',
+      '    total = 0',
+      '    if len(items) > 10:',
+      '        total *= 0.9',
+      '    return total',
+      '',
+      'def helper():',
+      '    z = compute_something_entirely_different()',
+      '    return z',
+      '',
+    ].join('\n'));
+    execSync('git add app.py', { cwd: dir });
+    const commitB = commitAiEdit(dir, baseCommit, 'tasklet-B1', 'sessB', 'unrelated edit on branch B', 2000);
+
+    // Synthetic merge commit combining both branches, mimicking the
+    // post-rewrite squash-merge hook described in getTracyChain()'s doc
+    // comment.
+    fs.writeFileSync(filePath, [
+      'def calculate_total(items):',
+      '    total = 0',
+      '    if len(items) >= 10:',
+      '        total *= 0.9',
+      '    return total',
+      '',
+      'def helper():',
+      '    z = compute_something_entirely_different()',
+      '    return z',
+      '',
+    ].join('\n'));
+    execSync('git add app.py', { cwd: dir });
+    const mergeTree = execSync('git write-tree', { cwd: dir, encoding: 'utf8' }).trim();
+    const mergeCommit = execSync(`git commit-tree ${mergeTree} -p ${commitA} -p ${commitB} -m "merge chains"`, {
+      cwd: dir,
+      encoding: 'utf8',
+      env: { ...process.env, GIT_AUTHOR_NAME: 'Tracybot', GIT_AUTHOR_EMAIL: 'tracybot@local', GIT_COMMITTER_NAME: 'Tracybot', GIT_COMMITTER_EMAIL: 'tracybot@local' },
+    }).trim();
+
+    execSync(`git update-ref refs/tracy-local/aaaa1111 ${mergeCommit}`, { cwd: dir });
+    execSync('git config tracy.current-id aaaa1111', { cwd: dir });
+    execSync(`git reset -q --mixed ${baseCommit}`, { cwd: dir });
+    fs.writeFileSync(filePath, [
+      'def calculate_total(items):',
+      '    total = 0',
+      '    if len(items) >= 10:',
+      '        total *= 0.9',
+      '    return total',
+      '',
+      'def helper():',
+      '    z = compute_something_entirely_different()',
+      '    return z',
+      '',
+    ].join('\n'));
+
+    const result = await buildHistory(dir);
+    assert.strictEqual(result.ok, true);
+    if (!result.ok) { return; }
+
+    const file = result.history.files.find(f => f.path === 'app.py');
+    const taskletA = file?.tasklets.find(t => t.taskletId === 'tasklet-A1');
+    const taskletB = file?.tasklets.find(t => t.taskletId === 'tasklet-B1');
+
+    assert.ok(
+      !taskletA || taskletA.lines.length === 0,
+      'branch A\'s tiny edit must be filtered — its real parent is the base commit, not branch B\'s AI snapshot'
+    );
+    assert.ok(taskletB, 'branch B\'s substantial edit should still be attributed');
+    assert.ok(taskletB!.lines.length > 0, 'branch B\'s edit should still own a live line');
+  });
+});
