@@ -620,51 +620,99 @@ async function buildUncommittedChanges(
   return { uncommittedChanges: chainChanges.flat(), lastTracyTip };
 }
 
-// Finds which new line in an insignificant hunk this specific old line's
-// content actually maps to, instead of crediting every new line in the
-// hunk. A restructuring (reorder, extract-and-move) can make git bundle a
-// wide, mostly-unrelated span of lines into one hunk that still scores as
-// "similar" overall (most of the text is still present, just reshuffled) —
-// blanket-crediting the whole hunk would then mislabel lines the tracked
-// line never had anything to do with. Exact (whitespace-insensitive) match
-// first, then the best BLEU-similar candidate above the same threshold
-// used to decide hunk significance.
-function findMatchingNewLineIndex(oldLineText: string, hunk: DiffHunk): number | null {
+// Aligns a hunk's old lines to its new lines one-to-one and in order,
+// instead of matching each tracked line independently — independent
+// per-line lookups all resolve a duplicated line (`}`, `return;`,
+// identical log lines, common in an "insignificant" hunk) to the SAME
+// first occurrence, colliding distinct duplicates onto one new position
+// and losing attribution for the rest, or letting a later match overwrite
+// an earlier one that legitimately owns a different occurrence.
+//
+// Exact (whitespace-insensitive) matches are aligned via LCS, which
+// respects both order and duplicate multiplicity — two `}` lines in the
+// old text land on two different `}` lines in the new text, not both on
+// the first one. Whatever's left over falls back to the best remaining
+// (not yet used) BLEU-similar candidate, so a restructuring that also
+// tweaks content along the way still gets a best-effort match.
+function alignHunkLines(hunk: DiffHunk): Map<number, number> {
+  const oldLines = hunk.removedLines ?? [];
   const addedLines = hunk.addedLines ?? [];
-  if (addedLines.length === 0) {
-    return null;
-  }
-
   const normalize = (s: string) => s.replace(/\s+/g, '');
-  const normalizedOld = normalize(oldLineText);
-  const exactIndex = addedLines.findIndex(l => normalize(l) === normalizedOld);
-  if (exactIndex !== -1) {
-    return exactIndex;
+  const normalizedOld = oldLines.map(normalize);
+  const normalizedNew = addedLines.map(normalize);
+
+  const n = normalizedOld.length;
+  const m = normalizedNew.length;
+  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i][j] = normalizedOld[i] === normalizedNew[j]
+        ? dp[i + 1][j + 1] + 1
+        : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
   }
 
-  let bestIndex = -1;
-  let bestScore = -1;
-  addedLines.forEach((candidate, i) => {
-    const score = bleuSimilarity(oldLineText, candidate);
-    if (score > bestScore) {
-      bestScore = score;
-      bestIndex = i;
+  const alignment = new Map<number, number>();
+  const usedNewIndices = new Set<number>();
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (normalizedOld[i] === normalizedNew[j]) {
+      alignment.set(i, j);
+      usedNewIndices.add(j);
+      i++;
+      j++;
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      i++;
+    } else {
+      j++;
     }
-  });
+  }
 
-  return bestScore > SIMILARITY_THRESHOLD ? bestIndex : null;
+  for (let oldIndex = 0; oldIndex < n; oldIndex++) {
+    if (alignment.has(oldIndex)) {
+      continue;
+    }
+
+    let bestIndex = -1;
+    let bestScore = -1;
+    for (let newIndex = 0; newIndex < m; newIndex++) {
+      if (usedNewIndices.has(newIndex)) {
+        continue;
+      }
+      const score = bleuSimilarity(oldLines[oldIndex], addedLines[newIndex]);
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = newIndex;
+      }
+    }
+
+    if (bestIndex !== -1 && bestScore > SIMILARITY_THRESHOLD) {
+      alignment.set(oldIndex, bestIndex);
+      usedNewIndices.add(bestIndex);
+    }
+  }
+
+  return alignment;
 }
 
 // Drops lines that fall inside a significant modified or deleted hunk.
 // Insignificant hunks preserve AI attribution only for the specific new
-// line this old line's content actually matches (see
-// findMatchingNewLineIndex) — not every new line in the hunk.
+// line this old line's content aligns to (see alignHunkLines) — not every
+// new line in the hunk.
 // Pure insertions (oldCount = 0) never consume old lines, only shift subsequent ones
 // Also returns the new-tree positions of lines consumed by significant hunks so the
 // caller can record them as "ghost" attribution for the previous owner.
 function consumeAndShift(lines: number[], hunks: DiffHunk[]): { survivors: number[]; consumedNewPositions: number[] } {
   const survivingLines = new Set<number>();
   const consumedHunks = new Set<DiffHunk>();
+  // Memoized per hunk within this call: alignHunkLines is a pure function
+  // of the hunk's own content, so every tracked line landing in the same
+  // hunk (whether from this tasklet's own lines, or a separate
+  // consumeAndShift call for a different tasklet touching the same hunk)
+  // resolves against the same one-to-one mapping — duplicate lines land on
+  // distinct occurrences instead of colliding on the first match.
+  const hunkAlignments = new Map<DiffHunk, Map<number, number>>();
 
   const sortedLines = [...lines].sort((a, b) => a - b);
   const sortedHunks = [...hunks].sort((a, b) => a.oldStart - b.oldStart);
@@ -689,17 +737,17 @@ function consumeAndShift(lines: number[], hunks: DiffHunk[]): { survivors: numbe
       }
 
       // Insignificant hunk: only credit the specific new line this old
-      // line's content matches. If nothing in the hunk resembles it
-      // anymore, drop it rather than guessing — deliberately not
-      // ghost-tracked either, to avoid the same blanket-crediting problem
-      // this function exists to avoid.
-      const oldLineText = containingHunk.removedLines?.[line - containingHunk.oldStart];
-      const matchIndex = oldLineText !== undefined
-        ? findMatchingNewLineIndex(oldLineText, containingHunk)
-        : null;
+      // line aligns to. If nothing in the hunk resembles it anymore, drop
+      // it rather than guessing — deliberately not ghost-tracked either,
+      // to avoid the same blanket-crediting problem this function exists
+      // to avoid.
+      if (!hunkAlignments.has(containingHunk)) {
+        hunkAlignments.set(containingHunk, alignHunkLines(containingHunk));
+      }
+      const newIndex = hunkAlignments.get(containingHunk)!.get(line - containingHunk.oldStart);
 
-      if (matchIndex !== null) {
-        survivingLines.add(containingHunk.newStart + matchIndex);
+      if (newIndex !== undefined) {
+        survivingLines.add(containingHunk.newStart + newIndex);
       }
     } else {
       // Line not in any hunk, apply shifts from all hunks before this line

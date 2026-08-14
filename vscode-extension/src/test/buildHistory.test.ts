@@ -398,3 +398,153 @@ suite('buildHistory resolves significance against the real parent, not array adj
     assert.ok(taskletB!.lines.length > 0, 'branch B\'s edit should still own a live line');
   });
 });
+
+suite('buildHistory aligns duplicate lines within a hunk one-to-one', () => {
+  test('two identical AI-written lines bundled into one insignificant hunk both keep distinct attribution', async () => {
+    // A naive per-line lookup (findIndex over the hunk's new lines) always
+    // resolves a duplicated line to the SAME first occurrence — both old
+    // duplicates collapse onto one new position, and the Set-based
+    // survivor collection silently drops the second one. A proper
+    // one-to-one, order-preserving alignment must keep them distinct.
+    const dir = makeTempDir();
+    execSync('git init -q', { cwd: dir });
+    execSync('git config user.email test@example.com', { cwd: dir });
+    execSync('git config user.name Test', { cwd: dir });
+
+    const filePath = path.join(dir, 'app.py');
+    fs.writeFileSync(filePath, [
+      'def process(items):',
+      '    return items',
+      '',
+    ].join('\n'));
+    execSync('git add app.py && git commit -q -m init', { cwd: dir });
+    const baseCommit = execSync('git rev-parse HEAD', { cwd: dir, encoding: 'utf8' }).trim();
+
+    // tasklet1 (AI): inserts a loop with two identical log lines — a pure
+    // insertion, both attributed outright.
+    fs.writeFileSync(filePath, [
+      'def process(items):',
+      '    for item in items:',
+      '        if item.valid:',
+      '            log.debug("done")',
+      '        else:',
+      '            log.debug("done")',
+      '    return items',
+      '',
+    ].join('\n'));
+    execSync('git add app.py', { cwd: dir });
+    const aiCommit = commitAiEdit(dir, baseCommit, 'tasklet-1', 'sess1', 'add a validation loop with debug logging', 1000);
+    execSync(`git update-ref refs/tracy-local/aaaa1111 ${aiCommit}`, { cwd: dir });
+
+    execSync('git add -A && git commit -q -m "add validation loop (AI assisted)"', { cwd: dir });
+    execSync('git notes add -m "tracy-id: aaaa1111" HEAD', { cwd: dir });
+    execSync(`git update-ref refs/tracy/aaaa1111 ${aiCommit}`, { cwd: dir });
+
+    // A later, separate human commit reindents the whole block AND renames
+    // a field, forcing git to bundle both duplicate lines into ONE hunk
+    // that's still similar enough overall to be "insignificant".
+    fs.writeFileSync(filePath, [
+      'def process(items):',
+      '  for item in items:',
+      '    if item.is_valid:',
+      '      log.debug("done")',
+      '    else:',
+      '      log.debug("done")',
+      '  return items',
+      '',
+    ].join('\n'));
+    execSync('git add -A && git commit -q -m "human reindents and renames"', { cwd: dir });
+
+    const result = await buildHistory(dir);
+    assert.strictEqual(result.ok, true);
+    if (!result.ok) { return; }
+
+    const file = result.history.files.find(f => f.path === 'app.py');
+    const tasklet = file?.tasklets.find(t => t.taskletId === 'tasklet-1');
+    assert.ok(tasklet, 'tasklet-1 should still be attributed to some of the loop');
+    assert.deepStrictEqual(
+      tasklet!.lines,
+      [2, 4, 5, 6],
+      'both duplicate log lines (4 and 6) must independently survive — neither should collapse onto the other'
+    );
+  });
+
+  test('two different tasklets each owning one occurrence of a duplicated line keep their own distinct positions', async () => {
+    // consumeAndShift is called separately per tasklet's own Change
+    // (propagateChanges maps over each Change independently), so this
+    // also exercises the cross-call case: two separate invocations against
+    // the same hunk must still agree on which duplicate maps to which
+    // tasklet, instead of one tasklet's line overwriting the other's.
+    const dir = makeTempDir();
+    execSync('git init -q', { cwd: dir });
+    execSync('git config user.email test@example.com', { cwd: dir });
+    execSync('git config user.name Test', { cwd: dir });
+
+    const filePath = path.join(dir, 'app.py');
+    fs.writeFileSync(filePath, [
+      'def process(a, b):',
+      '    pass',
+      '',
+    ].join('\n'));
+    execSync('git add app.py && git commit -q -m init', { cwd: dir });
+    const baseCommit = execSync('git rev-parse HEAD', { cwd: dir, encoding: 'utf8' }).trim();
+
+    // tasklet1 (AI): adds branch a with a log line.
+    fs.writeFileSync(filePath, [
+      'def process(a, b):',
+      '    if a:',
+      '        log.info(\'processed\')',
+      '    pass',
+      '',
+    ].join('\n'));
+    execSync('git add app.py', { cwd: dir });
+    const aiCommit1 = commitAiEdit(dir, baseCommit, 'tasklet-1', 'sess1', 'log when a is processed', 1000);
+    execSync(`git update-ref refs/tracy-local/aaaa1111 ${aiCommit1}`, { cwd: dir });
+    execSync('git add -A && git commit -q -m "log when a is processed (AI assisted)"', { cwd: dir });
+    const commitA = execSync('git rev-parse HEAD', { cwd: dir, encoding: 'utf8' }).trim();
+    execSync('git notes add -m "tracy-id: aaaa1111" HEAD', { cwd: dir });
+    execSync(`git update-ref refs/tracy/aaaa1111 ${aiCommit1}`, { cwd: dir });
+
+    // tasklet2 (AI, a SEPARATE later chain): adds an IDENTICAL log line for
+    // branch b.
+    fs.writeFileSync(filePath, [
+      'def process(a, b):',
+      '    if a:',
+      '        log.info(\'processed\')',
+      '    if b:',
+      '        log.info(\'processed\')',
+      '    pass',
+      '',
+    ].join('\n'));
+    execSync('git add app.py', { cwd: dir });
+    const aiCommit2 = commitAiEdit(dir, commitA, 'tasklet-2', 'sess2', 'also log when b is processed', 2000);
+    execSync(`git update-ref refs/tracy-local/bbbb2222 ${aiCommit2}`, { cwd: dir });
+    execSync('git add -A && git commit -q -m "also log when b is processed (AI assisted)"', { cwd: dir });
+    execSync('git notes add -m "tracy-id: bbbb2222" HEAD', { cwd: dir });
+    execSync(`git update-ref refs/tracy/bbbb2222 ${aiCommit2}`, { cwd: dir });
+
+    // Human commit: reindents the whole region, bundling both duplicates
+    // into one hunk.
+    fs.writeFileSync(filePath, [
+      'def process(a, b):',
+      '  if a:',
+      '    log.info(\'processed\')',
+      '  if b:',
+      '    log.info(\'processed\')',
+      '  pass',
+      '',
+    ].join('\n'));
+    execSync('git add -A && git commit -q -m "human reindents"', { cwd: dir });
+
+    const result = await buildHistory(dir);
+    assert.strictEqual(result.ok, true);
+    if (!result.ok) { return; }
+
+    const file = result.history.files.find(f => f.path === 'app.py');
+    const tasklet1 = file?.tasklets.find(t => t.taskletId === 'tasklet-1');
+    const tasklet2 = file?.tasklets.find(t => t.taskletId === 'tasklet-2');
+
+    assert.deepStrictEqual(tasklet1?.lines, [2, 3], 'tasklet-1 should keep its own branch-a lines');
+    assert.deepStrictEqual(tasklet2?.lines, [4, 5], 'tasklet-2 should keep its own branch-b lines, not tasklet-1\'s');
+  });
+});
