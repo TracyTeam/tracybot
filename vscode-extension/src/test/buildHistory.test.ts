@@ -623,4 +623,78 @@ suite('buildHistory stays fast and memory-bounded on a large single hunk', () =>
       `expected heap growth well under 150MB for a ${lineCount}-line hunk, saw ${heapGrowthMb.toFixed(1)}MB — an O(n*m) alignment table would allocate on the order of ${lineCount}^2 number slots`
     );
   });
+
+  test('a large hunk where every line is identical resolves without quadratic slowdown', async function () {
+    // The previous test's lines are all distinct, so it can't catch a
+    // different cost: consuming a per-content bucket of matched new-line
+    // indices via Array.prototype.shift() is O(k) per call — shift()
+    // shifts every remaining element down by one — so repeatedly shifting
+    // the SAME bucket (which is exactly what happens when a hunk has many
+    // identical lines: `}`, blank lines, templated log statements) costs
+    // O(k^2) for that bucket alone, even though the rest of the alignment
+    // is linear. This needs a much larger line count than the previous
+    // test before that quadratic term dominates the (still-linear) cost
+    // of everything else in the pipeline (diff parsing, file I/O).
+    this.timeout(60000);
+
+    const lineCount = 300000;
+    const dir = makeTempDir();
+    execSync('git init -q', { cwd: dir });
+    execSync('git config user.email test@example.com', { cwd: dir });
+    execSync('git config user.name Test', { cwd: dir });
+
+    const filePath = path.join(dir, 'app.py');
+    fs.writeFileSync(filePath, '# placeholder\n');
+    execSync('git add app.py && git commit -q -m init', { cwd: dir });
+    const baseCommit = execSync('git rev-parse HEAD', { cwd: dir, encoding: 'utf8' }).trim();
+
+    const buildLines = (indent: string) => {
+      const out = ['def process():'];
+      for (let i = 0; i < lineCount; i++) {
+        out.push(`${indent}log.debug("tick")`);
+      }
+      out.push(`${indent}return None`);
+      out.push('');
+      return out.join('\n');
+    };
+
+    fs.writeFileSync(filePath, buildLines('    '));
+    execSync('git add app.py', { cwd: dir });
+    const aiCommit = commitAiEdit(dir, baseCommit, 'tasklet-1', 'sess1', 'generate a large function with repeated log lines', 1000);
+    execSync(`git update-ref refs/tracy-local/aaaa1111 ${aiCommit}`, { cwd: dir });
+    execSync('git add -A && git commit -q -m "generate large function (AI assisted)"', { cwd: dir });
+    execSync('git notes add -m "tracy-id: aaaa1111" HEAD', { cwd: dir });
+    execSync(`git update-ref refs/tracy/aaaa1111 ${aiCommit}`, { cwd: dir });
+
+    // Human commit: reindent the entire block of identical lines — one
+    // giant hunk, one giant content bucket.
+    fs.writeFileSync(filePath, buildLines('  '));
+    execSync('git add -A && git commit -q -m "human reindents the whole file"', { cwd: dir });
+
+    const startedAt = Date.now();
+    const result = await buildHistory(dir);
+    const elapsedMs = Date.now() - startedAt;
+
+    assert.strictEqual(result.ok, true);
+    if (!result.ok) { return; }
+
+    const file = result.history.files.find(f => f.path === 'app.py');
+    const tasklet = file?.tasklets.find(t => t.taskletId === 'tasklet-1');
+    assert.ok(tasklet, 'the large reformatted function should still be attributed');
+    assert.strictEqual(
+      tasklet!.lines.length,
+      lineCount + 2,
+      'every reformatted line (plus the def and return lines) should still resolve to its own distinct position'
+    );
+
+    // Measured on a dev machine: a cursor-based bucket consumption
+    // resolves this in ~6s; the pre-fix Array.shift()-based consumption
+    // took ~11.7s for the same input. The bound below leaves generous
+    // margin over the fixed-code time for slower CI hardware while still
+    // sitting below the pre-fix time.
+    assert.ok(
+      elapsedMs < 10000,
+      `expected a ${lineCount}-line single-hunk alignment with all-identical content to resolve in well under 10s, took ${elapsedMs}ms — repeatedly Array.shift()-ing the same content bucket is O(k^2) for a bucket of this size`
+    );
+  });
 });

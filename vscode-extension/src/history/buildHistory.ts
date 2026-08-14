@@ -665,13 +665,23 @@ function alignHunkLines(hunk: DiffHunk): Map<number, number> {
     }
   });
 
+  // Consumed via a per-bucket cursor rather than bucket.shift(): shift()
+  // shifts every remaining element down by one, so repeatedly shifting the
+  // SAME bucket (a hunk with many identical lines — `}`, blank lines,
+  // templated log statements — is exactly when this bucket gets consumed
+  // over and over) is O(k) per call, O(k^2) total for that bucket alone.
+  // A cursor makes each consumption O(1) regardless of bucket size.
+  const bucketCursors = new Map<string, number>();
   const alignment = new Map<number, number>();
   const usedNewIndices = new Set<number>();
   const unmatchedOldIndices: number[] = [];
   oldLines.forEach((text, oldIndex) => {
-    const bucket = newIndicesByContent.get(normalize(text));
-    const newIndex = bucket?.shift();
-    if (newIndex !== undefined) {
+    const key = normalize(text);
+    const bucket = newIndicesByContent.get(key);
+    const cursor = bucketCursors.get(key) ?? 0;
+    if (bucket && cursor < bucket.length) {
+      const newIndex = bucket[cursor];
+      bucketCursors.set(key, cursor + 1);
       alignment.set(oldIndex, newIndex);
       usedNewIndices.add(newIndex);
     } else {
