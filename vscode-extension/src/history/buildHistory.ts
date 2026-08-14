@@ -620,6 +620,17 @@ async function buildUncommittedChanges(
   return { uncommittedChanges: chainChanges.flat(), lastTracyTip };
 }
 
+// Bounds the BLEU fallback pass below: it's inherently O(unmatched old x
+// unmatched new), and unlike the exact-match pass (an O(n+m) hash lookup,
+// safe at any size) that cost doesn't have a cheap linear alternative. A
+// large hunk that's mostly reformatting (the common "insignificant"
+// case — whitespace is stripped before comparison, so reindentation exact-
+// matches almost everything) leaves little for this pass to do regardless
+// of hunk size. Past the cap, leftover lines are left unmatched rather
+// than guessed at, consistent with this function's existing "drop rather
+// than guess" fallback.
+const FUZZY_MATCH_SEARCH_CAP = 200_000;
+
 // Aligns a hunk's old lines to its new lines one-to-one and in order,
 // instead of matching each tracked line independently — independent
 // per-line lookups all resolve a duplicated line (`}`, `return;`,
@@ -628,68 +639,70 @@ async function buildUncommittedChanges(
 // and losing attribution for the rest, or letting a later match overwrite
 // an earlier one that legitimately owns a different occurrence.
 //
-// Exact (whitespace-insensitive) matches are aligned via LCS, which
-// respects both order and duplicate multiplicity — two `}` lines in the
-// old text land on two different `}` lines in the new text, not both on
-// the first one. Whatever's left over falls back to the best remaining
-// (not yet used) BLEU-similar candidate, so a restructuring that also
-// tweaks content along the way still gets a best-effort match.
+// Exact (whitespace-insensitive) matches are found via an O(n+m) hash
+// lookup — grouping new-line indices by content and consuming each
+// group in order as old lines are walked — which respects both order and
+// duplicate multiplicity (two `}` lines in the old text land on two
+// different `}` lines in the new text, not both on the first one) without
+// the O(n*m) time and space a full LCS table would cost. A large hunk
+// (reformatting or bulk-renaming an equally large file) can easily reach
+// thousands of lines, where an O(n*m) table would mean hundreds of MB to
+// GBs of allocation. Whatever's left over falls back to the best
+// remaining BLEU-similar candidate, bounded by FUZZY_MATCH_SEARCH_CAP.
 function alignHunkLines(hunk: DiffHunk): Map<number, number> {
   const oldLines = hunk.removedLines ?? [];
   const addedLines = hunk.addedLines ?? [];
   const normalize = (s: string) => s.replace(/\s+/g, '');
-  const normalizedOld = oldLines.map(normalize);
-  const normalizedNew = addedLines.map(normalize);
 
-  const n = normalizedOld.length;
-  const m = normalizedNew.length;
-  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
-  for (let i = n - 1; i >= 0; i--) {
-    for (let j = m - 1; j >= 0; j--) {
-      dp[i][j] = normalizedOld[i] === normalizedNew[j]
-        ? dp[i + 1][j + 1] + 1
-        : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const newIndicesByContent = new Map<string, number[]>();
+  addedLines.forEach((text, newIndex) => {
+    const key = normalize(text);
+    const bucket = newIndicesByContent.get(key);
+    if (bucket) {
+      bucket.push(newIndex);
+    } else {
+      newIndicesByContent.set(key, [newIndex]);
     }
-  }
+  });
 
   const alignment = new Map<number, number>();
   const usedNewIndices = new Set<number>();
-  let i = 0;
-  let j = 0;
-  while (i < n && j < m) {
-    if (normalizedOld[i] === normalizedNew[j]) {
-      alignment.set(i, j);
-      usedNewIndices.add(j);
-      i++;
-      j++;
-    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
-      i++;
+  const unmatchedOldIndices: number[] = [];
+  oldLines.forEach((text, oldIndex) => {
+    const bucket = newIndicesByContent.get(normalize(text));
+    const newIndex = bucket?.shift();
+    if (newIndex !== undefined) {
+      alignment.set(oldIndex, newIndex);
+      usedNewIndices.add(newIndex);
     } else {
-      j++;
+      unmatchedOldIndices.push(oldIndex);
+    }
+  });
+
+  const unmatchedNewIndices: number[] = [];
+  for (let newIndex = 0; newIndex < addedLines.length; newIndex++) {
+    if (!usedNewIndices.has(newIndex)) {
+      unmatchedNewIndices.push(newIndex);
     }
   }
 
-  for (let oldIndex = 0; oldIndex < n; oldIndex++) {
-    if (alignment.has(oldIndex)) {
-      continue;
-    }
-
-    let bestIndex = -1;
-    let bestScore = -1;
-    for (let newIndex = 0; newIndex < m; newIndex++) {
-      if (usedNewIndices.has(newIndex)) {
-        continue;
+  if (unmatchedOldIndices.length * unmatchedNewIndices.length <= FUZZY_MATCH_SEARCH_CAP) {
+    const remainingNewIndices = new Set(unmatchedNewIndices);
+    for (const oldIndex of unmatchedOldIndices) {
+      let bestIndex = -1;
+      let bestScore = -1;
+      for (const newIndex of remainingNewIndices) {
+        const score = bleuSimilarity(oldLines[oldIndex], addedLines[newIndex]);
+        if (score > bestScore) {
+          bestScore = score;
+          bestIndex = newIndex;
+        }
       }
-      const score = bleuSimilarity(oldLines[oldIndex], addedLines[newIndex]);
-      if (score > bestScore) {
-        bestScore = score;
-        bestIndex = newIndex;
-      }
-    }
 
-    if (bestIndex !== -1 && bestScore > SIMILARITY_THRESHOLD) {
-      alignment.set(oldIndex, bestIndex);
-      usedNewIndices.add(bestIndex);
+      if (bestIndex !== -1 && bestScore > SIMILARITY_THRESHOLD) {
+        alignment.set(oldIndex, bestIndex);
+        remainingNewIndices.delete(bestIndex);
+      }
     }
   }
 

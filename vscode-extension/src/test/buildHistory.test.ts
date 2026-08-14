@@ -548,3 +548,79 @@ suite('buildHistory aligns duplicate lines within a hunk one-to-one', () => {
     assert.deepStrictEqual(tasklet2?.lines, [4, 5], 'tasklet-2 should keep its own branch-b lines, not tasklet-1\'s');
   });
 });
+
+suite('buildHistory stays fast and memory-bounded on a large single hunk', () => {
+  test('reformatting a large AI-generated file (one big insignificant hunk) resolves quickly without excess memory growth', async function () {
+    // A full-file reformat (e.g. running a formatter over an AI-generated
+    // file) touches every line, so git can produce ONE hunk spanning the
+    // whole file — thousands of lines on both sides. An O(n*m) alignment
+    // (a full LCS table) would allocate on the order of n*m number slots
+    // for that single hunk: harmless at a few hundred lines, but hundreds
+    // of MB to GB once a hunk reaches the thousands, which a large
+    // generated file crosses easily. The alignment must stay roughly
+    // linear in hunk size instead.
+    this.timeout(20000);
+
+    const lineCount = 5000;
+    const dir = makeTempDir();
+    execSync('git init -q', { cwd: dir });
+    execSync('git config user.email test@example.com', { cwd: dir });
+    execSync('git config user.name Test', { cwd: dir });
+
+    const filePath = path.join(dir, 'app.py');
+    fs.writeFileSync(filePath, '# placeholder\n');
+    execSync('git add app.py && git commit -q -m init', { cwd: dir });
+    const baseCommit = execSync('git rev-parse HEAD', { cwd: dir, encoding: 'utf8' }).trim();
+
+    const buildLines = (indent: string) => {
+      const out = ['def process():'];
+      for (let i = 0; i < lineCount; i++) {
+        out.push(`${indent}log.debug("line ${i}")`);
+      }
+      out.push(`${indent}return None`);
+      out.push('');
+      return out.join('\n');
+    };
+
+    fs.writeFileSync(filePath, buildLines('    '));
+    execSync('git add app.py', { cwd: dir });
+    const aiCommit = commitAiEdit(dir, baseCommit, 'tasklet-1', 'sess1', 'generate a large function', 1000);
+    execSync(`git update-ref refs/tracy-local/aaaa1111 ${aiCommit}`, { cwd: dir });
+    execSync('git add -A && git commit -q -m "generate large function (AI assisted)"', { cwd: dir });
+    execSync('git notes add -m "tracy-id: aaaa1111" HEAD', { cwd: dir });
+    execSync(`git update-ref refs/tracy/aaaa1111 ${aiCommit}`, { cwd: dir });
+
+    // Human commit: reindent the entire block — every line changes, so the
+    // whole thing lands in one hunk that's still similarity-wise
+    // "insignificant" (whitespace is stripped before comparison).
+    fs.writeFileSync(filePath, buildLines('  '));
+    execSync('git add -A && git commit -q -m "human reindents the whole file"', { cwd: dir });
+
+    const heapBefore = process.memoryUsage().heapUsed;
+    const startedAt = Date.now();
+    const result = await buildHistory(dir);
+    const elapsedMs = Date.now() - startedAt;
+    const heapGrowthMb = (process.memoryUsage().heapUsed - heapBefore) / (1024 * 1024);
+
+    assert.strictEqual(result.ok, true);
+    if (!result.ok) { return; }
+
+    const file = result.history.files.find(f => f.path === 'app.py');
+    const tasklet = file?.tasklets.find(t => t.taskletId === 'tasklet-1');
+    assert.ok(tasklet, 'the large reformatted function should still be attributed');
+    assert.strictEqual(
+      tasklet!.lines.length,
+      lineCount + 2,
+      'every reformatted line (plus the def and return lines) should still resolve to its own distinct position'
+    );
+
+    assert.ok(
+      elapsedMs < 5000,
+      `expected a ${lineCount}-line single-hunk alignment to resolve in well under 5s, took ${elapsedMs}ms — an O(n*m) alignment would scale quadratically here`
+    );
+    assert.ok(
+      heapGrowthMb < 150,
+      `expected heap growth well under 150MB for a ${lineCount}-line hunk, saw ${heapGrowthMb.toFixed(1)}MB — an O(n*m) alignment table would allocate on the order of ${lineCount}^2 number slots`
+    );
+  });
+});
