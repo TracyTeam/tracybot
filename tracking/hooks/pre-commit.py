@@ -1,4 +1,3 @@
-import os
 import sys
 import subprocess
 from pathlib import Path
@@ -17,6 +16,16 @@ def load_config(path):
     return config
 
 
+# This hook is a tracking convenience, not a policy gate — it must never be
+# able to block a real commit, no matter why the tracking step failed (a
+# stale config after an extension update, a missing script, a bug in
+# tracy.py itself, ...). Every failure path here prints a warning and exits
+# 0 instead of aborting the commit, unlike a normal validation hook.
+def warn_and_allow(message):
+    print(f"Warning: {message} — Tracybot snapshot skipped, commit proceeding.", file=sys.stderr)
+    sys.exit(0)
+
+
 def main():
     script_dir = Path(__file__).resolve().parent
     config_file = script_dir.parent / "tracybot" / "config"
@@ -25,10 +34,12 @@ def main():
     # CHECK CONFIG FILE
     # -------------------------------
     if not config_file.exists():
-        print(f"Error: Config file '{config_file}' not found.", file=sys.stderr)
-        sys.exit(1)
+        warn_and_allow(f"config file '{config_file}' not found")
 
-    config = load_config(config_file)
+    try:
+        config = load_config(config_file)
+    except OSError as e:
+        warn_and_allow(f"could not read config file: {e}")
 
     tracy_script = config.get("TRACY_SNAPSHOT_SCRIPT", "")
 
@@ -36,28 +47,26 @@ def main():
     # VALIDATE TRACY_SCRIPT
     # -------------------------------
     if not tracy_script:
-        print("Error: TRACY_SNAPSHOT_SCRIPT is not set in the config file.", file=sys.stderr)
-        sys.exit(1)
+        warn_and_allow("TRACY_SNAPSHOT_SCRIPT is not set in the config file")
 
     tracy_path = Path(tracy_script)
 
     if not tracy_path.exists():
-        print(f"Error: TRACY_SNAPSHOT_SCRIPT is set to '{tracy_script}' but the file does not exist.", file=sys.stderr)
-        sys.exit(1)
+        warn_and_allow(f"TRACY_SNAPSHOT_SCRIPT is set to '{tracy_script}' but the file does not exist")
 
     # -------------------------------
     # EXECUTE SCRIPT
     # -------------------------------
     try:
-        result = subprocess.run(
+        subprocess.run(
             [sys.executable, str(tracy_path), "--index-only"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )
-        sys.exit(result.returncode)
     except Exception as e:
-        print(f"Error executing Tracy script: {e}", file=sys.stderr)
-        sys.exit(1)
+        print(f"Warning: error executing Tracy script: {e} — commit proceeding.", file=sys.stderr)
+
+    sys.exit(0)
 
 
 if __name__ == "__main__":

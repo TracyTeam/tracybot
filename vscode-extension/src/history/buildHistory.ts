@@ -390,9 +390,17 @@ async function extractSnapshot(
     Array.from(fileChangesMap.keys()).map(async (filePath) => {
       const hunks = fileChangesMap.get(filePath) || [];
 
-      // Only include lines from significant hunks
-      // This handles User->AI: if AI made insignificant changes, don't attribute those lines to AI
-      const significantHunks = hunks.filter(h => h.isSignificant);
+      // Only filter by significance when diffing against non-AI content
+      // (the real User->AI case). chain[0] is the last real, on-branch
+      // commit (pushed by getTracyChain() before it stops walking), so the
+      // first AI edit is at index 1, not 0 — "index > 0" alone isn't
+      // enough. Skipping the filter for AI->AI hops matters because a
+      // hunk diffed against the AI's OWN prior edit is very often
+      // textually close to it (small follow-up prompts, or just the
+      // unchanged surrounding context dominating the score), which isn't
+      // the "insignificant" case this filter exists to catch.
+      const diffsAgainstPriorAiEdit = index > 0 && isAiChange(chain[index - 1]);
+      const significantHunks = diffsAgainstPriorAiEdit ? hunks : hunks.filter(h => h.isSignificant);
       const linesAtSnapshot: number[] = [];
       for (const hunk of significantHunks) {
         for (let i = 0; i < hunk.newCount; i++) {
