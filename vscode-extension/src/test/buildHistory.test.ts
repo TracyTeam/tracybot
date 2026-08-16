@@ -757,4 +757,93 @@ suite('buildHistory stays fast and memory-bounded on a large single hunk', () =>
       'every renamed line (plus the def and return lines) should still resolve to its own position — not just the two untouched lines'
     );
   });
+
+  test('lines inserted before a large rename do not pull AI-attributed lines onto the wrong occurrence', async function () {
+    // Code review finding: a fixed-size proportional estimate assumes the
+    // hunk's own line-count change is spread evenly across it. If it's
+    // actually concentrated at one end — e.g. a block of lines inserted
+    // right before a large renamed section — an old line near that end
+    // gets an estimate that's off by roughly the insertion size, and if
+    // something else in the hunk happens to be near-duplicate content
+    // (templated code very often is), the search can settle on that wrong
+    // occurrence via early exit before ever reaching the real one, which
+    // sits further out but still within the search window.
+    //
+    // This reproduces it precisely: 50 lines are inserted right before
+    // tasklet-1's 500-line renamed block, reusing indices 0..49 with
+    // content that becomes BYTE-IDENTICAL to the first 50 lines of
+    // tasklet-1's own (renamed) block — the sharpest version of "templated
+    // lines that are highly similar to each other." A naive estimate
+    // lands the search right on the inserted duplicate first.
+    this.timeout(20000);
+
+    const lineCount = 500;
+    const insertedCount = 50;
+    const dir = makeTempDir();
+    execSync('git init -q', { cwd: dir });
+    execSync('git config user.email test@example.com', { cwd: dir });
+    execSync('git config user.name Test', { cwd: dir });
+
+    const filePath = path.join(dir, 'app.py');
+    fs.writeFileSync(filePath, '# placeholder\n');
+    execSync('git add app.py && git commit -q -m init', { cwd: dir });
+    const baseCommit = execSync('git rev-parse HEAD', { cwd: dir, encoding: 'utf8' }).trim();
+
+    const buildAiLines = () => {
+      const out = ['def process(items):'];
+      for (let i = 0; i < lineCount; i++) {
+        out.push(`    record${i} = load(user_id=${i})`);
+      }
+      out.push('    return None');
+      out.push('');
+      return out.join('\n');
+    };
+
+    fs.writeFileSync(filePath, buildAiLines());
+    execSync('git add app.py', { cwd: dir });
+    const aiCommit = commitAiEdit(dir, baseCommit, 'tasklet-1', 'sess1', 'generate a large function using user_id', 1000);
+    execSync(`git update-ref refs/tracy-local/aaaa1111 ${aiCommit}`, { cwd: dir });
+    execSync('git add -A && git commit -q -m "generate large function (AI assisted)"', { cwd: dir });
+    execSync('git notes add -m "tracy-id: aaaa1111" HEAD', { cwd: dir });
+    execSync(`git update-ref refs/tracy/aaaa1111 ${aiCommit}`, { cwd: dir });
+
+    // Human commit: insert 50 lines reusing indices 0..49 right before the
+    // block, and rename user_id -> userId across the real block too. After
+    // the rename, indices 0..49 exist twice in the new file — once as the
+    // inserted lines, once as the true (shifted) AI content, byte-
+    // identical to each other.
+    const buildRenamedLines = () => {
+      const out = ['def process(items):'];
+      for (let i = 0; i < insertedCount; i++) {
+        out.push(`    record${i} = load(userId=${i})`);
+      }
+      for (let i = 0; i < lineCount; i++) {
+        out.push(`    record${i} = load(userId=${i})`);
+      }
+      out.push('    return None');
+      out.push('');
+      return out.join('\n');
+    };
+    fs.writeFileSync(filePath, buildRenamedLines());
+    execSync('git add -A && git commit -q -m "human inserts duplicate-numbered lines and renames user_id to userId"', { cwd: dir });
+
+    const result = await buildHistory(dir);
+    assert.strictEqual(result.ok, true);
+    if (!result.ok) { return; }
+
+    const file = result.history.files.find(f => f.path === 'app.py');
+    const tasklet = file?.tasklets.find(t => t.taskletId === 'tasklet-1');
+    assert.ok(tasklet, 'the large renamed function should still be attributed');
+
+    // The inserted duplicate occupies new lines [2, 1 + insertedCount].
+    // None of tasklet-1's own lines should land there.
+    const wrongRangeStart = 2;
+    const wrongRangeEnd = 1 + insertedCount;
+    const misattributed = tasklet!.lines.filter(l => l >= wrongRangeStart && l <= wrongRangeEnd);
+    assert.deepStrictEqual(
+      misattributed,
+      [],
+      `expected none of tasklet-1's lines to land in the inserted-duplicate range [${wrongRangeStart},${wrongRangeEnd}], got ${JSON.stringify(misattributed)}`
+    );
+  });
 });

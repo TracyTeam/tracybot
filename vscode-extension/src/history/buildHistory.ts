@@ -708,21 +708,58 @@ function alignHunkLines(hunk: DiffHunk): Map<number, number> {
     const oldCount = oldLines.length;
     const newCount = addedLines.length;
 
+    // Anchors: the exact matches already found above, used to LOCALLY
+    // estimate an unmatched line's expected position instead of scaling
+    // it against the hunk as a whole. A single global scale is wrong by
+    // however many lines were inserted/deleted before this point in the
+    // hunk — e.g. ~50 lines inserted right before a large renamed block
+    // shifts every renamed line's true position by ~50, but a global
+    // estimate only accounts for a fraction of that, landing the search
+    // window's center nowhere near the real match deep inside the block.
+    // Anchored to the exact matches immediately surrounding each gap
+    // instead — which, being exact, already reflect the true offset at
+    // that point exactly — the very first candidate checked is already
+    // close to correct. unmatchedOldIndices is walked in ascending order,
+    // so a single forward-moving pointer through the sorted anchors is
+    // enough; no need to re-search from the start each time.
+    const anchorOldIndices = Array.from(alignment.keys()).sort((a, b) => a - b);
+    let anchorPointer = 0;
+
     for (const oldIndex of unmatchedOldIndices) {
-      // A restructuring or in-place rename rarely moves a line far from
-      // its proportional position in the hunk, so search outward from
-      // where it's expected to land instead of scanning every remaining
-      // candidate.
-      const estimatedNewIndex = oldCount > 1
-        ? Math.round((oldIndex * (newCount - 1)) / (oldCount - 1))
-        : 0;
+      while (anchorPointer < anchorOldIndices.length && anchorOldIndices[anchorPointer] < oldIndex) {
+        anchorPointer++;
+      }
+      const prevAnchorOld = anchorPointer > 0 ? anchorOldIndices[anchorPointer - 1] : -1;
+      const prevAnchorNew = anchorPointer > 0 ? alignment.get(prevAnchorOld)! : -1;
+      const nextAnchorOld = anchorPointer < anchorOldIndices.length ? anchorOldIndices[anchorPointer] : oldCount;
+      const nextAnchorNew = anchorPointer < anchorOldIndices.length ? alignment.get(nextAnchorOld)! : newCount;
+
+      const span = nextAnchorOld - prevAnchorOld;
+      const estimatedNewIndex = span > 0
+        ? Math.round(prevAnchorNew + ((oldIndex - prevAnchorOld) * (nextAnchorNew - prevAnchorNew)) / span)
+        : prevAnchorNew + 1;
+
+      // How many net lines were inserted/deleted within this specific
+      // anchor-bounded gap (the whole hunk, when there are no anchors at
+      // all — exactly the "big rename hunk, nothing exact-matches" case).
+      // The estimate above assumes that shift is spread proportionally
+      // across the gap; if it's actually concentrated at one end (e.g. a
+      // block of lines inserted right before a renamed section), an old
+      // line near that end can have templated/near-duplicate content
+      // elsewhere in the gap score just as well as its real match, which
+      // — without a bound tied to the shift itself — patience-based
+      // exit could settle on before the search ever reaches the real one.
+      const localDrift = Math.abs((nextAnchorNew - prevAnchorNew) - (nextAnchorOld - prevAnchorOld));
+      const patience = Math.min(FUZZY_MATCH_WINDOW, Math.max(FUZZY_MATCH_EARLY_EXIT_PATIENCE, localDrift));
 
       // Stop early once a confidently-good match has been sitting
       // unbeaten for a while — without this, every line would always
       // scan the full window even after finding an obviously-correct
       // match at offset 0 (the common case for an in-place rename that
       // doesn't reorder anything), which is what actually made this loop
-      // slow in practice, not the window bound itself.
+      // slow in practice, not the window bound itself. Patience scales
+      // with localDrift so a search can't settle before at least reaching
+      // the position the gap's own line-count change implies.
       let bestIndex = -1;
       let bestScore = -1;
       let noImprovementStreak = 0;
@@ -737,7 +774,14 @@ function alignHunkLines(hunk: DiffHunk): Map<number, number> {
             continue;
           }
           const score = bleuSimilarity(oldLines[oldIndex], addedLines[candidate]);
-          if (score > bestScore) {
+          // >= rather than >: on an exact tie, prefer the farther-explored
+          // candidate. Combined with drift-scaled patience, a tie between
+          // a nearby candidate and one found only after searching out to
+          // localDrift favors the position that actually accounts for the
+          // shift — the more likely correct one when the gap's own line
+          // count changed, rather than an arbitrary "whichever was found
+          // first" tiebreak.
+          if (score >= bestScore) {
             bestScore = score;
             bestIndex = candidate;
             improved = true;
@@ -745,7 +789,7 @@ function alignHunkLines(hunk: DiffHunk): Map<number, number> {
         }
 
         noImprovementStreak = improved ? 0 : noImprovementStreak + 1;
-        if (bestScore > SIMILARITY_THRESHOLD && noImprovementStreak >= FUZZY_MATCH_EARLY_EXIT_PATIENCE) {
+        if (bestScore > SIMILARITY_THRESHOLD && noImprovementStreak >= patience) {
           break;
         }
       }
