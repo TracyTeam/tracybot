@@ -847,18 +847,26 @@ suite('buildHistory stays fast and memory-bounded on a large single hunk', () =>
     );
   });
 
-  test('a large hunk of uniformly-renamed identical lines resolves without the tie-breaking early exit stalling', async function () {
-    // Code review finding: preferring the farther-explored candidate on
-    // an exact score tie (added so a real match isn't lost to an earlier,
-    // wrong-but-equally-scoring one — see the previous test) marked every
-    // tie as "progress", resetting the patience counter. A hunk where
-    // every old line is identical to every other (a real pattern: the
-    // same templated statement repeated verbatim thousands of times) and
-    // gets uniformly renamed means every old line's fuzzy search sees
-    // thousands of candidates that ALL score identically — so patience
-    // never accumulates, and every single line scans the full search
-    // window regardless of the patience setting. Reproduced a ~13x
-    // slowdown (~2s fixed vs ~26s before) at 5,000 lines.
+  test('a large hunk of uniformly-renamed identical lines resolves without stalling or drifting off position', async function () {
+    // Two code review findings share this one repro. A hunk where every
+    // old line is identical to every other (a real pattern: the same
+    // templated statement repeated verbatim thousands of times) and gets
+    // uniformly renamed, with no lines inserted or deleted, means every
+    // old line's fuzzy search sees thousands of candidates that ALL score
+    // identically:
+    //
+    // 1. Preferring the farther-explored candidate on an exact tie (added
+    //    so a real match isn't lost to an earlier, wrong-but-equally-
+    //    scoring one) originally marked every tie as "progress", resetting
+    //    the patience counter — so patience never accumulated and every
+    //    line scanned the full search window. Reproduced a ~13x slowdown
+    //    (~2s fixed vs ~26s before) at 5,000 lines.
+    // 2. Once ties stopped resetting patience, "always prefer the
+    //    farther-explored tie" was still wrong when nothing actually
+    //    shifted (no size change in this hunk, so the natural position for
+    //    each line is unchanged) — it systematically walked every line's
+    //    pick toward the edge of the search window, losing the earliest
+    //    lines instead of matching them where they already were.
     this.timeout(20000);
 
     const lineCount = 5000;
@@ -912,6 +920,19 @@ suite('buildHistory stays fast and memory-bounded on a large single hunk', () =>
     assert.ok(
       tasklet!.lines.length > lineCount * 0.95,
       `expected the vast majority of ${lineCount} identical renamed lines to still resolve, got ${tasklet!.lines.length}`
+    );
+
+    // Count alone isn't enough: a systematic bias toward farther-explored
+    // ties can preserve nearly the full count while shifting every one of
+    // them off their natural (unshifted) position — losing the earliest
+    // lines instead of a random scatter. There's no size change here
+    // (oldCount === newCount), so the natural, unshifted range is exactly
+    // [1, lineCount + 2] (the def line through the return line). A shift
+    // shows up as the observed minimum climbing well above 1.
+    const sortedLines = tasklet!.lines.slice().sort((a, b) => a - b);
+    assert.ok(
+      sortedLines[0] <= 3,
+      `expected attribution to start at or near line 1 (no size change here, so nothing should need to shift) — the lowest attributed line was ${sortedLines[0]}, suggesting matches drifted toward one end of the search window`
     );
 
     assert.ok(

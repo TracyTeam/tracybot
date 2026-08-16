@@ -739,18 +739,19 @@ function alignHunkLines(hunk: DiffHunk): Map<number, number> {
         ? Math.round(prevAnchorNew + ((oldIndex - prevAnchorOld) * (nextAnchorNew - prevAnchorNew)) / span)
         : prevAnchorNew + 1;
 
-      // How many net lines were inserted/deleted within this specific
-      // anchor-bounded gap (the whole hunk, when there are no anchors at
-      // all — exactly the "big rename hunk, nothing exact-matches" case).
-      // The estimate above assumes that shift is spread proportionally
-      // across the gap; if it's actually concentrated at one end (e.g. a
-      // block of lines inserted right before a renamed section), an old
-      // line near that end can have templated/near-duplicate content
-      // elsewhere in the gap score just as well as its real match, which
-      // — without a bound tied to the shift itself — patience-based
-      // exit could settle on before the search ever reaches the real one.
-      const localDrift = Math.abs((nextAnchorNew - prevAnchorNew) - (nextAnchorOld - prevAnchorOld));
-      const patience = Math.min(FUZZY_MATCH_WINDOW, Math.max(FUZZY_MATCH_EARLY_EXIT_PATIENCE, localDrift));
+      // How many net lines were inserted (positive) or deleted (negative)
+      // within this specific anchor-bounded gap (the whole hunk, when
+      // there are no anchors at all — exactly the "big rename hunk,
+      // nothing exact-matches" case). The estimate above assumes that
+      // shift is spread proportionally across the gap; if it's actually
+      // concentrated at one end (e.g. a block of lines inserted right
+      // before a renamed section), an old line near that end can have
+      // templated/near-duplicate content elsewhere in the gap score just
+      // as well as its real match, which — without a bound tied to the
+      // shift itself — patience-based exit could settle on before the
+      // search ever reaches the real one.
+      const signedLocalDrift = (nextAnchorNew - prevAnchorNew) - (nextAnchorOld - prevAnchorOld);
+      const patience = Math.min(FUZZY_MATCH_WINDOW, Math.max(FUZZY_MATCH_EARLY_EXIT_PATIENCE, Math.abs(signedLocalDrift)));
 
       // Stop early once a confidently-good match has been sitting
       // unbeaten for a while — without this, every line would always
@@ -758,40 +759,51 @@ function alignHunkLines(hunk: DiffHunk): Map<number, number> {
       // match at offset 0 (the common case for an in-place rename that
       // doesn't reorder anything), which is what actually made this loop
       // slow in practice, not the window bound itself. Patience scales
-      // with localDrift so a search can't settle before at least reaching
+      // with the drift so a search can't settle before at least reaching
       // the position the gap's own line-count change implies.
       let bestIndex = -1;
       let bestScore = -1;
+      let bestTieDistance = Infinity;
       let noImprovementStreak = 0;
       for (let offset = 0; offset <= FUZZY_MATCH_WINDOW; offset++) {
         const candidates = offset === 0
-          ? [estimatedNewIndex]
-          : [estimatedNewIndex - offset, estimatedNewIndex + offset];
+          ? [{ index: estimatedNewIndex, signedOffset: 0 }]
+          : [
+              { index: estimatedNewIndex - offset, signedOffset: -offset },
+              { index: estimatedNewIndex + offset, signedOffset: offset },
+            ];
 
         // A strict improvement both updates the pick AND counts as
-        // progress (resets the patience counter below). An exact tie
-        // still updates the pick — preferring the farther-explored
-        // candidate, so a tie between a nearby candidate and one found
-        // only after searching out to localDrift favors the position that
-        // actually accounts for the shift — but does NOT count as
-        // progress: a hunk where many old lines each have many
-        // identically-scoring candidates (e.g. a uniform rename repeated
-        // verbatim across thousands of lines) would otherwise have every
-        // single one of those ties reset the counter, defeating the
-        // patience-based exit entirely and forcing a full-window scan for
-        // every line.
+        // progress (resets the patience counter below). An exact tie only
+        // updates the pick if it's closer to signedLocalDrift than the
+        // current pick — i.e. closer to the offset the gap's own
+        // insertion/deletion actually implies. When nothing shifted
+        // (signedLocalDrift = 0, an in-place rename with no size change),
+        // that means preferring whichever tie sits closest to the
+        // estimate itself, not whichever was found first OR farthest —
+        // without this, a hunk of many identical, uniformly-renamed lines
+        // would drift every line's pick toward the edge of the search
+        // window for no reason, since ties there don't actually reflect
+        // any real shift. A tie never counts as progress either way: a
+        // hunk where many old lines each have many identically-scoring
+        // candidates (e.g. that same uniform rename) would otherwise have
+        // every tie reset the counter, defeating the patience-based exit
+        // and forcing a full-window scan for every line.
         let improved = false;
-        for (const candidate of candidates) {
+        for (const { index: candidate, signedOffset } of candidates) {
           if (candidate < 0 || candidate >= newCount || !remainingNewIndices.has(candidate)) {
             continue;
           }
           const score = bleuSimilarity(oldLines[oldIndex], addedLines[candidate]);
+          const tieDistance = Math.abs(signedOffset - signedLocalDrift);
           if (score > bestScore) {
             bestScore = score;
             bestIndex = candidate;
+            bestTieDistance = tieDistance;
             improved = true;
-          } else if (score === bestScore) {
+          } else if (score === bestScore && tieDistance < bestTieDistance) {
             bestIndex = candidate;
+            bestTieDistance = tieDistance;
           }
         }
 
