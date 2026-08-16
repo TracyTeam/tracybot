@@ -285,6 +285,12 @@ export async function getDiff(
   return fileChanges;
 }
 
+// Character-level 4-gram BLEU similarity between two arbitrary text blocks
+// (single lines or whole hunks). 1.0 = identical, lower = more different.
+export function bleuSimilarity(oldText: string, newText: string): number {
+  return bleu(tokenizeHunk(oldText), tokenizeHunk(newText), 4);
+}
+
 // Compute significance of a hunk by comparing old and new content using BLEU
 function computeHunkSignificance(oldLines: string[], newLines: string[]): { isSignificant: boolean; bleuScore: number | null } {
   if (oldLines.length === 0 && newLines.length === 0) {
@@ -301,9 +307,7 @@ function computeHunkSignificance(oldLines: string[], newLines: string[]): { isSi
     return { isSignificant: true, bleuScore: null };
   }
 
-  const oldContent = oldLines.join("\n");
-  const newContent = newLines.join("\n");
-  const score = bleu(tokenizeHunk(oldContent), tokenizeHunk(newContent), 4);
+  const score = bleuSimilarity(oldLines.join("\n"), newLines.join("\n"));
 
   return { isSignificant: score <= SIMILARITY_THRESHOLD, bleuScore: score };
 }

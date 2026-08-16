@@ -1,5 +1,6 @@
 import { BuildHistoryFailureReason, BuildHistoryResult, Change, CommitInfo, DiffHunk, History, TaskletMessage, TaskletQuestion } from "./types";
 import {
+  bleuSimilarity,
   getActiveTracyId,
   getCommitTree,
   getDiff,
@@ -8,7 +9,8 @@ import {
   groupChangesByFile,
   isAiChange,
   mapLinesToTree,
-  runGit
+  runGit,
+  SIMILARITY_THRESHOLD
 } from "../utils";
 
 const DELIMITER = "||#--TRACY--#||";
@@ -376,12 +378,31 @@ async function extractSnapshot(
     agentSource,
   } = buildTaskletMessages(snapshot.description);
   let diffFromTree = index > 0 ? chain[index - 1].treeHash : baseTree;
+  // chain[index-1] (array-adjacent) is only a reliable stand-in for "this
+  // snapshot's actual parent" on a simple linear chain. getTracyChain()
+  // does a BFS over possibly-multiple parents to support squash-merged
+  // chains (see its doc comment above), so on a chain with a merge point,
+  // array-adjacent entries can be siblings from different branches rather
+  // than parent/child. Default to the array-adjacent check and only
+  // override it below once the real single parent is resolved.
+  let diffBaseIsAiAuthored = index > 0 && isAiChange(chain[index - 1]);
 
   if (snapshot.parentHash) {
-    const parentTree = await getCommitTree(repoPath, snapshot.parentHash);
+    const parentHashes = snapshot.parentHash.split(" ").filter(Boolean);
 
-    if (parentTree) {
-      diffFromTree = parentTree;
+    // A multi-parent parentHash (merge commit) isn't resolvable by
+    // getCommitTree (git rejects the space-joined string as a single
+    // revision), so diffFromTree already silently falls back to the
+    // array-adjacent tree above for that case — keep diffBaseIsAiAuthored
+    // consistent with whatever diffFromTree actually ends up being.
+    if (parentHashes.length === 1) {
+      const parentTree = await getCommitTree(repoPath, parentHashes[0]);
+
+      if (parentTree) {
+        diffFromTree = parentTree;
+        const actualParent = chain.find(c => c.hash === parentHashes[0]);
+        diffBaseIsAiAuthored = actualParent ? isAiChange(actualParent) : false;
+      }
     }
   }
 
@@ -391,16 +412,12 @@ async function extractSnapshot(
       const hunks = fileChangesMap.get(filePath) || [];
 
       // Only filter by significance when diffing against non-AI content
-      // (the real User->AI case). chain[0] is the last real, on-branch
-      // commit (pushed by getTracyChain() before it stops walking), so the
-      // first AI edit is at index 1, not 0 — "index > 0" alone isn't
-      // enough. Skipping the filter for AI->AI hops matters because a
-      // hunk diffed against the AI's OWN prior edit is very often
-      // textually close to it (small follow-up prompts, or just the
-      // unchanged surrounding context dominating the score), which isn't
-      // the "insignificant" case this filter exists to catch.
-      const diffsAgainstPriorAiEdit = index > 0 && isAiChange(chain[index - 1]);
-      const significantHunks = diffsAgainstPriorAiEdit ? hunks : hunks.filter(h => h.isSignificant);
+      // (the real User->AI case). Skipping the filter for AI->AI hops
+      // matters because a hunk diffed against the AI's OWN prior edit is
+      // very often textually close to it (small follow-up prompts, or
+      // just the unchanged surrounding context dominating the score),
+      // which isn't the "insignificant" case this filter exists to catch.
+      const significantHunks = diffBaseIsAiAuthored ? hunks : hunks.filter(h => h.isSignificant);
       const linesAtSnapshot: number[] = [];
       for (const hunk of significantHunks) {
         for (let i = 0; i < hunk.newCount; i++) {
@@ -603,15 +620,257 @@ async function buildUncommittedChanges(
   return { uncommittedChanges: chainChanges.flat(), lastTracyTip };
 }
 
-// Drops lines that fall inside a significant modified or deleted hunk
-// Insignificant hunks preserve AI attribution - ALL new lines from the hunk are kept
+// Bounds the BLEU fallback pass below to a fixed-size window per old line
+// rather than searching every remaining candidate. Gating on the total
+// unmatched-old x unmatched-new product (an earlier version of this cap)
+// meant that once a hunk had enough purely-unmatched lines — e.g. a
+// uniform field rename applied throughout, ~450 lines on each side, none
+// of which exact-match — the ENTIRE fallback got skipped, dropping
+// attribution for a whole hunk that's exactly the case this fallback
+// exists for. A per-line window keeps cost bounded (linear in hunk size)
+// without that all-or-nothing cliff: every unmatched old line still gets
+// a real, bounded search.
+const FUZZY_MATCH_WINDOW = 500;
+// Once a match's score has gone unbeaten for this many consecutive
+// offsets (and already clears the significance threshold), stop
+// searching — the common case (an in-place rename, no reordering) finds
+// its match at or near offset 0 and gains nothing from scanning the rest
+// of the window.
+const FUZZY_MATCH_EARLY_EXIT_PATIENCE = 20;
+// A tied candidate's text occurring at most this many times among the
+// hunk's new lines is treated as a rare, discrete duplicate (worth
+// reaching across the gap's drift for — see the long comment at its use
+// site). More occurrences than this is treated as uniform/templated
+// content instead, where reaching for a specific one has no basis.
+const FUZZY_MATCH_RARE_DUPLICATE_LIMIT = 4;
+
+// Aligns a hunk's old lines to its new lines one-to-one and in order,
+// instead of matching each tracked line independently — independent
+// per-line lookups all resolve a duplicated line (`}`, `return;`,
+// identical log lines, common in an "insignificant" hunk) to the SAME
+// first occurrence, colliding distinct duplicates onto one new position
+// and losing attribution for the rest, or letting a later match overwrite
+// an earlier one that legitimately owns a different occurrence.
+//
+// Exact (whitespace-insensitive) matches are found via an O(n+m) hash
+// lookup — grouping new-line indices by content and consuming each
+// group in order as old lines are walked — which respects both order and
+// duplicate multiplicity (two `}` lines in the old text land on two
+// different `}` lines in the new text, not both on the first one) without
+// the O(n*m) time and space a full LCS table would cost. A large hunk
+// (reformatting or bulk-renaming an equally large file) can easily reach
+// thousands of lines, where an O(n*m) table would mean hundreds of MB to
+// GBs of allocation. Whatever's left over falls back to the best
+// remaining BLEU-similar candidate, bounded by FUZZY_MATCH_SEARCH_CAP.
+function alignHunkLines(hunk: DiffHunk): Map<number, number> {
+  const oldLines = hunk.removedLines ?? [];
+  const addedLines = hunk.addedLines ?? [];
+  const normalize = (s: string) => s.replace(/\s+/g, '');
+
+  const newIndicesByContent = new Map<string, number[]>();
+  addedLines.forEach((text, newIndex) => {
+    const key = normalize(text);
+    const bucket = newIndicesByContent.get(key);
+    if (bucket) {
+      bucket.push(newIndex);
+    } else {
+      newIndicesByContent.set(key, [newIndex]);
+    }
+  });
+
+  // Consumed via a per-bucket cursor rather than bucket.shift(): shift()
+  // shifts every remaining element down by one, so repeatedly shifting the
+  // SAME bucket (a hunk with many identical lines — `}`, blank lines,
+  // templated log statements — is exactly when this bucket gets consumed
+  // over and over) is O(k) per call, O(k^2) total for that bucket alone.
+  // A cursor makes each consumption O(1) regardless of bucket size.
+  const bucketCursors = new Map<string, number>();
+  const alignment = new Map<number, number>();
+  const usedNewIndices = new Set<number>();
+  const unmatchedOldIndices: number[] = [];
+  oldLines.forEach((text, oldIndex) => {
+    const key = normalize(text);
+    const bucket = newIndicesByContent.get(key);
+    const cursor = bucketCursors.get(key) ?? 0;
+    if (bucket && cursor < bucket.length) {
+      const newIndex = bucket[cursor];
+      bucketCursors.set(key, cursor + 1);
+      alignment.set(oldIndex, newIndex);
+      usedNewIndices.add(newIndex);
+    } else {
+      unmatchedOldIndices.push(oldIndex);
+    }
+  });
+
+  const unmatchedNewIndices: number[] = [];
+  for (let newIndex = 0; newIndex < addedLines.length; newIndex++) {
+    if (!usedNewIndices.has(newIndex)) {
+      unmatchedNewIndices.push(newIndex);
+    }
+  }
+
+  // How many other old lines share this exact (whitespace-insensitive)
+  // text — used below to decide, per old line, whether reaching across
+  // the gap's drift for a tied candidate is warranted at all.
+  const oldContentCounts = new Map<string, number>();
+  oldLines.forEach(text => {
+    const key = normalize(text);
+    oldContentCounts.set(key, (oldContentCounts.get(key) ?? 0) + 1);
+  });
+
+  if (unmatchedOldIndices.length > 0 && unmatchedNewIndices.length > 0) {
+    const remainingNewIndices = new Set(unmatchedNewIndices);
+    const oldCount = oldLines.length;
+    const newCount = addedLines.length;
+
+    // Anchors: the exact matches already found above, used to LOCALLY
+    // estimate an unmatched line's expected position instead of scaling
+    // it against the hunk as a whole. A single global scale is wrong by
+    // however many lines were inserted/deleted before this point in the
+    // hunk — e.g. ~50 lines inserted right before a large renamed block
+    // shifts every renamed line's true position by ~50, but a global
+    // estimate only accounts for a fraction of that, landing the search
+    // window's center nowhere near the real match deep inside the block.
+    // Anchored to the exact matches immediately surrounding each gap
+    // instead — which, being exact, already reflect the true offset at
+    // that point exactly — the very first candidate checked is already
+    // close to correct. unmatchedOldIndices is walked in ascending order,
+    // so a single forward-moving pointer through the sorted anchors is
+    // enough; no need to re-search from the start each time.
+    const anchorOldIndices = Array.from(alignment.keys()).sort((a, b) => a - b);
+    let anchorPointer = 0;
+
+    for (const oldIndex of unmatchedOldIndices) {
+      while (anchorPointer < anchorOldIndices.length && anchorOldIndices[anchorPointer] < oldIndex) {
+        anchorPointer++;
+      }
+      const prevAnchorOld = anchorPointer > 0 ? anchorOldIndices[anchorPointer - 1] : -1;
+      const prevAnchorNew = anchorPointer > 0 ? alignment.get(prevAnchorOld)! : -1;
+      const nextAnchorOld = anchorPointer < anchorOldIndices.length ? anchorOldIndices[anchorPointer] : oldCount;
+      const nextAnchorNew = anchorPointer < anchorOldIndices.length ? alignment.get(nextAnchorOld)! : newCount;
+      const span = nextAnchorOld - prevAnchorOld;
+
+      // How many net lines were inserted (positive) or deleted (negative)
+      // within this specific anchor-bounded gap (the whole hunk, when
+      // there are no anchors at all — exactly the "big rename hunk,
+      // nothing exact-matches" case).
+      const signedLocalDrift = (nextAnchorNew - prevAnchorNew) - (nextAnchorOld - prevAnchorOld);
+
+      // This old line's own text tells us whether reaching for that drift
+      // is warranted at all. If it's rare among the old lines (occurs
+      // only a handful of times), a real "moved/renamed block vs. one
+      // stray duplicate elsewhere" situation is what's actually going on
+      // — see the repro two commits ago: 50 lines inserted before a
+      // renamed block, reusing indices 0..49 so exactly ONE decoy exists
+      // per rare index — and it's worth both (a) assuming the gap's whole
+      // drift already applies by this point (the proportional estimate
+      // below assumes the shift is spread evenly across the gap; if it's
+      // actually concentrated at one end, that assumption is wrong for
+      // lines near that end) and (b) reaching across the gap's drift on a
+      // tie to find the candidate that accounts for it.
+      //
+      // If instead this exact text repeats many times over (a large
+      // uniform/templated block — many AI-written lines that just happen
+      // to be identical), assuming or reaching for the gap's drift has no
+      // basis: there's no way to tell, from content alone, which
+      // occurrence is the line's own, and guessing risks walking straight
+      // into a same-looking but unrelated region (e.g. lines appended
+      // after the AI's own block, which is exactly as "textually similar"
+      // to this line as the AI's own text is to itself). The estimate
+      // then assumes NO shift at all (matching this line's own position
+      // 1:1 against the nearest anchor), and ties prefer whichever
+      // candidate is closest to that estimate instead of reaching toward
+      // the drift.
+      const isRareContent = (oldContentCounts.get(normalize(oldLines[oldIndex])) ?? 1) <= FUZZY_MATCH_RARE_DUPLICATE_LIMIT;
+      const estimatedNewIndex = isRareContent
+        ? (span > 0 ? Math.round(prevAnchorNew + ((oldIndex - prevAnchorOld) * (nextAnchorNew - prevAnchorNew)) / span) : prevAnchorNew + 1)
+        : prevAnchorNew + (oldIndex - prevAnchorOld);
+      const tieTarget = isRareContent ? signedLocalDrift : 0;
+      const patience = isRareContent
+        ? Math.min(FUZZY_MATCH_WINDOW, Math.max(FUZZY_MATCH_EARLY_EXIT_PATIENCE, Math.abs(signedLocalDrift)))
+        : FUZZY_MATCH_EARLY_EXIT_PATIENCE;
+
+      // Stop early once a confidently-good match has been sitting
+      // unbeaten for a while — without this, every line would always
+      // scan the full window even after finding an obviously-correct
+      // match at offset 0 (the common case for an in-place rename that
+      // doesn't reorder anything), which is what actually made this loop
+      // slow in practice, not the window bound itself. For rare content,
+      // patience scales with the drift so a search can't settle before at
+      // least reaching the position the gap's own line-count change
+      // implies.
+      let bestIndex = -1;
+      let bestScore = -1;
+      let bestTieDistance = Infinity;
+      let noImprovementStreak = 0;
+      for (let offset = 0; offset <= FUZZY_MATCH_WINDOW; offset++) {
+        const candidates = offset === 0
+          ? [{ index: estimatedNewIndex, signedOffset: 0 }]
+          : [
+              { index: estimatedNewIndex - offset, signedOffset: -offset },
+              { index: estimatedNewIndex + offset, signedOffset: offset },
+            ];
+
+        // A strict improvement both updates the pick AND counts as
+        // progress (resets the patience counter below). An exact tie only
+        // updates the pick if it's closer to tieTarget than the current
+        // pick. A tie never counts as progress either way: a hunk where
+        // many old lines each have many identically-scoring candidates
+        // (e.g. a uniform rename repeated verbatim across thousands of
+        // lines) would otherwise have every tie reset the counter,
+        // defeating the patience-based exit and forcing a full-window
+        // scan for every line.
+        let improved = false;
+        for (const { index: candidate, signedOffset } of candidates) {
+          if (candidate < 0 || candidate >= newCount || !remainingNewIndices.has(candidate)) {
+            continue;
+          }
+          const score = bleuSimilarity(oldLines[oldIndex], addedLines[candidate]);
+          const tieDistance = Math.abs(signedOffset - tieTarget);
+          if (score > bestScore) {
+            bestScore = score;
+            bestIndex = candidate;
+            bestTieDistance = tieDistance;
+            improved = true;
+          } else if (score === bestScore && tieDistance < bestTieDistance) {
+            bestIndex = candidate;
+            bestTieDistance = tieDistance;
+          }
+        }
+
+        noImprovementStreak = improved ? 0 : noImprovementStreak + 1;
+        if (bestScore > SIMILARITY_THRESHOLD && noImprovementStreak >= patience) {
+          break;
+        }
+      }
+
+      if (bestIndex !== -1 && bestScore > SIMILARITY_THRESHOLD) {
+        alignment.set(oldIndex, bestIndex);
+        remainingNewIndices.delete(bestIndex);
+      }
+    }
+  }
+
+  return alignment;
+}
+
+// Drops lines that fall inside a significant modified or deleted hunk.
+// Insignificant hunks preserve AI attribution only for the specific new
+// line this old line's content aligns to (see alignHunkLines) — not every
+// new line in the hunk.
 // Pure insertions (oldCount = 0) never consume old lines, only shift subsequent ones
 // Also returns the new-tree positions of lines consumed by significant hunks so the
 // caller can record them as "ghost" attribution for the previous owner.
 function consumeAndShift(lines: number[], hunks: DiffHunk[]): { survivors: number[]; consumedNewPositions: number[] } {
   const survivingLines = new Set<number>();
-  const processedInsignificantHunks = new Set<DiffHunk>();
   const consumedHunks = new Set<DiffHunk>();
+  // Memoized per hunk within this call: alignHunkLines is a pure function
+  // of the hunk's own content, so every tracked line landing in the same
+  // hunk (whether from this tasklet's own lines, or a separate
+  // consumeAndShift call for a different tasklet touching the same hunk)
+  // resolves against the same one-to-one mapping — duplicate lines land on
+  // distinct occurrences instead of colliding on the first match.
+  const hunkAlignments = new Map<DiffHunk, Map<number, number>>();
 
   const sortedLines = [...lines].sort((a, b) => a - b);
   const sortedHunks = [...hunks].sort((a, b) => a.oldStart - b.oldStart);
@@ -628,19 +887,25 @@ function consumeAndShift(lines: number[], hunks: DiffHunk[]): { survivors: numbe
 
     if (containingHunk) {
       if (containingHunk.isSignificant) {
-        // Significant hunk: consume the line (user override)
+        // Significant hunk: consume the line (user override). Ghost-tracked
+        // across the whole replaced block below, since a real rewrite has
+        // no specific "successor line" to point to.
         consumedHunks.add(containingHunk);
         continue;
-      } else {
-        // Insignificant hunk: preserve AI attribution for ALL new lines in the hunk
-        // Only process each hunk once to avoid duplicates
-        if (!processedInsignificantHunks.has(containingHunk)) {
-          for (let i = 0; i < containingHunk.newCount; i++) {
-            survivingLines.add(containingHunk.newStart + i);
-          }
-          processedInsignificantHunks.add(containingHunk);
-        }
-        // The current line is "absorbed" - no need to add individually
+      }
+
+      // Insignificant hunk: only credit the specific new line this old
+      // line aligns to. If nothing in the hunk resembles it anymore, drop
+      // it rather than guessing — deliberately not ghost-tracked either,
+      // to avoid the same blanket-crediting problem this function exists
+      // to avoid.
+      if (!hunkAlignments.has(containingHunk)) {
+        hunkAlignments.set(containingHunk, alignHunkLines(containingHunk));
+      }
+      const newIndex = hunkAlignments.get(containingHunk)!.get(line - containingHunk.oldStart);
+
+      if (newIndex !== undefined) {
+        survivingLines.add(containingHunk.newStart + newIndex);
       }
     } else {
       // Line not in any hunk, apply shifts from all hunks before this line
