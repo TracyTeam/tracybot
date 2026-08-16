@@ -846,4 +846,77 @@ suite('buildHistory stays fast and memory-bounded on a large single hunk', () =>
       `expected none of tasklet-1's lines to land in the inserted-duplicate range [${wrongRangeStart},${wrongRangeEnd}], got ${JSON.stringify(misattributed)}`
     );
   });
+
+  test('a large hunk of uniformly-renamed identical lines resolves without the tie-breaking early exit stalling', async function () {
+    // Code review finding: preferring the farther-explored candidate on
+    // an exact score tie (added so a real match isn't lost to an earlier,
+    // wrong-but-equally-scoring one — see the previous test) marked every
+    // tie as "progress", resetting the patience counter. A hunk where
+    // every old line is identical to every other (a real pattern: the
+    // same templated statement repeated verbatim thousands of times) and
+    // gets uniformly renamed means every old line's fuzzy search sees
+    // thousands of candidates that ALL score identically — so patience
+    // never accumulates, and every single line scans the full search
+    // window regardless of the patience setting. Reproduced a ~13x
+    // slowdown (~2s fixed vs ~26s before) at 5,000 lines.
+    this.timeout(20000);
+
+    const lineCount = 5000;
+    const dir = makeTempDir();
+    execSync('git init -q', { cwd: dir });
+    execSync('git config user.email test@example.com', { cwd: dir });
+    execSync('git config user.name Test', { cwd: dir });
+
+    const filePath = path.join(dir, 'app.py');
+    fs.writeFileSync(filePath, '# placeholder\n');
+    execSync('git add app.py && git commit -q -m init', { cwd: dir });
+    const baseCommit = execSync('git rev-parse HEAD', { cwd: dir, encoding: 'utf8' }).trim();
+
+    const buildLines = (fieldName: string) => {
+      const out = ['def process():'];
+      for (let i = 0; i < lineCount; i++) {
+        out.push(`    record = load(${fieldName}=value)`);
+      }
+      out.push('    return None');
+      out.push('');
+      return out.join('\n');
+    };
+
+    fs.writeFileSync(filePath, buildLines('user_id'));
+    execSync('git add app.py', { cwd: dir });
+    const aiCommit = commitAiEdit(dir, baseCommit, 'tasklet-1', 'sess1', 'generate a large function using user_id repeatedly', 1000);
+    execSync(`git update-ref refs/tracy-local/aaaa1111 ${aiCommit}`, { cwd: dir });
+    execSync('git add -A && git commit -q -m "generate large function (AI assisted)"', { cwd: dir });
+    execSync('git notes add -m "tracy-id: aaaa1111" HEAD', { cwd: dir });
+    execSync(`git update-ref refs/tracy/aaaa1111 ${aiCommit}`, { cwd: dir });
+
+    // Human commit: rename user_id -> userId across every (identical)
+    // line at once.
+    fs.writeFileSync(filePath, buildLines('userId'));
+    execSync('git add -A && git commit -q -m "human renames user_id to userId everywhere"', { cwd: dir });
+
+    const startedAt = Date.now();
+    const result = await buildHistory(dir);
+    const elapsedMs = Date.now() - startedAt;
+
+    assert.strictEqual(result.ok, true);
+    if (!result.ok) { return; }
+
+    const file = result.history.files.find(f => f.path === 'app.py');
+    const tasklet = file?.tasklets.find(t => t.taskletId === 'tasklet-1');
+    assert.ok(tasklet, 'the large renamed function should still be attributed');
+    // With every line identical to every other, which specific line
+    // "belongs" to which is genuinely ambiguous — a handful can be lost
+    // at the margins without it being a correctness bug. The overwhelming
+    // majority resolving is what matters here.
+    assert.ok(
+      tasklet!.lines.length > lineCount * 0.95,
+      `expected the vast majority of ${lineCount} identical renamed lines to still resolve, got ${tasklet!.lines.length}`
+    );
+
+    assert.ok(
+      elapsedMs < 8000,
+      `expected a ${lineCount}-line hunk of identical, uniformly-renamed lines to resolve in well under 8s, took ${elapsedMs}ms — ties resetting the early-exit patience counter would force a full-window scan for every line`
+    );
+  });
 });

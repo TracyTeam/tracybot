@@ -768,23 +768,30 @@ function alignHunkLines(hunk: DiffHunk): Map<number, number> {
           ? [estimatedNewIndex]
           : [estimatedNewIndex - offset, estimatedNewIndex + offset];
 
+        // A strict improvement both updates the pick AND counts as
+        // progress (resets the patience counter below). An exact tie
+        // still updates the pick — preferring the farther-explored
+        // candidate, so a tie between a nearby candidate and one found
+        // only after searching out to localDrift favors the position that
+        // actually accounts for the shift — but does NOT count as
+        // progress: a hunk where many old lines each have many
+        // identically-scoring candidates (e.g. a uniform rename repeated
+        // verbatim across thousands of lines) would otherwise have every
+        // single one of those ties reset the counter, defeating the
+        // patience-based exit entirely and forcing a full-window scan for
+        // every line.
         let improved = false;
         for (const candidate of candidates) {
           if (candidate < 0 || candidate >= newCount || !remainingNewIndices.has(candidate)) {
             continue;
           }
           const score = bleuSimilarity(oldLines[oldIndex], addedLines[candidate]);
-          // >= rather than >: on an exact tie, prefer the farther-explored
-          // candidate. Combined with drift-scaled patience, a tie between
-          // a nearby candidate and one found only after searching out to
-          // localDrift favors the position that actually accounts for the
-          // shift — the more likely correct one when the gap's own line
-          // count changed, rather than an arbitrary "whichever was found
-          // first" tiebreak.
-          if (score >= bestScore) {
+          if (score > bestScore) {
             bestScore = score;
             bestIndex = candidate;
             improved = true;
+          } else if (score === bestScore) {
+            bestIndex = candidate;
           }
         }
 
