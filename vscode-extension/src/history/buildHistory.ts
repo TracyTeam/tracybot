@@ -620,16 +620,23 @@ async function buildUncommittedChanges(
   return { uncommittedChanges: chainChanges.flat(), lastTracyTip };
 }
 
-// Bounds the BLEU fallback pass below: it's inherently O(unmatched old x
-// unmatched new), and unlike the exact-match pass (an O(n+m) hash lookup,
-// safe at any size) that cost doesn't have a cheap linear alternative. A
-// large hunk that's mostly reformatting (the common "insignificant"
-// case — whitespace is stripped before comparison, so reindentation exact-
-// matches almost everything) leaves little for this pass to do regardless
-// of hunk size. Past the cap, leftover lines are left unmatched rather
-// than guessed at, consistent with this function's existing "drop rather
-// than guess" fallback.
-const FUZZY_MATCH_SEARCH_CAP = 200_000;
+// Bounds the BLEU fallback pass below to a fixed-size window per old line
+// rather than searching every remaining candidate. Gating on the total
+// unmatched-old x unmatched-new product (an earlier version of this cap)
+// meant that once a hunk had enough purely-unmatched lines — e.g. a
+// uniform field rename applied throughout, ~450 lines on each side, none
+// of which exact-match — the ENTIRE fallback got skipped, dropping
+// attribution for a whole hunk that's exactly the case this fallback
+// exists for. A per-line window keeps cost bounded (linear in hunk size)
+// without that all-or-nothing cliff: every unmatched old line still gets
+// a real, bounded search.
+const FUZZY_MATCH_WINDOW = 500;
+// Once a match's score has gone unbeaten for this many consecutive
+// offsets (and already clears the significance threshold), stop
+// searching — the common case (an in-place rename, no reordering) finds
+// its match at or near offset 0 and gains nothing from scanning the rest
+// of the window.
+const FUZZY_MATCH_EARLY_EXIT_PATIENCE = 20;
 
 // Aligns a hunk's old lines to its new lines one-to-one and in order,
 // instead of matching each tracked line independently — independent
@@ -696,16 +703,50 @@ function alignHunkLines(hunk: DiffHunk): Map<number, number> {
     }
   }
 
-  if (unmatchedOldIndices.length * unmatchedNewIndices.length <= FUZZY_MATCH_SEARCH_CAP) {
+  if (unmatchedOldIndices.length > 0 && unmatchedNewIndices.length > 0) {
     const remainingNewIndices = new Set(unmatchedNewIndices);
+    const oldCount = oldLines.length;
+    const newCount = addedLines.length;
+
     for (const oldIndex of unmatchedOldIndices) {
+      // A restructuring or in-place rename rarely moves a line far from
+      // its proportional position in the hunk, so search outward from
+      // where it's expected to land instead of scanning every remaining
+      // candidate.
+      const estimatedNewIndex = oldCount > 1
+        ? Math.round((oldIndex * (newCount - 1)) / (oldCount - 1))
+        : 0;
+
+      // Stop early once a confidently-good match has been sitting
+      // unbeaten for a while — without this, every line would always
+      // scan the full window even after finding an obviously-correct
+      // match at offset 0 (the common case for an in-place rename that
+      // doesn't reorder anything), which is what actually made this loop
+      // slow in practice, not the window bound itself.
       let bestIndex = -1;
       let bestScore = -1;
-      for (const newIndex of remainingNewIndices) {
-        const score = bleuSimilarity(oldLines[oldIndex], addedLines[newIndex]);
-        if (score > bestScore) {
-          bestScore = score;
-          bestIndex = newIndex;
+      let noImprovementStreak = 0;
+      for (let offset = 0; offset <= FUZZY_MATCH_WINDOW; offset++) {
+        const candidates = offset === 0
+          ? [estimatedNewIndex]
+          : [estimatedNewIndex - offset, estimatedNewIndex + offset];
+
+        let improved = false;
+        for (const candidate of candidates) {
+          if (candidate < 0 || candidate >= newCount || !remainingNewIndices.has(candidate)) {
+            continue;
+          }
+          const score = bleuSimilarity(oldLines[oldIndex], addedLines[candidate]);
+          if (score > bestScore) {
+            bestScore = score;
+            bestIndex = candidate;
+            improved = true;
+          }
+        }
+
+        noImprovementStreak = improved ? 0 : noImprovementStreak + 1;
+        if (bestScore > SIMILARITY_THRESHOLD && noImprovementStreak >= FUZZY_MATCH_EARLY_EXIT_PATIENCE) {
+          break;
         }
       }
 
