@@ -940,4 +940,89 @@ suite('buildHistory stays fast and memory-bounded on a large single hunk', () =>
       `expected a ${lineCount}-line hunk of identical, uniformly-renamed lines to resolve in well under 8s, took ${elapsedMs}ms — ties resetting the early-exit patience counter would force a full-window scan for every line`
     );
   });
+
+  test('uniformly-renamed identical lines do not drift into unrelated lines appended right after the block', async function () {
+    // Code review finding, and a mirror of the previous test's own
+    // reasoning turned back on it: fixing the "drift toward the edge of
+    // the window" bug meant biasing ties toward the offset the gap's
+    // line-count change implies. But that bias is a single number for
+    // the WHOLE gap — it has no way to know WHERE within the gap an
+    // insertion actually happened. Here, 50 non-AI lines (identical to
+    // the AI's own, entirely uninformative content — no unique index
+    // anywhere) are appended AFTER the AI's block instead of inserted
+    // before it. The AI's own 1,000 lines need no shift at all, but a
+    // drift target that assumes the gap's whole +50 change applies
+    // uniformly to every line would still walk lines near the end of the
+    // block into the appended (non-AI) region, since that region is
+    // exactly as similar to the AI's own text as the AI's own text is to
+    // itself.
+    this.timeout(20000);
+
+    const lineCount = 1000;
+    const appendedCount = 50;
+    const dir = makeTempDir();
+    execSync('git init -q', { cwd: dir });
+    execSync('git config user.email test@example.com', { cwd: dir });
+    execSync('git config user.name Test', { cwd: dir });
+
+    const filePath = path.join(dir, 'app.py');
+    fs.writeFileSync(filePath, '# placeholder\n');
+    execSync('git add app.py && git commit -q -m init', { cwd: dir });
+    const baseCommit = execSync('git rev-parse HEAD', { cwd: dir, encoding: 'utf8' }).trim();
+
+    const buildAiLines = (fieldName: string) => {
+      const out = ['def process():'];
+      for (let i = 0; i < lineCount; i++) {
+        out.push(`    record = load(${fieldName}=value)`);
+      }
+      out.push('    return None');
+      out.push('');
+      return out.join('\n');
+    };
+
+    fs.writeFileSync(filePath, buildAiLines('user_id'));
+    execSync('git add app.py', { cwd: dir });
+    const aiCommit = commitAiEdit(dir, baseCommit, 'tasklet-1', 'sess1', 'generate a large function using user_id repeatedly', 1000);
+    execSync(`git update-ref refs/tracy-local/aaaa1111 ${aiCommit}`, { cwd: dir });
+    execSync('git add -A && git commit -q -m "generate large function (AI assisted)"', { cwd: dir });
+    execSync('git notes add -m "tracy-id: aaaa1111" HEAD', { cwd: dir });
+    execSync(`git update-ref refs/tracy/aaaa1111 ${aiCommit}`, { cwd: dir });
+
+    // Human commit: rename user_id -> userId across the AI's block AND
+    // append 50 more identical (non-AI) lines right after it.
+    const buildRenamedWithAppend = () => {
+      const out = ['def process():'];
+      for (let i = 0; i < lineCount; i++) {
+        out.push('    record = load(userId=value)');
+      }
+      for (let i = 0; i < appendedCount; i++) {
+        out.push('    record = load(userId=value)');
+      }
+      out.push('    return None');
+      out.push('');
+      return out.join('\n');
+    };
+    fs.writeFileSync(filePath, buildRenamedWithAppend());
+    execSync('git add -A && git commit -q -m "human renames and appends more identical lines after (non-AI)"', { cwd: dir });
+
+    const result = await buildHistory(dir);
+    assert.strictEqual(result.ok, true);
+    if (!result.ok) { return; }
+
+    const file = result.history.files.find(f => f.path === 'app.py');
+    const tasklet = file?.tasklets.find(t => t.taskletId === 'tasklet-1');
+    assert.ok(tasklet, 'the AI block should still be attributed');
+
+    // The AI's block occupies new lines [2, 1 + lineCount]. The appended,
+    // non-AI tail occupies [2 + lineCount, 1 + lineCount + appendedCount].
+    // None of tasklet-1's lines should land in the tail.
+    const tailStart = 2 + lineCount;
+    const tailEnd = 1 + lineCount + appendedCount;
+    const misattributed = tasklet!.lines.filter(l => l >= tailStart && l <= tailEnd);
+    assert.deepStrictEqual(
+      misattributed,
+      [],
+      `expected none of tasklet-1's lines to land in the appended, non-AI tail [${tailStart},${tailEnd}], got ${JSON.stringify(misattributed)}`
+    );
+  });
 });

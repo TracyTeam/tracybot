@@ -637,6 +637,12 @@ const FUZZY_MATCH_WINDOW = 500;
 // its match at or near offset 0 and gains nothing from scanning the rest
 // of the window.
 const FUZZY_MATCH_EARLY_EXIT_PATIENCE = 20;
+// A tied candidate's text occurring at most this many times among the
+// hunk's new lines is treated as a rare, discrete duplicate (worth
+// reaching across the gap's drift for — see the long comment at its use
+// site). More occurrences than this is treated as uniform/templated
+// content instead, where reaching for a specific one has no basis.
+const FUZZY_MATCH_RARE_DUPLICATE_LIMIT = 4;
 
 // Aligns a hunk's old lines to its new lines one-to-one and in order,
 // instead of matching each tracked line independently — independent
@@ -703,6 +709,15 @@ function alignHunkLines(hunk: DiffHunk): Map<number, number> {
     }
   }
 
+  // How many other old lines share this exact (whitespace-insensitive)
+  // text — used below to decide, per old line, whether reaching across
+  // the gap's drift for a tied candidate is warranted at all.
+  const oldContentCounts = new Map<string, number>();
+  oldLines.forEach(text => {
+    const key = normalize(text);
+    oldContentCounts.set(key, (oldContentCounts.get(key) ?? 0) + 1);
+  });
+
   if (unmatchedOldIndices.length > 0 && unmatchedNewIndices.length > 0) {
     const remainingNewIndices = new Set(unmatchedNewIndices);
     const oldCount = oldLines.length;
@@ -733,34 +748,57 @@ function alignHunkLines(hunk: DiffHunk): Map<number, number> {
       const prevAnchorNew = anchorPointer > 0 ? alignment.get(prevAnchorOld)! : -1;
       const nextAnchorOld = anchorPointer < anchorOldIndices.length ? anchorOldIndices[anchorPointer] : oldCount;
       const nextAnchorNew = anchorPointer < anchorOldIndices.length ? alignment.get(nextAnchorOld)! : newCount;
-
       const span = nextAnchorOld - prevAnchorOld;
-      const estimatedNewIndex = span > 0
-        ? Math.round(prevAnchorNew + ((oldIndex - prevAnchorOld) * (nextAnchorNew - prevAnchorNew)) / span)
-        : prevAnchorNew + 1;
 
       // How many net lines were inserted (positive) or deleted (negative)
       // within this specific anchor-bounded gap (the whole hunk, when
       // there are no anchors at all — exactly the "big rename hunk,
-      // nothing exact-matches" case). The estimate above assumes that
-      // shift is spread proportionally across the gap; if it's actually
-      // concentrated at one end (e.g. a block of lines inserted right
-      // before a renamed section), an old line near that end can have
-      // templated/near-duplicate content elsewhere in the gap score just
-      // as well as its real match, which — without a bound tied to the
-      // shift itself — patience-based exit could settle on before the
-      // search ever reaches the real one.
+      // nothing exact-matches" case).
       const signedLocalDrift = (nextAnchorNew - prevAnchorNew) - (nextAnchorOld - prevAnchorOld);
-      const patience = Math.min(FUZZY_MATCH_WINDOW, Math.max(FUZZY_MATCH_EARLY_EXIT_PATIENCE, Math.abs(signedLocalDrift)));
+
+      // This old line's own text tells us whether reaching for that drift
+      // is warranted at all. If it's rare among the old lines (occurs
+      // only a handful of times), a real "moved/renamed block vs. one
+      // stray duplicate elsewhere" situation is what's actually going on
+      // — see the repro two commits ago: 50 lines inserted before a
+      // renamed block, reusing indices 0..49 so exactly ONE decoy exists
+      // per rare index — and it's worth both (a) assuming the gap's whole
+      // drift already applies by this point (the proportional estimate
+      // below assumes the shift is spread evenly across the gap; if it's
+      // actually concentrated at one end, that assumption is wrong for
+      // lines near that end) and (b) reaching across the gap's drift on a
+      // tie to find the candidate that accounts for it.
+      //
+      // If instead this exact text repeats many times over (a large
+      // uniform/templated block — many AI-written lines that just happen
+      // to be identical), assuming or reaching for the gap's drift has no
+      // basis: there's no way to tell, from content alone, which
+      // occurrence is the line's own, and guessing risks walking straight
+      // into a same-looking but unrelated region (e.g. lines appended
+      // after the AI's own block, which is exactly as "textually similar"
+      // to this line as the AI's own text is to itself). The estimate
+      // then assumes NO shift at all (matching this line's own position
+      // 1:1 against the nearest anchor), and ties prefer whichever
+      // candidate is closest to that estimate instead of reaching toward
+      // the drift.
+      const isRareContent = (oldContentCounts.get(normalize(oldLines[oldIndex])) ?? 1) <= FUZZY_MATCH_RARE_DUPLICATE_LIMIT;
+      const estimatedNewIndex = isRareContent
+        ? (span > 0 ? Math.round(prevAnchorNew + ((oldIndex - prevAnchorOld) * (nextAnchorNew - prevAnchorNew)) / span) : prevAnchorNew + 1)
+        : prevAnchorNew + (oldIndex - prevAnchorOld);
+      const tieTarget = isRareContent ? signedLocalDrift : 0;
+      const patience = isRareContent
+        ? Math.min(FUZZY_MATCH_WINDOW, Math.max(FUZZY_MATCH_EARLY_EXIT_PATIENCE, Math.abs(signedLocalDrift)))
+        : FUZZY_MATCH_EARLY_EXIT_PATIENCE;
 
       // Stop early once a confidently-good match has been sitting
       // unbeaten for a while — without this, every line would always
       // scan the full window even after finding an obviously-correct
       // match at offset 0 (the common case for an in-place rename that
       // doesn't reorder anything), which is what actually made this loop
-      // slow in practice, not the window bound itself. Patience scales
-      // with the drift so a search can't settle before at least reaching
-      // the position the gap's own line-count change implies.
+      // slow in practice, not the window bound itself. For rare content,
+      // patience scales with the drift so a search can't settle before at
+      // least reaching the position the gap's own line-count change
+      // implies.
       let bestIndex = -1;
       let bestScore = -1;
       let bestTieDistance = Infinity;
@@ -775,27 +813,20 @@ function alignHunkLines(hunk: DiffHunk): Map<number, number> {
 
         // A strict improvement both updates the pick AND counts as
         // progress (resets the patience counter below). An exact tie only
-        // updates the pick if it's closer to signedLocalDrift than the
-        // current pick — i.e. closer to the offset the gap's own
-        // insertion/deletion actually implies. When nothing shifted
-        // (signedLocalDrift = 0, an in-place rename with no size change),
-        // that means preferring whichever tie sits closest to the
-        // estimate itself, not whichever was found first OR farthest —
-        // without this, a hunk of many identical, uniformly-renamed lines
-        // would drift every line's pick toward the edge of the search
-        // window for no reason, since ties there don't actually reflect
-        // any real shift. A tie never counts as progress either way: a
-        // hunk where many old lines each have many identically-scoring
-        // candidates (e.g. that same uniform rename) would otherwise have
-        // every tie reset the counter, defeating the patience-based exit
-        // and forcing a full-window scan for every line.
+        // updates the pick if it's closer to tieTarget than the current
+        // pick. A tie never counts as progress either way: a hunk where
+        // many old lines each have many identically-scoring candidates
+        // (e.g. a uniform rename repeated verbatim across thousands of
+        // lines) would otherwise have every tie reset the counter,
+        // defeating the patience-based exit and forcing a full-window
+        // scan for every line.
         let improved = false;
         for (const { index: candidate, signedOffset } of candidates) {
           if (candidate < 0 || candidate >= newCount || !remainingNewIndices.has(candidate)) {
             continue;
           }
           const score = bleuSimilarity(oldLines[oldIndex], addedLines[candidate]);
-          const tieDistance = Math.abs(signedOffset - signedLocalDrift);
+          const tieDistance = Math.abs(signedOffset - tieTarget);
           if (score > bestScore) {
             bestScore = score;
             bestIndex = candidate;
