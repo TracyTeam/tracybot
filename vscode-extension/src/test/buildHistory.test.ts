@@ -210,6 +210,91 @@ suite('buildHistory significance filtering across a tracy-local chain', () => {
   });
 });
 
+suite('buildHistory keeps earlier prompts as history when a later prompt re-edits the same line', () => {
+  test('three consecutive prompts editing the same line all remain visible, with only the last one live', async () => {
+    // Ranim's report: editing one line with three consecutive prompts
+    // (add, then edit, then a small tweak) made the earlier prompts
+    // disappear from the line's history entirely, not just lose the live
+    // highlight. Root cause: extractSnapshot() dropped any line a
+    // snapshot's own edit didn't survive to the target tree — and
+    // discarded the WHOLE Change object if nothing survived — before
+    // deduplicateAILines() ever got a chance to demote it to a ghost line
+    // instead. That's the same "later prompt overrides earlier one"
+    // situation the committed-history path already handles correctly via
+    // ghost lines; the uncommitted, in-progress chain just never got to
+    // use that mechanism.
+    const dir = makeTempDir();
+    execSync('git init -q', { cwd: dir });
+    execSync('git config user.email test@example.com', { cwd: dir });
+    execSync('git config user.name Test', { cwd: dir });
+
+    const filePath = path.join(dir, 'app.py');
+    fs.writeFileSync(filePath, [
+      'def process(order):',
+      '    # placeholder',
+      '    return None',
+      '',
+    ].join('\n'));
+    execSync('git add app.py && git commit -q -m init', { cwd: dir });
+    const baseCommit = execSync('git rev-parse HEAD', { cwd: dir, encoding: 'utf8' }).trim();
+
+    // Prompt 1: adds the line.
+    fs.writeFileSync(filePath, [
+      'def process(order):',
+      '    total = calculate_shipping_cost(order)',
+      '    return None',
+      '',
+    ].join('\n'));
+    execSync('git add app.py', { cwd: dir });
+    const commit1 = commitAiEdit(dir, baseCommit, 'tasklet-1', 'sess1', 'add shipping cost calculation', 1000);
+
+    // Prompt 2: edits that same line.
+    fs.writeFileSync(filePath, [
+      'def process(order):',
+      '    total = compute_shipping_cost(order)',
+      '    return None',
+      '',
+    ].join('\n'));
+    execSync('git add app.py', { cwd: dir });
+    const commit2 = commitAiEdit(dir, commit1, 'tasklet-2', 'sess1', 'rename calculate to compute', 2000);
+
+    // Prompt 3: removes one word from it.
+    fs.writeFileSync(filePath, [
+      'def process(order):',
+      '    total = compute_cost(order)',
+      '    return None',
+      '',
+    ].join('\n'));
+    execSync('git add app.py', { cwd: dir });
+    const commit3 = commitAiEdit(dir, commit2, 'tasklet-3', 'sess1', 'remove shipping from the function name', 3000);
+
+    execSync(`git update-ref refs/tracy-local/chain-1 ${commit3}`, { cwd: dir });
+    execSync('git config tracy.current-id chain-1', { cwd: dir });
+    execSync(`git reset -q --mixed ${baseCommit}`, { cwd: dir });
+
+    const result = await buildHistory(dir);
+    assert.strictEqual(result.ok, true);
+    if (!result.ok) { return; }
+
+    const file = result.history.files.find(f => f.path === 'app.py');
+    assert.ok(file, 'app.py should appear in history');
+    const tasklet1 = file!.tasklets.find(t => t.taskletId === 'tasklet-1');
+    const tasklet2 = file!.tasklets.find(t => t.taskletId === 'tasklet-2');
+    const tasklet3 = file!.tasklets.find(t => t.taskletId === 'tasklet-3');
+
+    assert.ok(tasklet1, 'prompt 1 must still appear in history, not disappear entirely');
+    assert.ok(tasklet2, 'prompt 2 must still appear in history, not disappear entirely');
+    assert.ok(tasklet3, 'prompt 3 must be attributed');
+
+    assert.deepStrictEqual(tasklet1!.lines, [], 'prompt 1 should no longer own the live line');
+    assert.deepStrictEqual(tasklet2!.lines, [], 'prompt 2 should no longer own the live line');
+    assert.ok(tasklet3!.lines.length > 0, 'prompt 3 (the most recent edit) should own the live line');
+
+    assert.ok(tasklet1!.ghostLines.length > 0, 'prompt 1 should be recorded as ghost/history for this line');
+    assert.ok(tasklet2!.ghostLines.length > 0, 'prompt 2 should be recorded as ghost/history for this line');
+  });
+});
+
 suite('buildHistory does not blanket-credit a whole hunk to one tasklet', () => {
   test('a human commit bundling a tiny AI-line tweak with an unrelated adjacent comment only credits the AI line', async () => {
     const dir = makeTempDir();
