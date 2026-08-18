@@ -293,6 +293,156 @@ suite('buildHistory keeps earlier prompts as history when a later prompt re-edit
     assert.ok(tasklet1!.ghostLines.length > 0, 'prompt 1 should be recorded as ghost/history for this line');
     assert.ok(tasklet2!.ghostLines.length > 0, 'prompt 2 should be recorded as ghost/history for this line');
   });
+
+  test('the same three-prompt history survives once the user commits, finalizing the whole chain', async () => {
+    // The previous test's fix only covered the in-progress (uncommitted)
+    // chain, via buildUncommittedChanges's own direct call to
+    // extractSnapshot. But extractChangesFromSnapshotChain (used by
+    // buildCommittedHistory once the user runs `git commit`, finalizing
+    // the whole chain into one real commit) calls extractSnapshot too,
+    // with dropOverriddenLines left at its default — so the exact same
+    // "later entry in the same chain overrides an earlier one, and the
+    // earlier one's Change gets dropped instead of ghosted" bug still
+    // applied there, just one step later in the workflow: the history
+    // would look fine right up until the user committed, at which point
+    // it broke again.
+    const dir = makeTempDir();
+    execSync('git init -q', { cwd: dir });
+    execSync('git config user.email test@example.com', { cwd: dir });
+    execSync('git config user.name Test', { cwd: dir });
+
+    const filePath = path.join(dir, 'app.py');
+    fs.writeFileSync(filePath, [
+      'def process(order):',
+      '    # placeholder',
+      '    return None',
+      '',
+    ].join('\n'));
+    execSync('git add app.py && git commit -q -m init', { cwd: dir });
+    const baseCommit = execSync('git rev-parse HEAD', { cwd: dir, encoding: 'utf8' }).trim();
+
+    fs.writeFileSync(filePath, [
+      'def process(order):',
+      '    total = calculate_shipping_cost(order)',
+      '    return None',
+      '',
+    ].join('\n'));
+    execSync('git add app.py', { cwd: dir });
+    const commit1 = commitAiEdit(dir, baseCommit, 'tasklet-1', 'sess1', 'add shipping cost calculation', 1000);
+
+    fs.writeFileSync(filePath, [
+      'def process(order):',
+      '    total = compute_shipping_cost(order)',
+      '    return None',
+      '',
+    ].join('\n'));
+    execSync('git add app.py', { cwd: dir });
+    const commit2 = commitAiEdit(dir, commit1, 'tasklet-2', 'sess1', 'rename calculate to compute', 2000);
+
+    fs.writeFileSync(filePath, [
+      'def process(order):',
+      '    total = compute_cost(order)',
+      '    return None',
+      '',
+    ].join('\n'));
+    execSync('git add app.py', { cwd: dir });
+    const commit3 = commitAiEdit(dir, commit2, 'tasklet-3', 'sess1', 'remove shipping from the function name', 3000);
+
+    execSync(`git update-ref refs/tracy-local/aaaa1111 ${commit3}`, { cwd: dir });
+    execSync('git config tracy.current-id aaaa1111', { cwd: dir });
+
+    // The user commits, finalizing the whole chain into one real commit.
+    execSync('git add -A && git commit -q -am "shipping cost calc (AI assisted)"', { cwd: dir });
+    execSync('git notes add -m "tracy-id: aaaa1111" HEAD', { cwd: dir });
+    execSync(`git update-ref refs/tracy/aaaa1111 ${commit3}`, { cwd: dir });
+    // Finalizing clears the active-chain marker — it's no longer in progress.
+    execSync('git config --unset tracy.current-id', { cwd: dir });
+
+    const result = await buildHistory(dir);
+    assert.strictEqual(result.ok, true);
+    if (!result.ok) { return; }
+
+    const file = result.history.files.find(f => f.path === 'app.py');
+    assert.ok(file, 'app.py should appear in history');
+    const tasklet1 = file!.tasklets.find(t => t.taskletId === 'tasklet-1');
+    const tasklet2 = file!.tasklets.find(t => t.taskletId === 'tasklet-2');
+    const tasklet3 = file!.tasklets.find(t => t.taskletId === 'tasklet-3');
+
+    assert.ok(tasklet1, 'prompt 1 must still appear in history after the commit, not disappear entirely');
+    assert.ok(tasklet2, 'prompt 2 must still appear in history after the commit, not disappear entirely');
+    assert.ok(tasklet3, 'prompt 3 must be attributed');
+
+    assert.deepStrictEqual(tasklet1!.lines, [], 'prompt 1 should no longer own the live line');
+    assert.deepStrictEqual(tasklet2!.lines, [], 'prompt 2 should no longer own the live line');
+    assert.ok(tasklet3!.lines.length > 0, 'prompt 3 (the most recent edit) should own the live line');
+
+    assert.ok(tasklet1!.ghostLines.length > 0, 'prompt 1 should be recorded as ghost/history for this line');
+    assert.ok(tasklet2!.ghostLines.length > 0, 'prompt 2 should be recorded as ghost/history for this line');
+  });
+
+  test('a genuine manual edit made right before commit is still correctly excluded from AI attribution', async () => {
+    // Guards against overcorrecting the two tests above: the committed
+    // path's dropOverriddenLines check still needs to catch a REAL,
+    // untracked override — e.g. the user manually tweaks something right
+    // before running `git commit`, with no AI turn (and so no Change
+    // object) representing that edit at all. Only the gap strictly AFTER
+    // the tracy-local chain's own last snapshot should count for this;
+    // scoping it correctly is what the two tests above depend on too.
+    const dir = makeTempDir();
+    execSync('git init -q', { cwd: dir });
+    execSync('git config user.email test@example.com', { cwd: dir });
+    execSync('git config user.name Test', { cwd: dir });
+
+    const filePath = path.join(dir, 'app.py');
+    fs.writeFileSync(filePath, [
+      'def process(order):',
+      '    # placeholder',
+      '    return None',
+      '',
+    ].join('\n'));
+    execSync('git add app.py && git commit -q -m init', { cwd: dir });
+    const baseCommit = execSync('git rev-parse HEAD', { cwd: dir, encoding: 'utf8' }).trim();
+
+    fs.writeFileSync(filePath, [
+      'def process(order):',
+      '    total = calculate_shipping_cost(order)',
+      '    tax = calculate_tax(order)',
+      '    return total + tax',
+      '',
+    ].join('\n'));
+    execSync('git add app.py', { cwd: dir });
+    const commit1 = commitAiEdit(dir, baseCommit, 'tasklet-1', 'sess1', 'add shipping and tax calculation', 1000);
+
+    execSync(`git update-ref refs/tracy-local/aaaa1111 ${commit1}`, { cwd: dir });
+    execSync('git config tracy.current-id aaaa1111', { cwd: dir });
+
+    // Manually edit ONLY the tax line before committing — no AI turn
+    // represents this.
+    fs.writeFileSync(filePath, [
+      'def process(order):',
+      '    total = calculate_shipping_cost(order)',
+      '    tax = manually_fixed_tax_calc(order)',
+      '    return total + tax',
+      '',
+    ].join('\n'));
+    execSync('git add -A && git commit -q -am "shipping and tax calc (AI assisted, tax manually tweaked)"', { cwd: dir });
+    execSync('git notes add -m "tracy-id: aaaa1111" HEAD', { cwd: dir });
+    execSync(`git update-ref refs/tracy/aaaa1111 ${commit1}`, { cwd: dir });
+    execSync('git config --unset tracy.current-id', { cwd: dir });
+
+    const result = await buildHistory(dir);
+    assert.strictEqual(result.ok, true);
+    if (!result.ok) { return; }
+
+    const file = result.history.files.find(f => f.path === 'app.py');
+    const tasklet = file?.tasklets.find(t => t.taskletId === 'tasklet-1');
+    assert.ok(tasklet, 'the untouched lines should still be attributed');
+    assert.deepStrictEqual(
+      tasklet!.lines,
+      [2, 4],
+      'the manually-edited tax line (3) must not be credited to AI — only the untouched shipping and return lines should be'
+    );
+  });
 });
 
 suite('buildHistory does not blanket-credit a whole hunk to one tasklet', () => {

@@ -457,20 +457,43 @@ async function extractSnapshot(
 
       let filteredLines = lines;
       if (dropOverriddenLines) {
-        const userDiffMap = await getDiff(
+        // Only check for genuine overrides in the gap AFTER this chain's
+        // own last entry — not the whole span from this snapshot to
+        // targetTree. A line touched by a LATER entry WITHIN this same
+        // chain is already represented by that entry's own Change object
+        // (from this same chain.map() call in extractChangesFromSnapshotChain)
+        // and gets correctly demoted to a ghost line by
+        // deduplicateAILines() afterward; dropping it here too would just
+        // mean deduplicateAILines() never gets the chance, and if this
+        // snapshot's ENTIRE line set gets dropped this way, the whole
+        // Change disappears with no ghost trace at all (see
+        // dropOverriddenLines's own doc comment above, and Ranim's
+        // report this fixes: a prompt vanishing from a line's history the
+        // moment a later prompt edits that line again — including after
+        // the whole chain gets finalized into one commit).
+        // What's left, past the chain's own tip, is genuinely untracked —
+        // e.g. a last-minute manual edit made right before `git commit`
+        // — and there's no other Change object that will ever represent
+        // it, so it has to be caught here.
+        const chainTipTree = chain[chain.length - 1].treeHash;
+        const residualDiffMap = await getDiff(
           repoPath,
-          snapshot.treeHash,
+          chainTipTree,
           targetTree,
           filePath
         );
 
-        const userHunks = userDiffMap.get(filePath) || [];
+        const residualHunks = residualDiffMap.get(filePath) || [];
 
+        // lines is already mapped into targetTree's coordinate space
+        // (mapLinesToTree's output), so it must be compared against
+        // these hunks' NEW side (also targetTree-relative) — not their
+        // OLD side, which is chainTipTree-relative.
         filteredLines = lines.filter((line) => {
-          return !userHunks.some((hunk) => {
+          return !residualHunks.some((hunk) => {
             return (
-              line >= hunk.oldStart &&
-              line < hunk.oldStart + hunk.oldCount
+              line >= hunk.newStart &&
+              line < hunk.newStart + hunk.newCount
             );
           });
         });
