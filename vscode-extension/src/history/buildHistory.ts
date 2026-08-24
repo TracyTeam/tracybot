@@ -361,7 +361,29 @@ async function extractSnapshot(
   baseTree: string,
   index: number,
   targetTree: string | "WORKING_DIR",
-  originCommit?: CommitInfo
+  originCommit?: CommitInfo,
+  // Whether to drop (not just live-deprioritize) any line this snapshot
+  // touched that's ALSO touched again somewhere between here and
+  // targetTree — and to discard the whole Change if nothing survives.
+  // True (default) is correct when targetTree can include content this
+  // function has no other visibility into (e.g. buildCommittedHistory's
+  // call, where targetTree is a real finalized commit that could include
+  // last-minute edits made outside any tracked AI turn — there's no other
+  // Change object that will ever represent that override, so it must be
+  // caught here or never at all).
+  // False is for buildUncommittedChanges's call, where targetTree is
+  // always exactly the tracy-local chain's own last snapshot — so
+  // "touched again before targetTree" only ever means "a later entry in
+  // this very chain", which already gets its own Change object here and
+  // which deduplicateAILines() already demotes correctly to a ghost line
+  // instead of erasing outright. Dropping the lines (and potentially the
+  // whole Change) here first means deduplicateAILines never gets the
+  // chance to do that: a line edited by an earlier prompt and then
+  // touched again by a later prompt in the same in-progress session
+  // vanishes from history entirely instead of showing up as "previously
+  // touched by" — see Ranim's report of a prompt disappearing from a
+  // line's history after a later prompt edited it again.
+  dropOverriddenLines = true
 ): Promise<Change[]> {
   if (!isAiChange(snapshot)) {
     return [];
@@ -433,23 +455,49 @@ async function extractSnapshot(
         linesAtSnapshot
       );
 
-      const userDiffMap = await getDiff(
-        repoPath,
-        snapshot.treeHash,
-        targetTree,
-        filePath
-      );
+      let filteredLines = lines;
+      if (dropOverriddenLines) {
+        // Only check for genuine overrides in the gap AFTER this chain's
+        // own last entry — not the whole span from this snapshot to
+        // targetTree. A line touched by a LATER entry WITHIN this same
+        // chain is already represented by that entry's own Change object
+        // (from this same chain.map() call in extractChangesFromSnapshotChain)
+        // and gets correctly demoted to a ghost line by
+        // deduplicateAILines() afterward; dropping it here too would just
+        // mean deduplicateAILines() never gets the chance, and if this
+        // snapshot's ENTIRE line set gets dropped this way, the whole
+        // Change disappears with no ghost trace at all (see
+        // dropOverriddenLines's own doc comment above, and Ranim's
+        // report this fixes: a prompt vanishing from a line's history the
+        // moment a later prompt edits that line again — including after
+        // the whole chain gets finalized into one commit).
+        // What's left, past the chain's own tip, is genuinely untracked —
+        // e.g. a last-minute manual edit made right before `git commit`
+        // — and there's no other Change object that will ever represent
+        // it, so it has to be caught here.
+        const chainTipTree = chain[chain.length - 1].treeHash;
+        const residualDiffMap = await getDiff(
+          repoPath,
+          chainTipTree,
+          targetTree,
+          filePath
+        );
 
-      const userHunks = userDiffMap.get(filePath) || [];
+        const residualHunks = residualDiffMap.get(filePath) || [];
 
-      const filteredLines = lines.filter((line) => {
-        return !userHunks.some((hunk) => {
-          return (
-            line >= hunk.oldStart &&
-            line < hunk.oldStart + hunk.oldCount
-          );
+        // lines is already mapped into targetTree's coordinate space
+        // (mapLinesToTree's output), so it must be compared against
+        // these hunks' NEW side (also targetTree-relative) — not their
+        // OLD side, which is chainTipTree-relative.
+        filteredLines = lines.filter((line) => {
+          return !residualHunks.some((hunk) => {
+            return (
+              line >= hunk.newStart &&
+              line < hunk.newStart + hunk.newCount
+            );
+          });
         });
-      });
+      }
 
       if (filteredLines.length > 0) {
         return {
@@ -612,7 +660,15 @@ async function buildUncommittedChanges(
         tracyChain,
         headTree,
         index,
-        lastTracyTip
+        lastTracyTip,
+        undefined,
+        // targetTree here is always exactly this chain's own last
+        // snapshot, so anything that "overrides" a line before targetTree
+        // is necessarily a later entry in this same chain — which gets
+        // its own Change object and which deduplicateAILines() already
+        // demotes correctly to a ghost line. See extractSnapshot's own
+        // comment on this parameter.
+        false
       )
     )
   );
