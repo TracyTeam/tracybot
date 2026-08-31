@@ -2,7 +2,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { History, TaskletMessage } from "../history/types";
 import { buildTaskletResearchPayloads } from "./buildResearchPayloads";
-import { ParticipantContext, Tier2Payload, Tier3Payload } from "./types";
+import { ParticipantContext, Tier1Payload, Tier2Payload } from "./types";
 
 const PARTICIPANT: ParticipantContext = {
   participantId: "p_test",
@@ -65,9 +65,9 @@ describe("buildTaskletResearchPayloads", () => {
     assert.equal(p.files_touched_count, 1);
     assert.equal(p.lines_changed_total, 2);
     assert.equal(p.ownership_flip, false);
+    assert.deepEqual(p.history_tasklet_ids, []);
 
-    // Tier 1 must not leak Tier 2/3 fields
-    assert.equal("plan_prompts" in p, false);
+    // Tier 1 must not leak Tier 2-only fields
     assert.equal("diff_hunks" in p, false);
   });
 
@@ -251,7 +251,7 @@ describe("buildTaskletResearchPayloads", () => {
     });
   });
 
-  describe("Tier 2 fields", () => {
+  describe("Tier 1 fields", () => {
     test("redacts fenced code blocks in plan/build responses", () => {
       const messages: TaskletMessage[] = [
         { stage: "plan", type: "prompt", model: "anthropic/claude-sonnet-4-6", message: "Plan this" },
@@ -266,7 +266,7 @@ describe("buildTaskletResearchPayloads", () => {
         },
       ];
       const history = makeHistory([{ path: "src/app.ts", tasklets: [makeTasklet({ messages })] }]);
-      const payloads = buildTaskletResearchPayloads(history, 2, PARTICIPANT, SUBMITTED_AT) as Tier2Payload[];
+      const payloads = buildTaskletResearchPayloads(history, 1, PARTICIPANT, SUBMITTED_AT) as Tier1Payload[];
 
       assert.equal(payloads[0].plan_responses[0], "Here's the plan.\n\n[code omitted]\n\nDone.");
       assert.equal(payloads[0].build_response, "Done.\n\n[code omitted]");
@@ -286,7 +286,7 @@ describe("buildTaskletResearchPayloads", () => {
         },
       ];
       const history = makeHistory([{ path: "src/app.ts", tasklets: [makeTasklet({ messages })] }]);
-      const payloads = buildTaskletResearchPayloads(history, 2, PARTICIPANT, SUBMITTED_AT) as Tier2Payload[];
+      const payloads = buildTaskletResearchPayloads(history, 1, PARTICIPANT, SUBMITTED_AT) as Tier1Payload[];
 
       assert.ok(!payloads[0].build_response.includes("esme"), "username should not leak");
       assert.ok(!payloads[0].build_response.includes("secret-client"), "local project name should not leak");
@@ -308,7 +308,7 @@ describe("buildTaskletResearchPayloads", () => {
         },
       ];
       const history = makeHistory([{ path: "src/app.ts", tasklets: [makeTasklet({ messages })] }]);
-      const payloads = buildTaskletResearchPayloads(history, 2, PARTICIPANT, SUBMITTED_AT) as Tier2Payload[];
+      const payloads = buildTaskletResearchPayloads(history, 1, PARTICIPANT, SUBMITTED_AT) as Tier1Payload[];
 
       assert.equal(
         payloads[0].build_response,
@@ -335,18 +335,18 @@ describe("buildTaskletResearchPayloads", () => {
           ],
         },
       ]);
-      const payloads = buildTaskletResearchPayloads(history, 2, PARTICIPANT, SUBMITTED_AT) as Tier2Payload[];
+      const payloads = buildTaskletResearchPayloads(history, 1, PARTICIPANT, SUBMITTED_AT) as Tier1Payload[];
       assert.deepEqual(payloads[0].questions_answers, [{ question: "Which log level?", answer: ["DEBUG"] }]);
     });
 
-    test("Tier 2 payload does not include Tier 3 diff_hunks", () => {
+    test("Tier 1 payload does not include Tier 2 diff_hunks", () => {
       const history = makeHistory([{ path: "src/app.ts", tasklets: [makeTasklet()] }]);
-      const payloads = buildTaskletResearchPayloads(history, 2, PARTICIPANT, SUBMITTED_AT);
+      const payloads = buildTaskletResearchPayloads(history, 1, PARTICIPANT, SUBMITTED_AT);
       assert.equal("diff_hunks" in payloads[0], false);
     });
   });
 
-  describe("Tier 3 fields", () => {
+  describe("Tier 2 fields", () => {
     test("flattens diff_hunks across files with correct file tagging and field mapping", () => {
       const history = makeHistory([
         {
@@ -378,7 +378,7 @@ describe("buildTaskletResearchPayloads", () => {
           ],
         },
       ]);
-      const payloads = buildTaskletResearchPayloads(history, 3, PARTICIPANT, SUBMITTED_AT) as Tier3Payload[];
+      const payloads = buildTaskletResearchPayloads(history, 2, PARTICIPANT, SUBMITTED_AT) as Tier2Payload[];
       const p = payloads[0];
 
       assert.equal(p.diff_hunks.length, 2);
@@ -414,17 +414,88 @@ describe("buildTaskletResearchPayloads", () => {
           ],
         },
       ]);
-      const payloads = buildTaskletResearchPayloads(history, 3, PARTICIPANT, SUBMITTED_AT) as Tier3Payload[];
+      const payloads = buildTaskletResearchPayloads(history, 2, PARTICIPANT, SUBMITTED_AT) as Tier2Payload[];
       assert.deepEqual(payloads[0].diff_hunks[0].added_lines, []);
       assert.deepEqual(payloads[0].diff_hunks[0].removed_lines, []);
       assert.equal(payloads[0].hunk_significance[0], false);
     });
 
-    test("Tier 3 still includes Tier 2 fields", () => {
+    test("Tier 2 still includes Tier 1 fields", () => {
       const history = makeHistory([{ path: "src/app.ts", tasklets: [makeTasklet()] }]);
-      const payloads = buildTaskletResearchPayloads(history, 3, PARTICIPANT, SUBMITTED_AT) as Tier3Payload[];
+      const payloads = buildTaskletResearchPayloads(history, 2, PARTICIPANT, SUBMITTED_AT) as Tier2Payload[];
       assert.ok(Array.isArray(payloads[0].plan_prompts));
       assert.ok(Array.isArray(payloads[0].questions_answers));
+    });
+  });
+
+  describe("history_tasklet_ids", () => {
+    test("lists the Tasklet that previously owned a now-taken-over line", () => {
+      const history = makeHistory([
+        {
+          path: "src/app.ts",
+          tasklets: [
+            // Originally wrote lines 1-3; line 2 was later taken over by tasklet-b.
+            makeTasklet({ taskletId: "tasklet-a", sessionId: "session-a", lines: [1, 3], ghostLines: [2] }),
+            // Now owns line 2.
+            makeTasklet({ taskletId: "tasklet-b", sessionId: "session-b", lines: [2], ghostLines: [] }),
+          ],
+        },
+      ]);
+      const payloads = buildTaskletResearchPayloads(history, 1, PARTICIPANT, SUBMITTED_AT);
+
+      const a = payloads.find(p => p.tasklet_id === "tasklet-a")!;
+      const b = payloads.find(p => p.tasklet_id === "tasklet-b")!;
+      // a's currently-live lines (1, 3) were never written by anyone else first.
+      assert.deepEqual(a.history_tasklet_ids, []);
+      // b's currently-live line (2) was previously written by a.
+      assert.deepEqual(b.history_tasklet_ids, ["tasklet-a"]);
+    });
+
+    test("dedupes repeated predecessors across multiple lines", () => {
+      const history = makeHistory([
+        {
+          path: "src/app.ts",
+          tasklets: [
+            makeTasklet({ taskletId: "tasklet-a", sessionId: "session-a", lines: [], ghostLines: [1, 2] }),
+            makeTasklet({ taskletId: "tasklet-b", sessionId: "session-b", lines: [1, 2], ghostLines: [] }),
+          ],
+        },
+      ]);
+      const payloads = buildTaskletResearchPayloads(history, 1, PARTICIPANT, SUBMITTED_AT);
+
+      const b = payloads.find(p => p.tasklet_id === "tasklet-b")!;
+      assert.deepEqual(b.history_tasklet_ids, ["tasklet-a"]);
+    });
+
+    test("aggregates history across every file the Tasklet touched", () => {
+      const history = makeHistory([
+        {
+          path: "src/app.ts",
+          tasklets: [
+            makeTasklet({ taskletId: "tasklet-a", sessionId: "session-a", lines: [], ghostLines: [1] }),
+            makeTasklet({ taskletId: "tasklet-c", sessionId: "session-c", lines: [1], ghostLines: [] }),
+          ],
+        },
+        {
+          path: "src/other.ts",
+          tasklets: [
+            makeTasklet({ taskletId: "tasklet-b", sessionId: "session-b", lines: [], ghostLines: [5] }),
+            { ...makeTasklet({ taskletId: "tasklet-c", sessionId: "session-c", lines: [5], ghostLines: [] }), id: "snapshot-hash-2" },
+          ],
+        },
+      ]);
+      const payloads = buildTaskletResearchPayloads(history, 1, PARTICIPANT, SUBMITTED_AT);
+
+      const c = payloads.find(p => p.tasklet_id === "tasklet-c")!;
+      assert.deepEqual([...c.history_tasklet_ids].sort(), ["tasklet-a", "tasklet-b"]);
+    });
+
+    test("does not include a Tasklet's own id even if it still ghost-owns a line elsewhere", () => {
+      const history = makeHistory([
+        { path: "src/app.ts", tasklets: [makeTasklet({ lines: [1], ghostLines: [2] })] },
+      ]);
+      const payloads = buildTaskletResearchPayloads(history, 1, PARTICIPANT, SUBMITTED_AT);
+      assert.deepEqual(payloads[0].history_tasklet_ids, []);
     });
   });
 

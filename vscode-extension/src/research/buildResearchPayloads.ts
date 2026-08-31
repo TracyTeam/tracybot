@@ -70,6 +70,84 @@ function groupByTasklet(history: History): TaskletGroup[] {
   return Array.from(groups.values());
 }
 
+// path -> line -> the taskletId that currently, live-ly owns that line.
+// history.files[path].tasklets is chronological (oldest -> newest), so
+// whichever entry lists a line in its (live) `lines` last is the current
+// owner — ghostLines never contribute here, by definition.
+function buildLineOwnership(history: History): Map<string, Map<number, string>> {
+  const ownership = new Map<string, Map<number, string>>();
+
+  for (const file of history.files) {
+    const lineOwner = new Map<number, string>();
+    for (const tasklet of file.tasklets) {
+      if (!tasklet.taskletId) { continue; }
+      for (const line of tasklet.lines) {
+        lineOwner.set(line, tasklet.taskletId);
+      }
+    }
+    ownership.set(file.path, lineOwner);
+  }
+
+  return ownership;
+}
+
+// path -> line -> chronological, deduped list of taskletIds that touched
+// that line (live or ghost) but are not its current owner — i.e. the
+// "previous Tasklets for this line" the AI Blame panel shows, keyed by
+// taskletId instead of the per-file snapshot id so it lines up with the
+// tasklet_id already in the payload.
+function buildLineHistory(history: History, ownership: Map<string, Map<number, string>>): Map<string, Map<number, string[]>> {
+  const history_ = new Map<string, Map<number, string[]>>();
+
+  for (const file of history.files) {
+    const lineOwner = ownership.get(file.path)!;
+    const lineHistory = new Map<number, string[]>();
+
+    for (const tasklet of file.tasklets) {
+      if (!tasklet.taskletId) { continue; }
+
+      // Unlike the AI Blame panel's dropdown, a Tasklet that's since been
+      // fully overridden (no live lines left anywhere) still belongs in the
+      // history — it's exactly the rewrite-chain data this field exists for.
+      const touched = new Set<number>([...tasklet.lines, ...tasklet.ghostLines]);
+      for (const line of touched) {
+        if (lineOwner.get(line) === tasklet.taskletId) { continue; }
+
+        const ids = lineHistory.get(line) ?? [];
+        if (!ids.includes(tasklet.taskletId)) { ids.push(tasklet.taskletId); }
+        lineHistory.set(line, ids);
+      }
+    }
+
+    history_.set(file.path, lineHistory);
+  }
+
+  return history_;
+}
+
+// For each line this Tasklet currently (live-ly) owns, who wrote it before —
+// deduped across all its files/lines, in roughly chronological order.
+function buildHistoryTaskletIds(group: TaskletGroup, lineHistory: Map<string, Map<number, string[]>>): string[] {
+  const seen = new Set<string>();
+  const ids: string[] = [];
+
+  for (const f of group.files) {
+    const fileHistory = lineHistory.get(f.path);
+    if (!fileHistory) { continue; }
+
+    for (const line of f.lines) {
+      for (const id of fileHistory.get(line) ?? []) {
+        if (!seen.has(id)) {
+          seen.add(id);
+          ids.push(id);
+        }
+      }
+    }
+  }
+
+  return ids;
+}
+
 // The build-stage prompt carries the model that actually produced the code;
 // falls back to any message with a model set (e.g. plan-only Tasklets).
 function splitModel(messages: TaskletMessage[]): { provider: string; modelId: string } {
@@ -152,7 +230,12 @@ function messagesByStage(messages: TaskletMessage[], stage: "plan" | "build", ty
   return messages.filter(m => m.stage === stage && m.type === type).map(m => m.message);
 }
 
-function buildBasePayload(group: TaskletGroup, participant: ParticipantContext, submittedAt: string): BaseTaskletPayload | null {
+function buildBasePayload(
+  group: TaskletGroup,
+  participant: ParticipantContext,
+  submittedAt: string,
+  lineHistory: Map<string, Map<number, string[]>>
+): BaseTaskletPayload | null {
   const generatedAt = generatedAtIso(group);
   if (generatedAt === null) {
     return null;
@@ -184,30 +267,27 @@ function buildBasePayload(group: TaskletGroup, participant: ParticipantContext, 
     ownership_flip: group.files.some(f => f.ghostLines.length > 0),
     bleu_score: averageBleuScore(group.files),
     review_latency_sec: reviewLatencySec(group),
+    history_tasklet_ids: buildHistoryTaskletIds(group, lineHistory),
   };
 }
 
 export function buildTaskletResearchPayloads(
   history: History,
-  consentTier: 1 | 2 | 3,
+  consentTier: 1 | 2,
   participant: ParticipantContext,
   submittedAt: string = new Date().toISOString()
 ): TaskletResearchPayload[] {
   const groups = groupByTasklet(history);
+  const lineHistory = buildLineHistory(history, buildLineOwnership(history));
   const payloads: TaskletResearchPayload[] = [];
 
   for (const group of groups) {
-    const base = buildBasePayload(group, participant, submittedAt);
+    const base = buildBasePayload(group, participant, submittedAt, lineHistory);
     if (!base) {
       continue;
     }
 
-    if (consentTier === 1) {
-      payloads.push({ ...base, consent_level: 1 });
-      continue;
-    }
-
-    const tier2Fields = {
+    const tier1Fields = {
       plan_prompts: messagesByStage(group.messages, "plan", "prompt").map(redactSensitiveText),
       plan_responses: messagesByStage(group.messages, "plan", "response").map(redactSensitiveText),
       build_prompt: redactSensitiveText(messagesByStage(group.messages, "build", "prompt")[0] ?? ""),
@@ -218,8 +298,8 @@ export function buildTaskletResearchPayloads(
       })),
     };
 
-    if (consentTier === 2) {
-      payloads.push({ ...base, ...tier2Fields, consent_level: 2 });
+    if (consentTier === 1) {
+      payloads.push({ ...base, ...tier1Fields, consent_level: 1 });
       continue;
     }
 
@@ -238,8 +318,8 @@ export function buildTaskletResearchPayloads(
 
     payloads.push({
       ...base,
-      ...tier2Fields,
-      consent_level: 3,
+      ...tier1Fields,
+      consent_level: 2,
       diff_hunks: diffHunks,
       hunk_significance: hunkSignificance,
     });

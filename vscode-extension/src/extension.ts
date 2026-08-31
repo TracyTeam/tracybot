@@ -142,7 +142,7 @@ async function updateResearchStatusBar(ctx: vscode.ExtensionContext): Promise<vo
 async function processNewTaskletsForResearch(ctx: vscode.ExtensionContext, h: History, repoPath: string): Promise<void> {
   if (!isResearchModeEnabled(repoPath)) { return; }
 
-  const participant = getParticipantContext(ctx, repoPath);
+  const participant = await getParticipantContext(ctx, repoPath);
   const payloads = buildTaskletResearchPayloads(h, getConsentTier(repoPath), participant);
 
   for (const payload of payloads) {

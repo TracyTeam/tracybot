@@ -1,12 +1,13 @@
 import * as vscode from 'vscode';
 import { randomUUID } from 'crypto';
 import { ParticipantContext } from './types';
-import { getConsentTierForRepo, getRepoUrlForRepo, isResearchModeEnabledForRepo } from './repoConsent';
+import { getConsentTierForRepo, isResearchModeEnabledForRepo } from './repoConsent';
+import { getRemoteUrl } from './gitRemote';
 
 const PARTICIPANT_ID_KEY = 'tracybot.researchMode.participantId';
 
-// Enabled/tier/repoUrl are per-repository (see repoConsent.ts) — re-exported
-// here so callers only need one import for "am I collecting, and how much".
+// Enabled/tier are per-repository (see repoConsent.ts) — re-exported here so
+// callers only need one import for "am I collecting, and how much".
 export const isResearchModeEnabled = isResearchModeEnabledForRepo;
 export const getConsentTier = getConsentTierForRepo;
 
@@ -24,9 +25,9 @@ export function getOrCreateParticipantId(context: vscode.ExtensionContext): stri
   return generated;
 }
 
-export function getParticipantContext(context: vscode.ExtensionContext, repoPath: string): ParticipantContext {
+export async function getParticipantContext(context: vscode.ExtensionContext, repoPath: string): Promise<ParticipantContext> {
   return {
     participantId: getOrCreateParticipantId(context),
-    repoUrl: getRepoUrlForRepo(repoPath),
+    repoUrl: await getRemoteUrl(repoPath),
   };
 }

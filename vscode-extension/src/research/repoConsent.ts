@@ -9,7 +9,7 @@ import * as path from 'path';
 // never risks ending up committed and pushed to a shared remote the way a
 // workspace-level Setting in .vscode/settings.json could.
 export type RepoConsent =
-  | { decision: 'enabled'; consentTier: 1 | 2 | 3; repoUrl?: string }
+  | { decision: 'enabled'; consentTier: 1 | 2 }
   | { decision: 'declined' };
 
 function consentFilePath(repoPath: string): string {
@@ -37,12 +37,7 @@ export function isResearchModeEnabledForRepo(repoPath: string): boolean {
   return readRepoConsent(repoPath)?.decision === 'enabled';
 }
 
-export function getConsentTierForRepo(repoPath: string): 1 | 2 | 3 {
+export function getConsentTierForRepo(repoPath: string): 1 | 2 {
   const consent = readRepoConsent(repoPath);
   return consent?.decision === 'enabled' ? consent.consentTier : 1;
-}
-
-export function getRepoUrlForRepo(repoPath: string): string | null {
-  const consent = readRepoConsent(repoPath);
-  return (consent?.decision === 'enabled' && consent.repoUrl) || null;
 }

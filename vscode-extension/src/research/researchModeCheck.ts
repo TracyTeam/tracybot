@@ -4,7 +4,7 @@ import { getOrCreateParticipantId } from './consent';
 import { readRepoConsent, writeRepoConsent } from './repoConsent';
 
 interface TierPickItem extends vscode.QuickPickItem {
-  tier: 1 | 2 | 3;
+  tier: 1 | 2;
 }
 
 // Shown inline as part of opting in, not buried in Settings afterward — a
@@ -13,18 +13,12 @@ interface TierPickItem extends vscode.QuickPickItem {
 const TIER_OPTIONS: TierPickItem[] = [
   {
     tier: 1,
-    label: 'Stats only',
-    description: 'model, timestamps, line counts',
-    detail: 'No prompt text, no code is shared.',
+    label: 'Prompt and response text',
+    description: 'fenced code blocks redacted',
+    detail: 'Shares what you asked the AI and what it replied.',
   },
   {
     tier: 2,
-    label: '+ Prompt and response text',
-    description: 'fenced code blocks redacted',
-    detail: 'Also shares what you asked the AI and what it replied.',
-  },
-  {
-    tier: 3,
     label: '+ Code diffs',
     description: 'only the lines each AI edit touched',
     detail: 'Also shares the actual code each AI-generated Tasklet changed.',
@@ -34,7 +28,7 @@ const TIER_OPTIONS: TierPickItem[] = [
 // Exported (rather than exporting TIER_OPTIONS directly) so the Manage
 // Research Mode command in extension.ts can offer the exact same tier
 // picker for a Change Tier action, without duplicating how it's presented.
-export async function pickResearchModeTier(): Promise<1 | 2 | 3 | undefined> {
+export async function pickResearchModeTier(): Promise<1 | 2 | undefined> {
   const chosen = await vscode.window.showQuickPick(TIER_OPTIONS, {
     title: 'Tracybot Research Mode — choose how much to share',
     placeHolder: 'You can change or disable this anytime from the Research Mode status bar item',

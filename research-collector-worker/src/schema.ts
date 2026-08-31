@@ -27,11 +27,11 @@ const basePayload = z.object({
   ownership_flip: z.boolean(),
   bleu_score: z.number().nullable(),
   review_latency_sec: z.number().nullable(),
+
+  history_tasklet_ids: z.array(z.string()),
 });
 
-const tier1Payload = basePayload.extend({ consent_level: z.literal(1) });
-
-const tier2Fields = {
+const tier1Fields = {
   plan_prompts: z.array(z.string()),
   plan_responses: z.array(z.string()),
   build_prompt: z.string(),
@@ -39,7 +39,7 @@ const tier2Fields = {
   questions_answers: z.array(z.object({ question: z.string(), answer: z.array(z.string()) })),
 };
 
-const tier2Payload = basePayload.extend({ consent_level: z.literal(2), ...tier2Fields });
+const tier1Payload = basePayload.extend({ consent_level: z.literal(1), ...tier1Fields });
 
 const diffHunk = z.object({
   file: z.string(),
@@ -51,9 +51,9 @@ const diffHunk = z.object({
   removed_lines: z.array(z.string()),
 });
 
-const tier3Payload = basePayload.extend({
-  consent_level: z.literal(3),
-  ...tier2Fields,
+const tier2Payload = basePayload.extend({
+  consent_level: z.literal(2),
+  ...tier1Fields,
   diff_hunks: z.array(diffHunk),
   hunk_significance: z.array(z.boolean()),
 });
@@ -61,7 +61,6 @@ const tier3Payload = basePayload.extend({
 export const taskletResearchPayloadSchema = z.discriminatedUnion("consent_level", [
   tier1Payload,
   tier2Payload,
-  tier3Payload,
 ]);
 
 export type TaskletResearchPayload = z.infer<typeof taskletResearchPayloadSchema>;

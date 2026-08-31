@@ -22,13 +22,11 @@ export interface BaseTaskletPayload {
   ownership_flip: boolean;     // true if any Change in this Tasklet has ghostLines
   bleu_score: number | null;   // summary: average of non-null per-hunk BLEU scores; null if none apply
   review_latency_sec: number | null; // null until the Tasklet's snapshot has been committed
+
+  history_tasklet_ids: string[]; // IDs of prior Tasklets that previously owned any line this Tasklet currently (live-ly) owns, oldest -> newest, deduped
 }
 
-export interface Tier1Payload extends BaseTaskletPayload {
-  consent_level: 1;
-}
-
-interface Tier2Fields {
+interface Tier1Fields {
   plan_prompts: string[];
   plan_responses: string[];   // fenced code blocks replaced with "[code omitted]"
   build_prompt: string;
@@ -36,8 +34,8 @@ interface Tier2Fields {
   questions_answers: { question: string; answer: string[] }[];
 }
 
-export interface Tier2Payload extends BaseTaskletPayload, Tier2Fields {
-  consent_level: 2;
+export interface Tier1Payload extends BaseTaskletPayload, Tier1Fields {
+  consent_level: 1;
 }
 
 export interface ResearchDiffHunk {
@@ -50,13 +48,13 @@ export interface ResearchDiffHunk {
   removed_lines: string[];
 }
 
-export interface Tier3Payload extends BaseTaskletPayload, Tier2Fields {
-  consent_level: 3;
+export interface Tier2Payload extends BaseTaskletPayload, Tier1Fields {
+  consent_level: 2;
   diff_hunks: ResearchDiffHunk[];        // every hunk touched by this Tasklet, never a full file/repo snapshot
   hunk_significance: boolean[];  // BLEU-threshold result per hunk, same index order as diff_hunks
 }
 
-export type TaskletResearchPayload = Tier1Payload | Tier2Payload | Tier3Payload;
+export type TaskletResearchPayload = Tier1Payload | Tier2Payload;
 
 export interface ParticipantContext {
   participantId: string;
