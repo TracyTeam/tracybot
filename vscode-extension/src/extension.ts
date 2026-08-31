@@ -8,7 +8,7 @@ import { checkOpencode } from './pluginCheck';
 import { checkHookBasedAgents } from './hookAgentPluginCheck';
 import { checkTracyInit } from './tracyInitCheck';
 import { checkResearchModeConsent, enableResearchModeForRepo, pickResearchModeTier } from './research/researchModeCheck';
-import { getConsentTier, getParticipantContext, isResearchModeEnabled } from './research/consent';
+import { getConsentTier, getOrCreateParticipantId, getParticipantContext, isResearchModeEnabled } from './research/consent';
 import { readRepoConsent, writeRepoConsent } from './research/repoConsent';
 import { clearPendingPayloads, getPendingPayloads, getTodaysSentCount, queueTaskletForSubmission } from './research/queue';
 import { buildTaskletResearchPayloads } from './research/buildResearchPayloads';
@@ -278,6 +278,7 @@ export async function activate(context: vscode.ExtensionContext) {
         `Tracybot Research Mode: sent ${count} tasklet${count === 1 ? '' : 's'} today. ` +
         `${pending.length} total pending.`,
         'View Pending Data',
+        'Copy Participant ID',
         'Change Tier',
         'Disable for This Repo'
       );
@@ -288,6 +289,13 @@ export async function activate(context: vscode.ExtensionContext) {
           language: 'json',
         });
         await vscode.window.showTextDocument(doc);
+      } else if (action === 'Copy Participant ID') {
+        // Only reachable from this already-opted-in menu — nothing shows this
+        // to a participant who hasn't enabled Research Mode. Useful for e.g. a
+        // classroom study where students self-report this id through a
+        // separate, out-of-band roster rather than the tool ever identifying them.
+        await vscode.env.clipboard.writeText(getOrCreateParticipantId(context));
+        vscode.window.showInformationMessage('Participant ID copied to clipboard.');
       } else if (action === 'Change Tier') {
         const tier = await pickResearchModeTier();
         // Dismissed: leave the existing tier untouched — this is a change,
