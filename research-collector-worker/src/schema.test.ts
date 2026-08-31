@@ -21,7 +21,13 @@ function makeTier1Payload(overrides: Record<string, unknown> = {}) {
     ownership_flip: false,
     bleu_score: null,
     review_latency_sec: null,
+    history_tasklet_ids: [],
     consent_level: 1,
+    plan_prompts: ["Plan this"],
+    plan_responses: ["Here's the plan"],
+    build_prompt: "Build it",
+    build_response: "Done",
+    questions_answers: [],
     ...overrides,
   };
 }
@@ -37,10 +43,16 @@ describe("submitRequestSchema", () => {
     assert.equal(result.success, false);
   });
 
-  test("rejects a Tier 2 payload missing the Tier 2-only fields", () => {
-    const result = submitRequestSchema.safeParse({
-      payloads: [makeTier1Payload({ consent_level: 2 })],
-    });
+  test("rejects a Tier 1 payload missing the Tier 1-only fields", () => {
+    const {
+      plan_prompts,
+      plan_responses,
+      build_prompt,
+      build_response,
+      questions_answers,
+      ...baseOnly
+    } = makeTier1Payload();
+    const result = submitRequestSchema.safeParse({ payloads: [baseOnly] });
     assert.equal(result.success, false);
   });
 

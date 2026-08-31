@@ -41,7 +41,13 @@ function makePayload(taskletId: string): Tier1Payload {
     ownership_flip: false,
     bleu_score: null,
     review_latency_sec: null,
+    history_tasklet_ids: [],
     consent_level: 1,
+    plan_prompts: ["Plan this"],
+    plan_responses: ["Here's the plan"],
+    build_prompt: "Build it",
+    build_response: "Done",
+    questions_answers: [],
   };
 }
 

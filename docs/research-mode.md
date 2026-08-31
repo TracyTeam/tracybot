@@ -8,7 +8,7 @@ Consent is **per repository**, not machine-wide — agreeing to share one projec
 
 > Help improve Tracybot: share this repository's Tasklet history for a study on AI-assisted coding behavior?
 
-Agreeing shows a Tier picker (Tier 1, the most conservative, is the default if dismissed) and generates a random, per-machine `participant_id` that is never derived from git identity (`user.name`/`user.email`) — the participant identity is shared across repos even though the enable/tier decision isn't. The decision (`enabled` + tier, or `declined`) is stored in that repo's `.git/tracybot/research-consent.json` — inside `.git` so it's never itself tracked or pushed by that repo's own history — and can be changed anytime from the Research Mode status bar item ("Disable for This Repo").
+Agreeing shows a Tier picker (Tier 1, the most conservative option, is the default if dismissed) and generates a random, per-machine `participant_id` that is never derived from git identity (`user.name`/`user.email`) — the participant identity is shared across repos even though the enable/tier decision isn't. The decision (`enabled` + tier, or `declined`) is stored in that repo's `.git/tracybot/research-consent.json` — inside `.git` so it's never itself tracked or pushed by that repo's own history — and can be changed anytime from the Research Mode status bar item ("Disable for This Repo").
 
 ### Consent tiers
 
@@ -16,15 +16,16 @@ Tiers are additive — each includes everything in the tier below it.
 
 | Tier | Adds |
 |---|---|
-| **1** (default) | Model, timestamps, file extensions touched, line-change counts, ownership-flip/BLEU stats. No prompt text, no code. |
-| **2** | Plan/build prompt and response text (fenced code blocks in responses are redacted before leaving the machine). |
-| **3** | The diff hunks touched by each Tasklet (`added_lines`/`removed_lines`), plus the BLEU-significance result per hunk. Never a full file or repo snapshot. |
+| **1** (default) | Model, timestamps, file extensions touched, line-change counts, ownership-flip/BLEU stats, the taskletIds of prior Tasklets that previously owned any line this one currently owns (`history_tasklet_ids`), plus plan/build prompt and response text (fenced code blocks in responses are redacted before leaving the machine). |
+| **2** | The diff hunks touched by each Tasklet (`added_lines`/`removed_lines`), plus the BLEU-significance result per hunk. Never a full file or repo snapshot. |
 
 The developer's own (non-AI) code is never collected, regardless of tier.
 
 ## What gets collected
 
 One payload per Tasklet, built by `vscode-extension/src/research/buildResearchPayloads.ts` from `buildHistory()`'s output. See `vscode-extension/src/research/types.ts` for the exact field list per tier.
+
+`repo_url` is read live from the repo's `origin` remote (`vscode-extension/src/research/gitRemote.ts`) at submission time — it isn't something the participant sets, and isn't stored in the consent file. There's no separate consent gate for it: for an open-source repo the URL doesn't tell us anything not already public, and for a private one the URL alone doesn't grant access either way.
 
 ## Architecture
 
@@ -62,8 +63,7 @@ Stored per-repo in `.git/tracybot/research-consent.json` (see `vscode-extension/
 | Field | Purpose |
 |---|---|
 | `decision` | `"enabled"` or `"declined"` — absent entirely means undecided (prompt shows next time the repo is opened) |
-| `consentTier` | `1`, `2`, or `3` — see tiers above; only present when `decision` is `"enabled"` |
-| `repoUrl` | Optional, not currently set through any UI — lets researchers later check if a repo is open source, if manually added to the file |
+| `consentTier` | `1` or `2` — see tiers above; only present when `decision` is `"enabled"` |
 
 ## Local development
 

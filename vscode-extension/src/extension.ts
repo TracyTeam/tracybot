@@ -8,7 +8,7 @@ import { checkOpencode } from './pluginCheck';
 import { checkHookBasedAgents } from './hookAgentPluginCheck';
 import { checkTracyInit } from './tracyInitCheck';
 import { checkResearchModeConsent, enableResearchModeForRepo, pickResearchModeTier } from './research/researchModeCheck';
-import { getConsentTier, getParticipantContext, isResearchModeEnabled } from './research/consent';
+import { getConsentTier, getOrCreateParticipantId, getParticipantContext, isResearchModeEnabled } from './research/consent';
 import { readRepoConsent, writeRepoConsent } from './research/repoConsent';
 import { clearPendingPayloads, getPendingPayloads, getTodaysSentCount, queueTaskletForSubmission } from './research/queue';
 import { buildTaskletResearchPayloads } from './research/buildResearchPayloads';
@@ -142,7 +142,7 @@ async function updateResearchStatusBar(ctx: vscode.ExtensionContext): Promise<vo
 async function processNewTaskletsForResearch(ctx: vscode.ExtensionContext, h: History, repoPath: string): Promise<void> {
   if (!isResearchModeEnabled(repoPath)) { return; }
 
-  const participant = getParticipantContext(ctx, repoPath);
+  const participant = await getParticipantContext(ctx, repoPath);
   const payloads = buildTaskletResearchPayloads(h, getConsentTier(repoPath), participant);
 
   for (const payload of payloads) {
@@ -277,17 +277,25 @@ export async function activate(context: vscode.ExtensionContext) {
       const action = await vscode.window.showInformationMessage(
         `Tracybot Research Mode: sent ${count} tasklet${count === 1 ? '' : 's'} today. ` +
         `${pending.length} total pending.`,
-        'View Pending Data',
+        'View Pending',
+        'Copy ID',
         'Change Tier',
-        'Disable for This Repo'
+        'Disable'
       );
 
-      if (action === 'View Pending Data') {
+      if (action === 'View Pending') {
         const doc = await vscode.workspace.openTextDocument({
           content: JSON.stringify(pending, null, 2),
           language: 'json',
         });
         await vscode.window.showTextDocument(doc);
+      } else if (action === 'Copy ID') {
+        // Only reachable from this already-opted-in menu — nothing shows this
+        // to a participant who hasn't enabled Research Mode. Useful for e.g. a
+        // classroom study where students self-report this id through a
+        // separate, out-of-band roster rather than the tool ever identifying them.
+        await vscode.env.clipboard.writeText(getOrCreateParticipantId(context));
+        vscode.window.showInformationMessage('Participant ID copied to clipboard.');
       } else if (action === 'Change Tier') {
         const tier = await pickResearchModeTier();
         // Dismissed: leave the existing tier untouched — this is a change,
@@ -296,7 +304,7 @@ export async function activate(context: vscode.ExtensionContext) {
           writeRepoConsent(repoPath, { ...consent, consentTier: tier });
           vscode.window.showInformationMessage(`Research Mode tier changed to Tier ${tier} for this repository.`);
         }
-      } else if (action === 'Disable for This Repo') {
+      } else if (action === 'Disable') {
         writeRepoConsent(repoPath, { decision: 'declined' });
         vscode.window.showInformationMessage('Tracybot Research Mode disabled for this repository.');
         await updateResearchStatusBar(context);
