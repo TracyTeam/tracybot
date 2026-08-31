@@ -277,19 +277,19 @@ export async function activate(context: vscode.ExtensionContext) {
       const action = await vscode.window.showInformationMessage(
         `Tracybot Research Mode: sent ${count} tasklet${count === 1 ? '' : 's'} today. ` +
         `${pending.length} total pending.`,
-        'View Pending Data',
-        'Copy Participant ID',
+        'View Pending',
+        'Copy ID',
         'Change Tier',
-        'Disable for This Repo'
+        'Disable'
       );
 
-      if (action === 'View Pending Data') {
+      if (action === 'View Pending') {
         const doc = await vscode.workspace.openTextDocument({
           content: JSON.stringify(pending, null, 2),
           language: 'json',
         });
         await vscode.window.showTextDocument(doc);
-      } else if (action === 'Copy Participant ID') {
+      } else if (action === 'Copy ID') {
         // Only reachable from this already-opted-in menu — nothing shows this
         // to a participant who hasn't enabled Research Mode. Useful for e.g. a
         // classroom study where students self-report this id through a
@@ -304,7 +304,7 @@ export async function activate(context: vscode.ExtensionContext) {
           writeRepoConsent(repoPath, { ...consent, consentTier: tier });
           vscode.window.showInformationMessage(`Research Mode tier changed to Tier ${tier} for this repository.`);
         }
-      } else if (action === 'Disable for This Repo') {
+      } else if (action === 'Disable') {
         writeRepoConsent(repoPath, { decision: 'declined' });
         vscode.window.showInformationMessage('Tracybot Research Mode disabled for this repository.');
         await updateResearchStatusBar(context);
