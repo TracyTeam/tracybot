@@ -21,6 +21,10 @@ Tiers are additive — each includes everything in the tier below it.
 
 The developer's own (non-AI) code is never collected, regardless of tier.
 
+## Requesting or deleting your data
+
+The Research Mode status bar item's menu has a "Request My Data" action (only shown once a repo has opted in — there's nothing to request otherwise). It copies your `participant_id` and shows it in a message; email that ID to lirongy@chalmers.se to request a copy or deletion of everything linked to it. There's no automated export/delete pipeline yet, so fulfillment is manual on our end. This is also how a participant in a supervised study (e.g. a classroom) can self-report their id to the researcher, since the tool itself never ties `participant_id` to a real identity.
+
 ## What gets collected
 
 One payload per Tasklet, built by `vscode-extension/src/research/buildResearchPayloads.ts` from `buildHistory()`'s output. See `vscode-extension/src/research/types.ts` for the exact field list per tier.

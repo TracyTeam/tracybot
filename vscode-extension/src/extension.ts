@@ -196,6 +196,11 @@ let statusBarItem: vscode.StatusBarItem;
 // windows that stay open that long, without polling any more often than that.
 const AGENT_RECHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
+// Where a participant emails their participant_id to request a copy or
+// deletion of the data linked to it (GDPR access/erasure) — Tracybot itself
+// has no automated export/delete pipeline yet, so this is a manual handoff.
+const RESEARCH_DATA_REQUEST_EMAIL = 'lirongy@chalmers.se';
+
 // Activate function
 export async function activate(context: vscode.ExtensionContext) {
   // git extension is a hard requirement for some functions
@@ -278,7 +283,7 @@ export async function activate(context: vscode.ExtensionContext) {
         `Tracybot Research Mode: sent ${count} tasklet${count === 1 ? '' : 's'} today. ` +
         `${pending.length} total pending.`,
         'View Pending',
-        'Copy ID',
+        'Request My Data',
         'Change Tier',
         'Disable'
       );
@@ -289,13 +294,22 @@ export async function activate(context: vscode.ExtensionContext) {
           language: 'json',
         });
         await vscode.window.showTextDocument(doc);
-      } else if (action === 'Copy ID') {
+      } else if (action === 'Request My Data') {
         // Only reachable from this already-opted-in menu — nothing shows this
-        // to a participant who hasn't enabled Research Mode. Useful for e.g. a
-        // classroom study where students self-report this id through a
-        // separate, out-of-band roster rather than the tool ever identifying them.
-        await vscode.env.clipboard.writeText(getOrCreateParticipantId(context));
-        vscode.window.showInformationMessage('Participant ID copied to clipboard.');
+        // to a participant who hasn't enabled Research Mode, since there's no
+        // data to request otherwise. Framed around a data-rights request (an
+        // export or deletion of everything tied to this id) rather than just
+        // "copy id", both because that's clearer to a general (non-student)
+        // participant and because it's the access/erasure mechanism GDPR
+        // requires us to offer. Tracybot has no automated fulfillment yet —
+        // this just gets the id in front of the participant and tells them
+        // who to send it to; the actual export/deletion is handled manually.
+        const participantId = getOrCreateParticipantId(context);
+        await vscode.env.clipboard.writeText(participantId);
+        vscode.window.showInformationMessage(
+          `Your participant ID (copied to clipboard): ${participantId}. ` +
+          `Email ${RESEARCH_DATA_REQUEST_EMAIL} with this ID to request a copy or deletion of your data.`
+        );
       } else if (action === 'Change Tier') {
         const tier = await pickResearchModeTier();
         // Dismissed: leave the existing tier untouched — this is a change,
