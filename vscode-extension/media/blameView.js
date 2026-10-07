@@ -6,6 +6,7 @@
 
   let selectedTaskletId = null;
   let selectedLine = null;
+  const navStack = [];
 
   const tbody = document.getElementById('code-body');
 
@@ -99,6 +100,7 @@
   function handleLineClick(lineIdx) {
     const ownerId = LINE_MAP[String(lineIdx)];
     if (ownerId === undefined) { return; }
+    navStack.length = 0;
 
     // Toggle off if clicking the already-selected line of the same tasklet.
     if (selectedLine === lineIdx && selectedTaskletId === ownerId) {
@@ -238,6 +240,7 @@
     promptContent.innerHTML = `
       <div class="tasklet-card">
         <div class="card-nav">
+          ${backButtonHtml()}
           <div class="card-title">${esc(t.name)}</div>
           <button class="menu-btn" id="all-tasklets-btn">All Tasklets</button>
         </div>
@@ -270,7 +273,10 @@
       });
     });
 
+    bindBackButton();
+
     document.getElementById('all-tasklets-btn').addEventListener('click', () => {
+      navStack.push({ taskletId: selectedTaskletId, line: selectedLine });
       showTaskletMenu();
       clearSelection();
       selectedTaskletId = null;
@@ -288,6 +294,7 @@
     const t = TASKLETS[taskletId];
     if (!t || t.lines.length === 0) { return; }
 
+    navStack.push({ taskletId: selectedTaskletId, line: selectedLine });
     selectedTaskletId = taskletId;
 
     // Move the selected line to the live line of this tasklet nearest the
@@ -310,6 +317,36 @@
     if (tr) { tr.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
   }
 
+  // ── Back navigation ───────────────────────────────────────────────────────
+  // A null taskletId in navStack means the All Tasklets menu.
+
+  function backButtonHtml() {
+    return navStack.length > 0 ? `<button class="menu-btn back-btn" id="back-btn">← Back</button>` : '';
+  }
+
+  function bindBackButton() {
+    const backBtn = document.getElementById('back-btn');
+    if (backBtn) { backBtn.addEventListener('click', goBack); }
+  }
+
+  function goBack() {
+    const prev = navStack.pop();
+    if (!prev) { return; }
+    selectedTaskletId = prev.taskletId;
+    selectedLine = prev.line;
+
+    if (selectedTaskletId === null) {
+      clearSelection();
+      showTaskletMenu();
+      return;
+    }
+
+    applySelection(selectedTaskletId);
+    showPrompt(selectedTaskletId);
+    const tr = tbody.querySelector(`tr[data-line="${selectedLine}"]`);
+    if (tr) { tr.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+  }
+
   // ── Tasklet menu ──────────────────────────────────────────────────────────
   // Only tasklets that still own at least one live line are listed; fully
   // overridden tasklets are only reachable via the per-line previous-tasklets
@@ -325,14 +362,18 @@
 
     promptContent.innerHTML = `
       <div class="tasklet-menu">
+        ${backButtonHtml()}
         <div class="menu-title">All Tasklets</div>
         <ul class="tasklet-list">${items}</ul>
       </div>`;
+
+    bindBackButton();
 
     promptContent.querySelectorAll('.tasklet-list li').forEach(li => {
       li.addEventListener('click', () => {
         const id = li.dataset.id;
         const t = TASKLETS[id];
+        navStack.push({ taskletId: null, line: null });
         selectedTaskletId = id;
         // Move the line cursor onto this tasklet's first live line so the
         // previous-tasklets dropdown reflects this tasklet's context.

@@ -166,6 +166,8 @@ body.vscode-high-contrast-light tr.ai-line-cursor td.line-num { box-shadow: inse
   transition: border-color 120ms, color 120ms, background 120ms;
 }
 .menu-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+.back-btn { margin-left: 0; }
+.tasklet-menu .back-btn { margin-bottom: 12px; }
 
 /* ── Section label ── */
 .section-label { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 8px; }
