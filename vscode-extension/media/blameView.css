@@ -196,6 +196,8 @@ body.vscode-high-contrast-light tr.ai-line-cursor td.line-num { box-shadow: inse
 .message-label.build { color: #3794ff; }
 .message-label.plan  { color: #c98b00; }
 
+.plan-messages { display: flex; flex-direction: column; gap: 8px; padding: 4px 14px 14px; }
+
 .message-box p                  { margin: 0 0 8px; }
 .message-box p:last-child       { margin-bottom: 0; }
 .message-box code               { font-family: var(--font-mono); font-size: 11.5px; background: var(--vscode-textCodeBlock-background, rgba(128,128,128,0.15)); padding: 1px 5px; border-radius: 3px; }

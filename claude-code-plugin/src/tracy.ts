@@ -74,11 +74,27 @@ export async function getRepoRoot(cwd: string): Promise<string | undefined> {
 // derived from them instead — tried in order in case an earlier one no
 // longer resolves (e.g. a since-deleted file).
 export async function getRepoRootForEditedFiles(editedFiles: string[]): Promise<string | undefined> {
-    for (const file of editedFiles) {
-        const repoRoot = await getRepoRoot(path.dirname(file))
+    return getFirstRepoRoot(editedFiles.map(file => path.dirname(file)))
+}
+
+// Unlike the Stop-time cwd above, the cwd recorded at PostToolUse is where
+// that Bash command actually ran, so it is a valid fallback when the turn
+// changed files only through the shell.
+export async function getFirstRepoRoot(dirs: string[]): Promise<string | undefined> {
+    for (const dir of dirs) {
+        const repoRoot = await getRepoRoot(dir)
         if (repoRoot) return repoRoot
     }
     return undefined
+}
+
+// The head of the in-progress snapshot chain, read before and after running
+// tracy.py to tell whether it recorded a snapshot or skipped an unchanged tree.
+export async function getLatestSnapshot(repoRoot: string): Promise<string | undefined> {
+    const tracyId = (await $`git config --get tracy.current-id`.cwd(repoRoot).quiet().nothrow()).stdout.toString('utf8').trim()
+    if (!tracyId) return undefined
+    const ref = await $`git rev-parse --verify -q refs/tracy-local/${tracyId}`.cwd(repoRoot).quiet().nothrow()
+    return ref.exitCode === 0 ? ref.stdout.toString('utf8').trim() : undefined
 }
 
 // Same shape of call opencode-plugin makes — tracy.py itself doesn't care

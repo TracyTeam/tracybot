@@ -2,7 +2,7 @@ import { test, expect, afterEach } from "bun:test"
 import path from "path"
 import os from "os"
 import fs from "fs"
-import { getRepoRoot, getRepoRootForEditedFiles } from "./tracy"
+import { getRepoRoot, getRepoRootForEditedFiles, getFirstRepoRoot, getLatestSnapshot } from "./tracy"
 
 const $ = Bun.$
 
@@ -58,4 +58,24 @@ test("getRepoRootForEditedFiles returns undefined when no edited file resolves t
 
     const resolved = await getRepoRootForEditedFiles([file])
     expect(resolved).toBeUndefined()
+})
+
+test("getFirstRepoRoot resolves the first directory that is inside a repo", async () => {
+    const outsideAnyRepo = fs.mkdtempSync(path.join(os.tmpdir(), "tracy-no-repo-test-"))
+    tmpDirs.push(outsideAnyRepo)
+    const repo = await makeRepo()
+
+    expect(await getFirstRepoRoot([outsideAnyRepo, repo])).toBe(fs.realpathSync(repo))
+})
+
+test("getLatestSnapshot returns the head of the current snapshot chain, or undefined when there is none", async () => {
+    const repo = await makeRepo()
+    expect(await getLatestSnapshot(repo)).toBeUndefined()
+
+    const tree = (await $`git write-tree`.cwd(repo).text()).trim()
+    const commit = (await $`git commit-tree ${tree} -m snapshot`.cwd(repo).env({ ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t" }).text()).trim()
+    await $`git config tracy.current-id chain-1`.cwd(repo).quiet()
+    await $`git update-ref refs/tracy-local/chain-1 ${commit}`.cwd(repo).quiet()
+
+    expect(await getLatestSnapshot(repo)).toBe(commit)
 })

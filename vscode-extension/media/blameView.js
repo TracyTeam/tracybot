@@ -179,6 +179,23 @@
     return LINE_PREVIOUS[String(lineIdx)] || [];
   }
 
+  function renderMessage(msg) {
+    const questionsHtml = (msg.questions && msg.questions.length > 0)
+      ? msg.questions.map(q => `
+          <div class="question-item">
+            <div class="question-header">${esc(q.header)}</div>
+            <div class="question-text">${esc(q.question)}</div>
+          </div>
+        `).join('')
+      : '';
+    return `
+      <div>
+        <div class="message-label ${esc(msg.stage)}">${esc(msg.stage)} · ${esc(msg.type)}${msg.type === 'response' && msg.model ? ` · ${esc(msg.model)}` : ''}</div>
+        <div class="message-box ${esc(msg.type)} ${esc(msg.stage)}">${renderMd(msg.message)}</div>
+        ${questionsHtml ? `<div class="questions-section">${questionsHtml}</div>` : ''}
+      </div>`;
+  }
+
   function showPrompt(taskletId) {
     const t = TASKLETS[taskletId];
     if (!t) { return; }
@@ -190,23 +207,18 @@
       return `<span class="line-chip" data-first="${first}" data-last="${last}">${label}</span>`;
     }).join('');
 
-    const messagesHtml = (t.messages && t.messages.length > 0)
-      ? t.messages.map(msg => {
-          const questionsHtml = (msg.questions && msg.questions.length > 0)
-            ? msg.questions.map(q => `
-                <div class="question-item">
-                  <div class="question-header">${esc(q.header)}</div>
-                  <div class="question-text">${esc(q.question)}</div>
-                </div>
-              `).join('')
-            : '';
-          return `
-            <div>
-              <div class="message-label ${esc(msg.stage)}">${esc(msg.stage)} · ${esc(msg.type)}${msg.type === 'response' && msg.model ? ` · ${esc(msg.model)}` : ''}</div>
-              <div class="message-box ${esc(msg.type)} ${esc(msg.stage)}">${renderMd(msg.message)}</div>
-              ${questionsHtml ? `<div class="questions-section">${questionsHtml}</div>` : ''}
-            </div>`;
-        }).join('')
+    const messages = t.messages || [];
+    const planMessages = messages.filter(msg => msg.stage === 'plan');
+    const planHtml = planMessages.length > 0
+      ? `
+        <details class="prev-dropdown plan-context">
+          <summary>Earlier context (${planMessages.length} message${planMessages.length !== 1 ? 's' : ''})</summary>
+          <div class="plan-messages">${planMessages.map(renderMessage).join('')}</div>
+        </details>`
+      : '';
+
+    const messagesHtml = messages.length > 0
+      ? planHtml + messages.filter(msg => msg.stage !== 'plan').map(renderMessage).join('')
       : `<div class="message-box prompt build"><p><em>No messages recorded for this tasklet.</em></p></div>`;
 
     const linesCount = t.lines.length;

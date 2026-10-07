@@ -29,7 +29,7 @@ const AGENTS: HookAgentConfig[] = [
     hooksConfigPath: path.join(homedir(), '.claude', 'settings.json'),
     hookScriptFilename: 'tracybot-cc-hook.js',
     installDir: path.join(homedir(), '.claude', 'tracybot'),
-    postToolUseMatcher: 'Edit|Write|MultiEdit',
+    postToolUseMatcher: 'Edit|Write|MultiEdit|Bash',
     failureCooldownKey: 'tracybot.claudeCodeInstallFailureAt',
   },
   {
@@ -89,17 +89,23 @@ function loadHooksConfig(configPath: string): any {
   }
 }
 
+function findHookEntry(hookList: any[] | undefined, command: string): any | undefined {
+  return (hookList ?? []).find((entry: any) => (entry.hooks ?? []).some((h: any) => h.command === command));
+}
+
 function hasHookCommand(hookList: any[] | undefined, command: string): boolean {
-  return (hookList ?? []).some((entry: any) => (entry.hooks ?? []).some((h: any) => h.command === command));
+  return findHookEntry(hookList, command) !== undefined;
 }
 
 // Checks both hooks installHooks() manages — checking only PostToolUse would
 // report "already configured" (and skip forever) even if Stop were somehow
 // missing, e.g. a user manually edited the config and removed just that one.
+// The matcher is compared too, so an install from before a tool was added to
+// it gets updated rather than skipped.
 function isAlreadyConfigured(agent: HookAgentConfig, scriptPath: string, bunPath: string): boolean {
   const config = loadHooksConfig(agent.hooksConfigPath);
   if (!config?.hooks) { return false; }
-  return hasHookCommand(config.hooks.PostToolUse, `${bunPath} ${scriptPath} post-tool-use`)
+  return findHookEntry(config.hooks.PostToolUse, `${bunPath} ${scriptPath} post-tool-use`)?.matcher === agent.postToolUseMatcher
     && hasHookCommand(config.hooks.Stop, `${bunPath} ${scriptPath} stop`);
 }
 
@@ -128,7 +134,10 @@ function installHooks(agent: HookAgentConfig, scriptPath: string, bunPath: strin
 
   config.hooks.PostToolUse ??= [];
   const postToolUseCommand = `${bunPath} ${scriptPath} post-tool-use`;
-  if (!hasHookCommand(config.hooks.PostToolUse, postToolUseCommand)) {
+  const postToolUseEntry = findHookEntry(config.hooks.PostToolUse, postToolUseCommand);
+  if (postToolUseEntry) {
+    postToolUseEntry.matcher = agent.postToolUseMatcher;
+  } else {
     config.hooks.PostToolUse.push({
       matcher: agent.postToolUseMatcher,
       hooks: [{ type: 'command', command: postToolUseCommand }],
