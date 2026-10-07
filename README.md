@@ -40,7 +40,7 @@ Available on the [VS Code Marketplace](https://marketplace.visualstudio.com/item
 
 ### 1. Install the VS Code Extension
 
-This is the entry point to Tracybot. The extension can open AI Blame, automatically initializes Tracybot in the current repository, and automatically installs plugins for any supported agent it detects on your machine.
+This is the entry point to Tracybot. The extension can open AI Blame, offers to initialize Tracybot in the repositories you open, and automatically installs plugins for any supported agent it detects on your machine.
 
 You can install the extension directly within VS Code:
 1. Open VS Code and go to the **Extensions** view (`Ctrl+Shift+X` or `Cmd+Shift+X`).
@@ -53,7 +53,7 @@ Alternatively, visit the [Tracybot VS Code Marketplace page](https://marketplace
 
 When the extension activates, it adds an `AI Blame` status bar item on the right side of VS Code.
 
-If Tracybot has not been initialized in the open repository yet, the extension initializes it automatically.
+If Tracybot has not been initialized in the open repository yet, the extension asks whether to initialize it: **Initialize**, **Not now** (asked again next time), or **Never for this project**. You can initialize later with the **Tracybot: Initialize in This Repository** command. Once a repository is initialized, the extension asks whether to enable [Research Mode](./docs/research-mode.md) for it.
 
 If you prefer to initialize from the terminal instead, run:
 

@@ -11,7 +11,7 @@ The extension queries the Git repository to reconstruct the history of AI intera
 2. Extracting metadata from commit objects
 3. Building a timeline that maps code changes to AI interactions
 
-It also handles setup automatically: initializing Tracybot in a newly opened repository, and installing the plugin for whichever supported agent (OpenCode, Claude Code, Codex) is detected on your machine. No setup steps are required beyond installing the extension itself.
+It also handles setup: it asks before initializing Tracybot in a newly opened repository (or run **Tracybot: Initialize in This Repository** from the Command Palette), and installs the plugin for whichever supported agent (OpenCode, Claude Code, Codex) is detected on your machine.
 
 ## Installation
 

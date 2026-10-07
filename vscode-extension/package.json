@@ -46,6 +46,10 @@
         "title": "Tracybot: Invalidate History Cache"
       },
       {
+        "command": "tracybot-extension.initRepo",
+        "title": "Tracybot: Initialize in This Repository"
+      },
+      {
         "command": "tracybot-extension.reviewResearchDigest",
         "title": "Tracybot: Manage Research Mode"
       }
