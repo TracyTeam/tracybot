@@ -58,7 +58,7 @@ suite('buildHistory failure reasons', () => {
 // Builds a real hidden tracy-local commit on top of `parent`, matching the
 // exact shape claude-code-plugin/tracy.py produces: subject line is a bare
 // tasklet id, body is the JSON turn record, author/committer is the agent.
-function commitAiEdit(dir: string, parentHash: string, taskletId: string, sessionId: string, prompt: string, timestamp: number): string {
+function commitAiEdit(dir: string, parentHash: string, taskletId: string, sessionId: string, prompt: string, timestamp: number, extra: Record<string, unknown> = {}): string {
   const tree = execSync('git write-tree', { cwd: dir, encoding: 'utf8' }).trim();
   const body = JSON.stringify({
     id: taskletId,
@@ -69,6 +69,7 @@ function commitAiEdit(dir: string, parentHash: string, taskletId: string, sessio
     response: `Did: ${prompt}`,
     promptCreatedAt: timestamp,
     responseCompletedAt: timestamp,
+    ...extra,
   });
   const message = `${taskletId}\n\n${body}`;
   const commit = execSync(`git commit-tree ${tree} -p ${parentHash}`, {
@@ -207,6 +208,38 @@ suite('buildHistory significance filtering across a tracy-local chain', () => {
       !tasklet || tasklet.lines.length === 0,
       'a tiny User->AI edit must not be credited to AI as a live line'
     );
+  });
+});
+
+suite('buildHistory shows earlier non-editing Claude Code turns as the Plan stage', () => {
+  test('context turns become plan messages and the first one becomes the title', async () => {
+    const dir = makeTempDir();
+    initRepoWithCommit(dir);
+    const baseCommit = execSync('git rev-parse HEAD', { cwd: dir, encoding: 'utf8' }).trim();
+
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'hello\nrequest id\n');
+    execSync('git add a.txt', { cwd: dir });
+    const commit = commitAiEdit(dir, baseCommit, 'tasklet-1', 'sess1', 'yes', 1000, {
+      context: [{ prompt: 'I want to add a small feature, what can it be', response: '1. Request IDs' }],
+    });
+
+    execSync(`git update-ref refs/tracy-local/chain-1 ${commit}`, { cwd: dir });
+    execSync('git config tracy.current-id chain-1', { cwd: dir });
+    execSync(`git reset -q --mixed ${baseCommit}`, { cwd: dir });
+
+    const result = await buildHistory(dir);
+    assert.strictEqual(result.ok, true);
+    if (!result.ok) { return; }
+
+    const tasklet = result.history.files.find(f => f.path === 'a.txt')?.tasklets.find(t => t.taskletId === 'tasklet-1');
+    assert.ok(tasklet, 'the AI edit should be attributed');
+    assert.strictEqual(tasklet!.name, 'I want to add a small feature, what can it be');
+    assert.deepStrictEqual(tasklet!.messages.map(m => `${m.stage}/${m.type}: ${m.message}`), [
+      'plan/prompt: I want to add a small feature, what can it be',
+      'plan/response: 1. Request IDs',
+      'build/prompt: yes',
+      'build/response: Did: yes',
+    ]);
   });
 });
 
