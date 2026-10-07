@@ -6,7 +6,8 @@ import { getBlameViewHtml } from './blameView';
 import { getRepoPath, mergeRemoteNotes } from './utils';
 import { checkOpencode } from './pluginCheck';
 import { checkHookBasedAgents } from './hookAgentPluginCheck';
-import { checkTracyInit } from './tracyInitCheck';
+import { checkTracyInit, initializeRepo } from './tracyInitCheck';
+import { isTracyInitialized } from './initState';
 import { checkResearchModeConsent, enableResearchModeForRepo, pickResearchModeTier } from './research/researchModeCheck';
 import { getConsentTier, getOrCreateParticipantId, getParticipantContext, isResearchModeEnabled } from './research/consent';
 import { readRepoConsent, writeRepoConsent } from './research/repoConsent';
@@ -209,11 +210,14 @@ export async function activate(context: vscode.ExtensionContext) {
     return undefined;
   }
 
-  const runInitialChecks = () => {
-    checkTracyInit(context);
+  // Research Mode is only asked about once the repo is initialized, since
+  // there is no Tasklet history to share otherwise.
+  const runInitialChecks = async () => {
     checkOpencode(context);
     checkHookBasedAgents(context);
-    checkResearchModeConsent(context);
+    if (await checkTracyInit(context)) {
+      await checkResearchModeConsent(context);
+    }
   };
 
   runInitialChecks();
@@ -253,6 +257,13 @@ export async function activate(context: vscode.ExtensionContext) {
       const consent = readRepoConsent(repoPath);
 
       if (!consent) {
+        if (!isTracyInitialized(repoPath)) {
+          const action = await vscode.window.showInformationMessage(
+            'Research Mode needs Tracybot to be initialized in this repository first.',
+            'Initialize'
+          );
+          if (action !== 'Initialize' || !(await initializeRepo(context))) { return; }
+        }
         await checkResearchModeConsent(context);
         await updateResearchStatusBar(context);
         return;
@@ -369,6 +380,17 @@ export async function activate(context: vscode.ExtensionContext) {
       const fileTasklets = relativePath ? (fileTaskletsMap.get(relativePath) ?? []) : [];
 
       if (!fileMap || fileMap.size === 0) {
+        const repoPath = await getRepoPath();
+        if (repoPath && !isTracyInitialized(repoPath)) {
+          const action = await vscode.window.showInformationMessage(
+            'AI Blame: Tracybot isn\'t initialized in this repository, so no AI changes are being recorded.',
+            'Initialize'
+          );
+          if (action === 'Initialize') {
+            await vscode.commands.executeCommand('tracybot-extension.initRepo');
+          }
+          return;
+        }
         vscode.window.showInformationMessage(
           `AI Blame: No AI-generated lines found in "${fileName}".`
         );
@@ -414,6 +436,18 @@ export async function activate(context: vscode.ExtensionContext) {
     }
     refreshHistory();
   };
+
+  // Initialize — the way back for a repo that was declined (or dismissed)
+  // at the prompt checkTracyInit shows on open.
+  context.subscriptions.push(
+    vscode.commands.registerCommand('tracybot-extension.initRepo', async () => {
+      if (await initializeRepo(context)) {
+        await checkResearchModeConsent(context);
+        await updateResearchStatusBar(context);
+        refreshHistory();
+      }
+    })
+  );
 
   // clearCache — clears the history cache
   context.subscriptions.push(
