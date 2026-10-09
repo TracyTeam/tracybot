@@ -4,6 +4,7 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { getRepoPath } from './utils';
 import { clearFailureCooldown, notifyFailureOnce } from './failureCooldown';
+import { resolveGitDir } from './gitDir';
 
 // A failed init (e.g. no Python) gets a cooldown, not a permanent skip — same
 // rationale as hookAgentPluginCheck.ts: a since-fixed problem (Python
@@ -52,7 +53,7 @@ export async function checkTracyInit(context: vscode.ExtensionContext): Promise<
   const repoPath = await getRepoPath();
   if (!repoPath) { return; }
 
-  const tracyConfig = path.join(repoPath, '.git', 'tracybot', 'config');
+  const tracyConfig = path.join(resolveGitDir(repoPath), 'tracybot', 'config');
   if (fs.existsSync(tracyConfig) && isTracySnapshotScriptValid(tracyConfig)) {
     await clearFailureCooldown(context.globalState, INIT_FAILURE_COOLDOWN_KEY);
     return;
