@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { resolveGitDir } from '../gitDir';
 
 // Research Mode consent is per-repository, not machine-wide — a participant
 // agreeing to share one project's Tasklet history shouldn't silently enroll
@@ -13,7 +14,7 @@ export type RepoConsent =
   | { decision: 'declined' };
 
 function consentFilePath(repoPath: string): string {
-  return path.join(repoPath, '.git', 'tracybot', 'research-consent.json');
+  return path.join(resolveGitDir(repoPath), 'tracybot', 'research-consent.json');
 }
 
 export function readRepoConsent(repoPath: string): RepoConsent | undefined {
