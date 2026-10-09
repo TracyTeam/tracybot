@@ -27,6 +27,18 @@ def run_git(repo, args, capture=False, check=False):
         return None if capture else False
 
 
+# In a linked worktree or submodule `.git` is a file ("gitdir: ..."), not a
+# directory, so `<repo>/.git/tracybot` can't exist. Everything Tracybot keeps
+# under the git dir (config, hooks) lives in the *common* git dir, which is
+# also where git itself looks for hooks and where pre-commit.py reads its
+# config from (the parent of the hooks dir).
+def resolve_git_dir(repo):
+    common = run_git(repo, ["rev-parse", "--git-common-dir"], capture=True)
+    if not common:
+        return Path(repo) / ".git"
+    return (Path(repo) / common).resolve()
+
+
 def find_repo(start: Path):
     current = start.resolve()
     while current != current.parent:
@@ -82,9 +94,7 @@ def main():
             sys.exit(1)
 
     repo = str(repo)
-    git_dir = Path(repo) / ".git"
-
-    git_dir = Path(repo) / ".git"
+    git_dir = resolve_git_dir(repo)
     tracy_dir = git_dir / "tracybot"
     script_source = Path(__file__).resolve().parent / "tracking" / "tracy.py"
     tracy_dir.mkdir(parents=True, exist_ok=True)
