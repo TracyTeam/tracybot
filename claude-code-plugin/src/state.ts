@@ -79,6 +79,18 @@ async function readSavedContextTurns(sessionId: string): Promise<SavedContextTur
     return file.json() as Promise<SavedContextTurn[]>
 }
 
+// Removes only the given repo's turns once they've been attached to its
+// snapshot — a discussion about another repo in the same session is still
+// waiting for that repo's next change.
+export async function clearRepoContextTurns(sessionId: string, repoRoot: string): Promise<void> {
+    const remaining = (await readSavedContextTurns(sessionId)).filter(turn => turn.repoRoot !== repoRoot)
+    if (remaining.length === 0) {
+        await clearContextTurns(sessionId)
+    } else {
+        await writePrivate(contextPath(sessionId), JSON.stringify(remaining))
+    }
+}
+
 export async function clearContextTurns(sessionId: string): Promise<void> {
     const file = Bun.file(contextPath(sessionId))
     if (await file.exists()) {

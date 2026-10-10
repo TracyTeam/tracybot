@@ -2,7 +2,7 @@ import { test, expect, afterEach } from "bun:test"
 import path from "path"
 import os from "os"
 import fs from "fs"
-import { appendContextTurn, readContextTurns, clearContextTurns, MAX_CONTEXT_TURNS, markFileEdited, markBashRan, readPendingTurn, clearPendingTurn } from "./state"
+import { appendContextTurn, readContextTurns, clearContextTurns, clearRepoContextTurns, MAX_CONTEXT_TURNS, markFileEdited, markBashRan, readPendingTurn, clearPendingTurn } from "./state"
 
 const sessionIds: string[] = []
 
@@ -64,6 +64,16 @@ test("clearContextTurns removes the context so it isn't attached to a later edit
     await clearContextTurns(id)
 
     expect(await readContextTurns(id, "/repo/a")).toEqual([])
+})
+
+test("clearRepoContextTurns removes only that repo's turns", async () => {
+    const id = sessionId()
+    await appendContextTurn(id, "/repo/a", { prompt: "about a", response: "" })
+    await appendContextTurn(id, "/repo/b", { prompt: "about b", response: "ok" })
+    await clearRepoContextTurns(id, "/repo/b")
+
+    expect(await readContextTurns(id, "/repo/b")).toEqual([])
+    expect(await readContextTurns(id, "/repo/a")).toEqual([{ prompt: "about a", response: "" }])
 })
 
 test("markBashRan records each working directory once, alongside edited files", async () => {
