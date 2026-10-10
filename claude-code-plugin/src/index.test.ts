@@ -125,3 +125,26 @@ test("a discussion turn in another repo is never attached to this repo's change"
     expect(turn?.prompt).toBe("rename it")
     expect(turn?.context).toEqual([])
 })
+
+test("a change in one repo keeps another repo's discussion for that repo's next change", async () => {
+    const repoA = await makeRepo()
+    const repoB = await makeRepo()
+    const transcriptDir = fs.mkdtempSync(path.join(os.tmpdir(), "tracy-transcript-test-"))
+    tmpDirs.push(transcriptDir)
+    const id = sessionId()
+
+    await runHook("stop", { session_id: id, cwd: repoA, transcript_path: writeTranscript(transcriptDir, "what should we rename in A?"), last_assistant_message: "TOKEN_REGEXP." })
+
+    fs.writeFileSync(path.join(repoB, "app.js"), "var B_REGEXP = /x/;\n")
+    await runHook("post-tool-use", { session_id: id, cwd: repoB, tool_name: "Bash", tool_input: { command: "sed -i '' ... app.js" } })
+    await runHook("stop", { session_id: id, cwd: repoB, transcript_path: writeTranscript(transcriptDir, "fix B first"), last_assistant_message: "Fixed." })
+
+    fs.writeFileSync(path.join(repoA, "app.js"), "var SERVER_TIMING_NAME_REGEXP = /x/;\n")
+    await runHook("post-tool-use", { session_id: id, cwd: repoA, tool_name: "Bash", tool_input: { command: "sed -i '' ... app.js" } })
+    await runHook("stop", { session_id: id, cwd: repoA, transcript_path: writeTranscript(transcriptDir, "now do A"), last_assistant_message: "Renamed." })
+
+    expect((await latestSnapshotTurn(repoB))?.context).toEqual([])
+    const turnA = await latestSnapshotTurn(repoA)
+    expect(turnA?.prompt).toBe("now do A")
+    expect(turnA?.context).toEqual([{ prompt: "what should we rename in A?", response: "TOKEN_REGEXP." }])
+})

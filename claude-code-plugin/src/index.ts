@@ -1,4 +1,4 @@
-import { markFileEdited, markBashRan, readPendingTurn, clearPendingTurn, appendContextTurn, readContextTurns, clearContextTurns } from "./state"
+import { markFileEdited, markBashRan, readPendingTurn, clearPendingTurn, appendContextTurn, readContextTurns, clearRepoContextTurns } from "./state"
 import { extractTurnContext } from "./transcript"
 import { getRepoRootForEditedFiles, getFirstRepoRoot, getLatestSnapshot, resolveTracyPath, detectPythonCommand, runTracySnapshot } from "./tracy"
 import type { ClaudeTurn, PendingTurnState } from "./types"
@@ -45,8 +45,9 @@ async function handleStop(): Promise<void> {
     const { prompt, model } = await extractTurnContext(input.transcript_path)
     const response = input.last_assistant_message ?? ""
 
-    if (pending && await recordSnapshot(input.session_id, pending, prompt, model, response)) {
-        await clearContextTurns(input.session_id)
+    const recordedRepoRoot = pending && await recordSnapshot(input.session_id, pending, prompt, model, response)
+    if (recordedRepoRoot) {
+        await clearRepoContextTurns(input.session_id, recordedRepoRoot)
     } else if (prompt && !pending?.editedFiles.length) {
         // Nothing changed this turn — mirrors OpenCode's toolCount > 0 gate,
         // but keep the turn as context for the next one that does change
@@ -59,20 +60,21 @@ async function handleStop(): Promise<void> {
     }
 }
 
-// Returns whether tracy.py actually recorded a snapshot. It skips when the
-// tree is unchanged, e.g. a turn whose Bash commands only read files.
-async function recordSnapshot(sessionId: string, pending: PendingTurnState, prompt: string, model: string, response: string): Promise<boolean> {
+// Returns the repo tracy.py recorded a snapshot in, or undefined if it
+// didn't. It skips when the tree is unchanged, e.g. a turn whose Bash
+// commands only read files.
+async function recordSnapshot(sessionId: string, pending: PendingTurnState, prompt: string, model: string, response: string): Promise<string | undefined> {
     // Derived from the edited files, or where Bash ran, not the Stop event's
     // cwd — see getRepoRootForEditedFiles for why that can't be trusted.
     const repoRoot = (await getRepoRootForEditedFiles(pending.editedFiles))
         ?? (await getFirstRepoRoot(pending.bashCwds ?? []))
-    if (!repoRoot) return false
+    if (!repoRoot) return undefined
 
     const tracyPath = await resolveTracyPath(repoRoot)
-    if (!tracyPath) return false // Tracybot not initialized in this repo
+    if (!tracyPath) return undefined // Tracybot not initialized in this repo
 
     const pythonCmd = await detectPythonCommand()
-    if (!pythonCmd) return false
+    if (!pythonCmd) return undefined
 
     const now = Date.now()
     const turn: ClaudeTurn = {
@@ -95,7 +97,7 @@ async function recordSnapshot(sessionId: string, pending: PendingTurnState, prom
 
     const before = await getLatestSnapshot(repoRoot)
     await runTracySnapshot(pythonCmd, tracyPath, repoRoot, JSON.stringify(turn), sessionId)
-    return (await getLatestSnapshot(repoRoot)) !== before
+    return (await getLatestSnapshot(repoRoot)) !== before ? repoRoot : undefined
 }
 
 async function main(): Promise<void> {
