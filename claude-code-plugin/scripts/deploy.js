@@ -51,8 +51,14 @@ function hookCommand(event) {
     return `${resolveBunPath()} ${DIST_PATH} ${event}`
 }
 
+const POST_TOOL_USE_MATCHER = 'Edit|Write|MultiEdit|Bash'
+
+function findEntry(hookList, command) {
+    return (hookList ?? []).find(entry => (entry.hooks ?? []).some(h => h.command === command))
+}
+
 function hasCommand(hookList, command) {
-    return (hookList ?? []).some(entry => (entry.hooks ?? []).some(h => h.command === command))
+    return findEntry(hookList, command) !== undefined
 }
 
 function installHooks(settings) {
@@ -60,12 +66,16 @@ function installHooks(settings) {
 
     settings.hooks.PostToolUse ??= []
     const postToolUseCommand = hookCommand('post-tool-use')
-    if (!hasCommand(settings.hooks.PostToolUse, postToolUseCommand)) {
+    const postToolUseEntry = findEntry(settings.hooks.PostToolUse, postToolUseCommand)
+    if (!postToolUseEntry) {
         settings.hooks.PostToolUse.push({
-            matcher: 'Edit|Write|MultiEdit',
+            matcher: POST_TOOL_USE_MATCHER,
             hooks: [{ type: 'command', command: postToolUseCommand }],
         })
         console.log('  Added PostToolUse hook')
+    } else if (postToolUseEntry.matcher !== POST_TOOL_USE_MATCHER) {
+        postToolUseEntry.matcher = POST_TOOL_USE_MATCHER
+        console.log('  Updated PostToolUse hook matcher')
     } else {
         console.log('  PostToolUse hook already present')
     }

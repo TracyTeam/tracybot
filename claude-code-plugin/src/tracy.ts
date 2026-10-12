@@ -1,10 +1,34 @@
 import path from "path"
+import fs from "fs"
 
 // Bun.$ (the shell API) is used as the ambient global here, matching how
 // Bun.file/Bun.write/Bun.stdin are used elsewhere in this package — importing
 // `{ $ } from "bun"` instead trips up tsup/esbuild, which doesn't know how to
 // resolve Bun's built-in module specifier.
 const $ = Bun.$
+
+// `.git` is a file ("gitdir: ..."), not a directory, in a linked worktree or a
+// submodule, so `<repo>/.git/tracybot/...` can't exist there. Tracybot keeps
+// its config in the *common* git dir (where init.py writes it and where the
+// git hooks live), which for a linked worktree is found through the
+// `commondir` pointer inside the worktree's own git dir.
+export function resolveGitDir(repoRoot: string): string {
+    const dotGit = path.join(repoRoot, ".git")
+    try {
+        if (!fs.statSync(dotGit).isFile()) return dotGit
+        const target = fs.readFileSync(dotGit, "utf8").match(/^gitdir:\s*(.+)$/m)?.[1]
+        if (!target) return dotGit
+
+        const gitDir = path.resolve(repoRoot, target.trim())
+        const commonDirFile = path.join(gitDir, "commondir")
+        if (fs.existsSync(commonDirFile)) {
+            return path.resolve(gitDir, fs.readFileSync(commonDirFile, "utf8").trim())
+        }
+        return gitDir
+    } catch {
+        return dotGit
+    }
+}
 
 // Mirrors opencode-plugin/src/index.ts's resolveTracyPath — same config file,
 // same handrolled parsing (dotenv isn't available, and this has to match the
@@ -14,7 +38,7 @@ export async function resolveTracyPath(repoRoot: string): Promise<string | undef
         return path.resolve(repoRoot, process.env.TRACY_SNAPSHOT_SCRIPT)
     }
 
-    const configPath = path.join(repoRoot, ".git", "tracybot", "config")
+    const configPath = path.join(resolveGitDir(repoRoot), "tracybot", "config")
     const configFile = Bun.file(configPath)
 
     if (!(await configFile.exists())) return
@@ -74,11 +98,27 @@ export async function getRepoRoot(cwd: string): Promise<string | undefined> {
 // derived from them instead — tried in order in case an earlier one no
 // longer resolves (e.g. a since-deleted file).
 export async function getRepoRootForEditedFiles(editedFiles: string[]): Promise<string | undefined> {
-    for (const file of editedFiles) {
-        const repoRoot = await getRepoRoot(path.dirname(file))
+    return getFirstRepoRoot(editedFiles.map(file => path.dirname(file)))
+}
+
+// Unlike the Stop-time cwd above, the cwd recorded at PostToolUse is where
+// that Bash command actually ran, so it is a valid fallback when the turn
+// changed files only through the shell.
+export async function getFirstRepoRoot(dirs: string[]): Promise<string | undefined> {
+    for (const dir of dirs) {
+        const repoRoot = await getRepoRoot(dir)
         if (repoRoot) return repoRoot
     }
     return undefined
+}
+
+// The head of the in-progress snapshot chain, read before and after running
+// tracy.py to tell whether it recorded a snapshot or skipped an unchanged tree.
+export async function getLatestSnapshot(repoRoot: string): Promise<string | undefined> {
+    const tracyId = (await $`git config --get tracy.current-id`.cwd(repoRoot).quiet().nothrow()).stdout.toString('utf8').trim()
+    if (!tracyId) return undefined
+    const ref = await $`git rev-parse --verify -q refs/tracy-local/${tracyId}`.cwd(repoRoot).quiet().nothrow()
+    return ref.exitCode === 0 ? ref.stdout.toString('utf8').trim() : undefined
 }
 
 // Same shape of call opencode-plugin makes — tracy.py itself doesn't care

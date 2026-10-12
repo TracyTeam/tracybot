@@ -1,17 +1,18 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { resolveGitDir } from './gitDir';
 
 // Kept free of the 'vscode' module so it can be unit-tested directly.
 export type InitState = 'initialized' | 'needs-repair' | 'declined' | 'undecided';
 
 function configPath(repoPath: string): string {
-  return path.join(repoPath, '.git', 'tracybot', 'config');
+  return path.join(resolveGitDir(repoPath), 'tracybot', 'config');
 }
 
 // Stored inside .git like research-consent.json, so the choice stays scoped
 // to this one repo and is never committed or pushed.
 function declinedMarkerPath(repoPath: string): string {
-  return path.join(repoPath, '.git', 'tracybot', 'init-declined');
+  return path.join(resolveGitDir(repoPath), 'tracybot', 'init-declined');
 }
 
 // init.py writes TRACY_SNAPSHOT_SCRIPT as an absolute path into *this*

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { execSync } from "child_process";
 import { clearInitDeclined, getInitState, isTracyInitialized, recordInitDeclined } from "./initState";
 
 const tmpDirs: string[] = [];
@@ -66,5 +67,71 @@ describe("initState", () => {
     writeConfig(repo, script);
 
     assert.equal(getInitState(repo), "initialized");
+  });
+
+  describe("when .git is a file (linked worktree, submodule)", () => {
+    function sh(cmd: string, cwd: string): void {
+      execSync(cmd, { cwd, stdio: "pipe" });
+    }
+
+    function makeRealRepo(): string {
+      const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "tracybot-init-state-real-")));
+      tmpDirs.push(dir);
+      sh("git init -q -b main && git config user.email t@e.com && git config user.name T", dir);
+      fs.writeFileSync(path.join(dir, "a.txt"), "x\n");
+      sh("git add -A && git commit -q -m init", dir);
+      return dir;
+    }
+
+    function addLinkedWorktree(main: string): string {
+      const linked = path.join(path.dirname(main), `linked-${path.basename(main)}`);
+      tmpDirs.push(linked);
+      sh(`git worktree add -q ${linked} -b feat`, main);
+      assert.ok(fs.statSync(path.join(linked, ".git")).isFile(), "test setup: .git should be a file here");
+      return linked;
+    }
+
+    // init.py writes the config into the common git dir; ask git for it
+    // rather than assuming ".git", the same way init.py does.
+    function writeConfigLikeInitPy(repo: string, scriptPath: string): void {
+      const common = path.resolve(repo, execSync("git rev-parse --git-common-dir", { cwd: repo, encoding: "utf8" }).trim());
+      fs.mkdirSync(path.join(common, "tracybot"), { recursive: true });
+      fs.writeFileSync(path.join(common, "tracybot", "config"), `TRACY_SNAPSHOT_SCRIPT=${scriptPath}\n`);
+    }
+
+    test("a linked worktree of an initialized repo counts as initialized", () => {
+      const main = makeRealRepo();
+      const script = path.join(main, "tracy.py");
+      fs.writeFileSync(script, "");
+      writeConfigLikeInitPy(main, script);
+      const linked = addLinkedWorktree(main);
+
+      assert.equal(getInitState(linked), "initialized");
+      assert.equal(isTracyInitialized(linked), true);
+    });
+
+    test("declining from a linked worktree is remembered instead of throwing ENOTDIR", () => {
+      const main = makeRealRepo();
+      const linked = addLinkedWorktree(main);
+
+      recordInitDeclined(linked);
+      assert.equal(getInitState(linked), "declined");
+      // One answer per repository, shared with the main checkout.
+      assert.equal(getInitState(main), "declined");
+
+      clearInitDeclined(linked);
+      assert.equal(getInitState(linked), "undecided");
+    });
+
+    test("declining inside a submodule is remembered instead of throwing ENOTDIR", () => {
+      const lib = makeRealRepo();
+      const main = makeRealRepo();
+      sh(`git -c protocol.file.allow=always submodule add -q ${lib} sub`, main);
+      const sub = path.join(main, "sub");
+      assert.ok(fs.statSync(path.join(sub, ".git")).isFile(), "test setup: .git should be a file here");
+
+      recordInitDeclined(sub);
+      assert.equal(getInitState(sub), "declined");
+    });
   });
 });
