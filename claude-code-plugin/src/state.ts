@@ -49,6 +49,16 @@ export async function markBashRan(sessionId: string, cwd: string): Promise<void>
     await writePrivate(statePath(sessionId), JSON.stringify(state))
 }
 
+// First call of the turn wins: later Bash calls in the same turn must not move
+// the baseline forward past changes an earlier one already made.
+export async function markBashBaseline(sessionId: string, repoRoot: string, tree: string): Promise<void> {
+    const state = (await readPendingTurn(sessionId)) ?? { editedFiles: [] }
+    state.bashBaselines ??= {}
+    if (state.bashBaselines[repoRoot] !== undefined) return
+    state.bashBaselines[repoRoot] = tree
+    await writePrivate(statePath(sessionId), JSON.stringify(state))
+}
+
 export async function readPendingTurn(sessionId: string): Promise<PendingTurnState | undefined> {
     const file = Bun.file(statePath(sessionId))
     if (!(await file.exists())) return undefined

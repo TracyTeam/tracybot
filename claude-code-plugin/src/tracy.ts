@@ -1,5 +1,6 @@
 import path from "path"
 import fs from "fs"
+import os from "os"
 
 // Bun.$ (the shell API) is used as the ambient global here, matching how
 // Bun.file/Bun.write/Bun.stdin are used elsewhere in this package — importing
@@ -119,6 +120,27 @@ export async function getLatestSnapshot(repoRoot: string): Promise<string | unde
     if (!tracyId) return undefined
     const ref = await $`git rev-parse --verify -q refs/tracy-local/${tracyId}`.cwd(repoRoot).quiet().nothrow()
     return ref.exitCode === 0 ? ref.stdout.toString('utf8').trim() : undefined
+}
+
+// The tree tracy.py would snapshot right now: the whole working directory
+// (`git add -A`, so untracked files count and .gitignore is respected), written
+// through a throwaway copy of the index so the user's real index is never
+// touched. tracy.py skips a snapshot when this equals the last one's.
+export async function getWorkingTreeHash(repoRoot: string): Promise<string | undefined> {
+    const tmpIndex = path.join(os.tmpdir(), `tracybot-cc-index-${process.pid}-${Date.now()}`)
+    try {
+        const realIndex = path.resolve(repoRoot, (await $`git rev-parse --git-path index`.cwd(repoRoot).quiet().text()).trim())
+        if (fs.existsSync(realIndex)) fs.copyFileSync(realIndex, tmpIndex)
+
+        const env = { ...process.env, GIT_INDEX_FILE: tmpIndex }
+        await $`git add -A`.cwd(repoRoot).env(env).quiet()
+        const tree = (await $`git write-tree`.cwd(repoRoot).env(env).quiet().text()).trim()
+        return tree || undefined
+    } catch {
+        return undefined
+    } finally {
+        fs.rmSync(tmpIndex, { force: true })
+    }
 }
 
 // Same shape of call opencode-plugin makes — tracy.py itself doesn't care

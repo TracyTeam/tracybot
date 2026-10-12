@@ -34,4 +34,9 @@ export interface PendingTurnState {
   // files without naming them (e.g. `sed -i`), so these only mark which
   // repo might have changed; tracy.py decides whether anything actually did.
   bashCwds?: string[]
+  // Per repo: the working-tree hash taken just before the turn's first Bash
+  // call (PreToolUse). A turn that only ran Bash is recorded only if the tree
+  // now differs from this — otherwise whatever changed since the last snapshot
+  // (the user's own hand-written edits) would be credited to the turn's prompt.
+  bashBaselines?: Record<string, string>
 }

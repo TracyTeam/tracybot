@@ -91,6 +91,86 @@ test("a Bash-only turn that changes nothing is kept as context, not recorded", a
     expect(await readContextTurns(id, repo)).toEqual([{ prompt: "what could we rename?", response: "TOKEN_REGEXP is too generic." }])
 })
 
+// What Claude Code does around a Bash tool call: PreToolUse fires before the
+// command runs (so the tree at that moment is the turn's baseline), PostToolUse
+// after it. `change` stands in for whatever the command itself does to files.
+async function bashTurn(opts: { id: string, repo: string, transcriptDir: string, prompt: string, response: string, change?: () => void }): Promise<void> {
+    const { id, repo, transcriptDir, prompt, response, change } = opts
+    await runHook("pre-tool-use", { session_id: id, cwd: repo, tool_name: "Bash", tool_input: { command: "..." } })
+    change?.()
+    await runHook("post-tool-use", { session_id: id, cwd: repo, tool_name: "Bash", tool_input: { command: "..." } })
+    await runHook("stop", { session_id: id, cwd: repo, transcript_path: writeTranscript(transcriptDir, prompt), last_assistant_message: response })
+}
+
+test("a Bash-only turn that changes nothing does not claim the user's own hand-written edits", async () => {
+    const repo = await makeRepo()
+    const transcriptDir = fs.mkdtempSync(path.join(os.tmpdir(), "tracy-transcript-test-"))
+    tmpDirs.push(transcriptDir)
+    const id = sessionId()
+
+    // Turn 1: Claude really changes app.js through Bash.
+    await bashTurn({ id, repo, transcriptDir, prompt: "rename the variable", response: "Renamed.",
+        change: () => fs.writeFileSync(path.join(repo, "app.js"), "var SERVER_TIMING_NAME_REGEXP = /x/;\n") })
+    expect((await latestSnapshotTurn(repo))?.prompt).toBe("rename the variable")
+
+    // The user then writes a whole new file by hand, no AI involved.
+    fs.writeFileSync(path.join(repo, "mine.js"), "function mine() {\n  const a = 1\n  const b = 2\n  return a + b\n}\n")
+
+    // Turn 2: Claude only runs the tests. Nothing in the repo changes during the turn.
+    await bashTurn({ id, repo, transcriptDir, prompt: "run the tests", response: "All green." })
+
+    // No snapshot is recorded for it, so mine.js isn't credited to "run the tests".
+    expect((await latestSnapshotTurn(repo))?.prompt).toBe("rename the variable")
+    // And, like any turn that changed nothing, it is kept as context for the next change.
+    expect(await readContextTurns(id, repo)).toEqual([{ prompt: "run the tests", response: "All green." }])
+})
+
+test("a Bash turn that really changes a file is still recorded when a baseline exists", async () => {
+    const repo = await makeRepo()
+    const transcriptDir = fs.mkdtempSync(path.join(os.tmpdir(), "tracy-transcript-test-"))
+    tmpDirs.push(transcriptDir)
+    const id = sessionId()
+
+    await bashTurn({ id, repo, transcriptDir, prompt: "rename the variable", response: "Renamed.",
+        change: () => fs.writeFileSync(path.join(repo, "app.js"), "var SERVER_TIMING_NAME_REGEXP = /x/;\n") })
+
+    expect((await latestSnapshotTurn(repo))?.prompt).toBe("rename the variable")
+    expect(await readContextTurns(id, repo)).toEqual([])
+})
+
+test("a later Bash call in the same turn does not move the baseline past an earlier call's change", async () => {
+    const repo = await makeRepo()
+    const transcriptDir = fs.mkdtempSync(path.join(os.tmpdir(), "tracy-transcript-test-"))
+    tmpDirs.push(transcriptDir)
+    const id = sessionId()
+    const bash = { session_id: id, cwd: repo, tool_name: "Bash", tool_input: { command: "..." } }
+
+    // 1st call edits the file, 2nd call (e.g. running the tests) changes nothing.
+    await runHook("pre-tool-use", bash)
+    fs.writeFileSync(path.join(repo, "app.js"), "var SERVER_TIMING_NAME_REGEXP = /x/;\n")
+    await runHook("post-tool-use", bash)
+    await runHook("pre-tool-use", bash)
+    await runHook("post-tool-use", bash)
+    await runHook("stop", { session_id: id, cwd: repo, transcript_path: writeTranscript(transcriptDir, "rename and run the tests"), last_assistant_message: "Done." })
+
+    expect((await latestSnapshotTurn(repo))?.prompt).toBe("rename and run the tests")
+})
+
+test("a turn that edited files with the Edit tool is unaffected by a Bash baseline", async () => {
+    const repo = await makeRepo()
+    const transcriptDir = fs.mkdtempSync(path.join(os.tmpdir(), "tracy-transcript-test-"))
+    tmpDirs.push(transcriptDir)
+    const id = sessionId()
+
+    await runHook("pre-tool-use", { session_id: id, cwd: repo, tool_name: "Bash", tool_input: { command: "ls" } })
+    await runHook("post-tool-use", { session_id: id, cwd: repo, tool_name: "Bash", tool_input: { command: "ls" } })
+    fs.writeFileSync(path.join(repo, "app.js"), "var SERVER_TIMING_NAME_REGEXP = /x/;\n")
+    await runHook("post-tool-use", { session_id: id, cwd: repo, tool_name: "Edit", tool_input: { file_path: path.join(repo, "app.js") } })
+    await runHook("stop", { session_id: id, cwd: repo, transcript_path: writeTranscript(transcriptDir, "edit it"), last_assistant_message: "Edited." })
+
+    expect((await latestSnapshotTurn(repo))?.prompt).toBe("edit it")
+})
+
 test("a discussion turn is attached to the next change in the same repo", async () => {
     const repo = await makeRepo()
     const transcriptDir = fs.mkdtempSync(path.join(os.tmpdir(), "tracy-transcript-test-"))
