@@ -52,6 +52,9 @@ function hookCommand(event) {
 }
 
 const POST_TOOL_USE_MATCHER = 'Edit|Write|MultiEdit|Bash'
+// PreToolUse only exists to take a baseline of the working tree before a Bash
+// command runs, so a Bash-only turn can tell whether it really changed anything.
+const PRE_TOOL_USE_MATCHER = 'Bash'
 
 function findEntry(hookList, command) {
     return (hookList ?? []).find(entry => (entry.hooks ?? []).some(h => h.command === command))
@@ -78,6 +81,22 @@ function installHooks(settings) {
         console.log('  Updated PostToolUse hook matcher')
     } else {
         console.log('  PostToolUse hook already present')
+    }
+
+    settings.hooks.PreToolUse ??= []
+    const preToolUseCommand = hookCommand('pre-tool-use')
+    const preToolUseEntry = findEntry(settings.hooks.PreToolUse, preToolUseCommand)
+    if (!preToolUseEntry) {
+        settings.hooks.PreToolUse.push({
+            matcher: PRE_TOOL_USE_MATCHER,
+            hooks: [{ type: 'command', command: preToolUseCommand }],
+        })
+        console.log('  Added PreToolUse hook')
+    } else if (preToolUseEntry.matcher !== PRE_TOOL_USE_MATCHER) {
+        preToolUseEntry.matcher = PRE_TOOL_USE_MATCHER
+        console.log('  Updated PreToolUse hook matcher')
+    } else {
+        console.log('  PreToolUse hook already present')
     }
 
     settings.hooks.Stop ??= []

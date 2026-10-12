@@ -1,6 +1,6 @@
-import { markFileEdited, markBashRan, readPendingTurn, clearPendingTurn, appendContextTurn, readContextTurns, clearRepoContextTurns } from "./state"
+import { markFileEdited, markBashRan, markBashBaseline, readPendingTurn, clearPendingTurn, appendContextTurn, readContextTurns, clearRepoContextTurns } from "./state"
 import { extractTurnContext } from "./transcript"
-import { getRepoRootForEditedFiles, getFirstRepoRoot, getLatestSnapshot, resolveTracyPath, detectPythonCommand, runTracySnapshot } from "./tracy"
+import { getRepoRoot, getRepoRootForEditedFiles, getFirstRepoRoot, getLatestSnapshot, getWorkingTreeHash, resolveTracyPath, detectPythonCommand, runTracySnapshot } from "./tracy"
 import type { ClaudeTurn, PendingTurnState } from "./types"
 
 const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit"])
@@ -22,6 +22,22 @@ interface StopEventInput {
 async function readStdinJson<T>(): Promise<T> {
     const text = await Bun.stdin.text()
     return JSON.parse(text) as T
+}
+
+// Runs before a Bash command: a shell command can change files without naming
+// them (`sed -i`), so the only way to tell afterwards whether the turn changed
+// anything is to remember what the tree looked like before it started.
+async function handlePreToolUse(): Promise<void> {
+    const input = await readStdinJson<ToolEventInput>()
+    if (input.tool_name !== "Bash") return
+
+    const repoRoot = await getRepoRoot(input.cwd)
+    if (!repoRoot) return
+    if (!(await resolveTracyPath(repoRoot))) return // Tracybot not initialized in this repo
+    if ((await readPendingTurn(input.session_id))?.bashBaselines?.[repoRoot] !== undefined) return
+
+    const tree = await getWorkingTreeHash(repoRoot)
+    if (tree) await markBashBaseline(input.session_id, repoRoot, tree)
 }
 
 async function handlePostToolUse(): Promise<void> {
@@ -76,6 +92,16 @@ async function recordSnapshot(sessionId: string, pending: PendingTurnState, prom
     const pythonCmd = await detectPythonCommand()
     if (!pythonCmd) return undefined
 
+    // A turn that only ran Bash is recorded only if the tree really changed
+    // during it. tracy.py alone can't tell: it skips just when nothing changed
+    // since the LAST snapshot, so it would also pick up edits the user made
+    // by hand between turns and credit them to this turn's prompt. Without a
+    // baseline (the PreToolUse hook isn't installed yet) fall back to that.
+    if (pending.editedFiles.length === 0) {
+        const baseline = pending.bashBaselines?.[repoRoot]
+        if (baseline !== undefined && baseline === await getWorkingTreeHash(repoRoot)) return undefined
+    }
+
     const now = Date.now()
     const turn: ClaudeTurn = {
         id: `claude_${sessionId}_${now}`,
@@ -104,7 +130,9 @@ async function main(): Promise<void> {
     const event = process.argv[2]
 
     try {
-        if (event === "post-tool-use") {
+        if (event === "pre-tool-use") {
+            await handlePreToolUse()
+        } else if (event === "post-tool-use") {
             await handlePostToolUse()
         } else if (event === "stop") {
             await handleStop()

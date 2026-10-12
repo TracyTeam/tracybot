@@ -15,7 +15,13 @@ bun install
 bun run deploy
 ```
 
-This builds the plugin and adds `PostToolUse` (matcher: `Edit|Write|MultiEdit|Bash`) and `Stop` hooks to `~/.claude/settings.json`, without touching any hooks you already have configured there. If the hooks are already installed with an older matcher, the matcher is updated.
+This builds the plugin and adds `PostToolUse` (matcher: `Edit|Write|MultiEdit|Bash`), `PreToolUse` (matcher: `Bash`) and `Stop` hooks to `~/.claude/settings.json`, without touching any hooks you already have configured there. If the hooks are already installed with an older matcher, the matcher is updated, and a missing `PreToolUse` hook is added.
+
+### Bash-only turns
+
+A shell command can change files without naming them (`sed -i`), so a turn that only used Bash is recorded when the working tree actually changed during it. `PreToolUse` takes a baseline of the tree just before the turn's first Bash command; at `Stop` the turn is recorded only if the tree differs from that baseline. Without this, `tracy.py` (which only skips when nothing changed since the *last snapshot*) would credit any edit you made by hand between turns to a turn that merely ran `ls` or the tests. If the `PreToolUse` hook isn't installed yet, the plugin falls back to that older behavior.
+
+A turn that also used the Edit/Write tools is unaffected, and so is the one remaining limitation: a snapshot always captures the whole working tree, so a turn that really does change something still bundles any hand-written edits made just before it.
 
 ## Requirements
 

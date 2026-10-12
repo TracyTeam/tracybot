@@ -2,7 +2,7 @@ import { test, expect, afterEach } from "bun:test"
 import path from "path"
 import os from "os"
 import fs from "fs"
-import { appendContextTurn, readContextTurns, clearContextTurns, clearRepoContextTurns, MAX_CONTEXT_TURNS, markFileEdited, markBashRan, readPendingTurn, clearPendingTurn } from "./state"
+import { appendContextTurn, readContextTurns, clearContextTurns, clearRepoContextTurns, MAX_CONTEXT_TURNS, markFileEdited, markBashRan, markBashBaseline, readPendingTurn, clearPendingTurn } from "./state"
 
 const sessionIds: string[] = []
 
@@ -94,3 +94,27 @@ test.skipIf(process.platform === "win32")("state files are readable only by thei
         expect(fs.statSync(path.join(os.tmpdir(), name)).mode & 0o777).toBe(0o600)
     }
 })
+
+test("markBashBaseline keeps the first baseline per repo and tracks repos independently", async () => {
+    const id = sessionId()
+    await markBashBaseline(id, "/repo/a", "tree-1")
+    await markBashBaseline(id, "/repo/a", "tree-2")
+    await markBashBaseline(id, "/repo/b", "tree-3")
+
+    expect((await readPendingTurn(id))?.bashBaselines).toEqual({ "/repo/a": "tree-1", "/repo/b": "tree-3" })
+    await clearPendingTurn(id)
+})
+
+test("markBashBaseline doesn't disturb edited files or Bash cwds already recorded", async () => {
+    const id = sessionId()
+    await markFileEdited(id, "/repo/a/x.ts")
+    await markBashRan(id, "/repo/a")
+    await markBashBaseline(id, "/repo/a", "tree-1")
+
+    const state = await readPendingTurn(id)
+    expect(state?.editedFiles).toEqual(["/repo/a/x.ts"])
+    expect(state?.bashCwds).toEqual(["/repo/a"])
+    expect(state?.bashBaselines).toEqual({ "/repo/a": "tree-1" })
+    await clearPendingTurn(id)
+})
+

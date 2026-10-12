@@ -2,7 +2,7 @@ import { test, expect, afterEach } from "bun:test"
 import path from "path"
 import os from "os"
 import fs from "fs"
-import { getRepoRoot, getRepoRootForEditedFiles, getFirstRepoRoot, getLatestSnapshot, resolveTracyPath } from "./tracy"
+import { getRepoRoot, getRepoRootForEditedFiles, getFirstRepoRoot, getLatestSnapshot, resolveTracyPath, getWorkingTreeHash } from "./tracy"
 
 const $ = Bun.$
 
@@ -133,3 +133,70 @@ test("resolveTracyPath finds the config from a submodule, where .git is a file",
 
     expect(await resolveTracyPath(sub)).toBe("/opt/tracy.py")
 })
+
+// ---- getWorkingTreeHash ----
+
+const TRACY_PY = path.resolve(import.meta.dir, "..", "..", "tracking", "tracy.py")
+
+test("getWorkingTreeHash is stable for an unchanged tree and changes with any edit, including a new untracked file", async () => {
+    const repo = await makeCommittedRepo()
+    const clean = await getWorkingTreeHash(repo)
+    expect(clean).toBeDefined()
+    expect(await getWorkingTreeHash(repo)).toBe(clean)
+
+    fs.writeFileSync(path.join(repo, "a.txt"), "changed\n")
+    const edited = await getWorkingTreeHash(repo)
+    expect(edited).not.toBe(clean)
+
+    fs.writeFileSync(path.join(repo, "new.txt"), "untracked\n")
+    expect(await getWorkingTreeHash(repo)).not.toBe(edited)
+})
+
+test("getWorkingTreeHash respects .gitignore", async () => {
+    const repo = await makeCommittedRepo()
+    fs.writeFileSync(path.join(repo, ".gitignore"), "build/\n")
+    const before = await getWorkingTreeHash(repo)
+
+    fs.mkdirSync(path.join(repo, "build"))
+    fs.writeFileSync(path.join(repo, "build", "out.js"), "generated\n")
+    expect(await getWorkingTreeHash(repo)).toBe(before)
+})
+
+test("getWorkingTreeHash leaves the user's real index alone", async () => {
+    const repo = await makeCommittedRepo()
+    fs.writeFileSync(path.join(repo, "a.txt"), "changed but not staged\n")
+    fs.writeFileSync(path.join(repo, "new.txt"), "untracked\n")
+    const statusBefore = (await $`git status --porcelain`.cwd(repo).text())
+    const indexBefore = fs.readFileSync(path.join(repo, ".git", "index"))
+
+    await getWorkingTreeHash(repo)
+
+    expect(await $`git status --porcelain`.cwd(repo).text()).toBe(statusBefore)
+    expect(fs.readFileSync(path.join(repo, ".git", "index")).equals(indexBefore)).toBe(true)
+})
+
+test("getWorkingTreeHash equals the tree tracy.py snapshots for the same working directory", async () => {
+    const repo = await makeCommittedRepo()
+    fs.writeFileSync(path.join(repo, "a.txt"), "changed\n")
+    fs.writeFileSync(path.join(repo, "new.txt"), "untracked\n")
+    const predicted = await getWorkingTreeHash(repo)
+
+    await $`python3 ${TRACY_PY} --user-name claude-code --user-email claude-code --description {} --session-id s1`.cwd(repo).quiet()
+    const tracyId = (await $`git config --get tracy.current-id`.cwd(repo).text()).trim()
+    const snapshotTree = (await $`git rev-parse refs/tracy-local/${tracyId}^{tree}`.cwd(repo).text()).trim()
+
+    expect(predicted).toBe(snapshotTree)
+})
+
+test("getWorkingTreeHash works from a linked worktree, where .git is a file", async () => {
+    const main = await makeCommittedRepo()
+    const linked = path.join(path.dirname(main), `linked-${path.basename(main)}`)
+    tmpDirs.push(linked)
+    await $`git worktree add -q ${linked} -b feat`.cwd(main).quiet()
+
+    const clean = await getWorkingTreeHash(linked)
+    expect(clean).toBeDefined()
+    fs.writeFileSync(path.join(linked, "a.txt"), "changed in the worktree\n")
+    expect(await getWorkingTreeHash(linked)).not.toBe(clean)
+})
+
