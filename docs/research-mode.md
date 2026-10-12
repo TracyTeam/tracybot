@@ -4,7 +4,7 @@ Research Mode is an opt-in feature that lets a Tracybot user share their Tasklet
 
 ## Consent
 
-Consent is **per repository**, not machine-wide — agreeing to share one project's Tasklet history doesn't enroll every other repo opened afterward. The first time a repo is opened (and once per repo thereafter, until a decision is made), the VS Code extension shows a prompt:
+Consent is **per repository**, not machine-wide — agreeing to share one project's Tasklet history doesn't enroll every other repo opened afterward. Once Tracybot is initialized in a repo (the extension asks before initializing), and each time that repo is opened until a decision is made, the VS Code extension shows a prompt:
 
 > Help improve Tracybot: share this repository's Tasklet history for a study on AI-assisted coding behavior?
 
