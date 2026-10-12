@@ -4,7 +4,7 @@ Records Tasklet snapshots for [Tracybot](../README.md) when using Claude Code, t
 
 ## How it differs from `opencode-plugin`
 
-Claude Code doesn't have OpenCode's Plan/Build mode distinction, so this doesn't produce the same `Tasklet` shape — each recorded unit is one `ClaudeTurn` (one `UserPromptSubmit` → `Stop` cycle that touched a file via `Edit`/`Write`/`MultiEdit`), tagged `"source": "claude-code"` so `buildHistory.ts` can tell the two shapes apart and parse each one correctly.
+Claude Code doesn't have OpenCode's Plan/Build mode distinction, so this doesn't produce the same `Tasklet` shape — each recorded unit is one `ClaudeTurn` (one `UserPromptSubmit` → `Stop` cycle that changed the repo via `Edit`/`Write`/`MultiEdit` or a `Bash` command), tagged `"source": "claude-code"` so `buildHistory.ts` can tell the two shapes apart and parse each one correctly.
 
 Prompt text is read from the turn's `transcript_path` rather than passed directly by a hook, and the response text comes from the `Stop` event's `last_assistant_message`.
 
@@ -15,7 +15,7 @@ bun install
 bun run deploy
 ```
 
-This builds the plugin and adds `PostToolUse` (matcher: `Edit|Write|MultiEdit`) and `Stop` hooks to `~/.claude/settings.json`, without touching any hooks you already have configured there.
+This builds the plugin and adds `PostToolUse` (matcher: `Edit|Write|MultiEdit|Bash`) and `Stop` hooks to `~/.claude/settings.json`, without touching any hooks you already have configured there. If the hooks are already installed with an older matcher, the matcher is updated.
 
 ## Requirements
 
