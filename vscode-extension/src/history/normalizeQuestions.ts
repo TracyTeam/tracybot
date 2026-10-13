@@ -21,7 +21,7 @@ export function normalizeQuestions(raw: unknown): TaskletQuestion[] {
             .filter((o): o is Record<string, unknown> => o !== null && typeof o === "object")
             .map(o => ({ label: String(o.label ?? ""), description: String(o.description ?? "") }))
         : [],
-      answer: Array.isArray(q.answer) ? q.answer.map(String) : q.answer == null ? [] : [String(q.answer)],
+      answer: Array.isArray(q.answer) ? q.answer.map(String) : q.answer === null || q.answer === undefined ? [] : [String(q.answer)],
       outputId: typeof q.outputId === "string" ? q.outputId : "",
     }));
 }
