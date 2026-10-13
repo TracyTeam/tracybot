@@ -19,6 +19,7 @@ Tracybot is a tool that traces AI-generated code back to the prompts that create
 - **Seamless Integration** - Works with OpenCode CLI, Claude Code, Codex CLI, and Visual Studio Code
 - **Audit Trail** - Review AI interactions to verify, debug, or understand code origins
 - **Team Sync** - Push traces to remote for team collaboration
+- **ADR drafts** - Turn a tasklet into an Architecture Decision Record draft (no LLM), whose status follows what happens to the code — see [docs/adr.md](./docs/adr.md)
 - **Research Mode** - Optional, opt-in sharing of your Tasklet history for a research study on AI-assisted coding behavior — see [docs/research-mode.md](./docs/research-mode.md)
 
 ## Supported Agents and Editors

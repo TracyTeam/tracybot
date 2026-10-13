@@ -4,6 +4,9 @@
   // LINES, LINE_MAP, LINE_PREVIOUS, TASKLETS, FILE_NAME, INITIAL_LINE
   // are injected as globals by blameView.ts
 
+  // Only present inside a real VS Code webview.
+  const vscodeApi = typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : null;
+
   let selectedTaskletId = null;
   let selectedLine = null;
   const navStack = [];
@@ -254,6 +257,7 @@
         <div class="card-nav">
           ${backButtonHtml()}
           <div class="card-title">${esc(t.name)}</div>
+          <button class="menu-btn" id="create-adr-btn" title="Create an Architecture Decision Record draft from this tasklet">Create ADR</button>
           <button class="menu-btn" id="all-tasklets-btn">All Tasklets</button>
         </div>
         <div class="card-nav-pills">
@@ -286,6 +290,10 @@
     });
 
     bindBackButton();
+
+    document.getElementById('create-adr-btn').addEventListener('click', () => {
+      if (vscodeApi) { vscodeApi.postMessage({ type: 'createAdr', id: taskletId }); }
+    });
 
     document.getElementById('all-tasklets-btn').addEventListener('click', () => {
       navStack.push({ taskletId: selectedTaskletId, line: selectedLine });

@@ -52,6 +52,10 @@
       {
         "command": "tracybot-extension.reviewResearchDigest",
         "title": "Tracybot: Manage Research Mode"
+      },
+      {
+        "command": "tracybot-extension.refreshAdrStatus",
+        "title": "Tracybot: Refresh ADR Status"
       }
     ],
     "keybindings": [
@@ -61,7 +65,17 @@
         "mac": "cmd+shift+0",
         "when": "editorTextFocus"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Tracybot",
+      "properties": {
+        "tracybot.adrDirectory": {
+          "type": "string",
+          "default": "docs/adr",
+          "markdownDescription": "Folder, relative to the repository root, where **Create ADR** (a button on an AI Blame tasklet) writes decision records, and where **Tracybot: Refresh ADR Status** looks for them."
+        }
+      }
+    }
   },
   "scripts": {
     "clean": "rm -rf out assets init.py tracking",
@@ -72,7 +86,7 @@
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",
     "test": "vscode-test",
-    "test:unit": "tsc -p ./ && node --test out/research/**/*.test.js out/*.test.js",
+    "test:unit": "tsc -p ./ && node --test out/research/**/*.test.js out/adr/**/*.test.js out/*.test.js",
     "package": "vsce package -o out/tracybot-extension.vsix",
     "deploy": "npm run package && code --install-extension out/tracybot-extension.vsix"
   },
