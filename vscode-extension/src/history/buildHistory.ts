@@ -1,3 +1,4 @@
+import { normalizeQuestions } from "./normalizeQuestions";
 import { BuildHistoryFailureReason, BuildHistoryResult, Change, CommitInfo, DiffHunk, History, TaskletMessage, TaskletQuestion } from "./types";
 import {
   bleuSimilarity,
@@ -292,7 +293,7 @@ function parseOpenCodeTasklet(tasklet_obj: any, tasklet_str: string): TaskletMes
   title = tasklet_obj.title ?? "skill issue";
 
   // Handle questions and answers
-  const allQuestions: any[] = Array.isArray(tasklet_obj.questions) ? tasklet_obj.questions : [];
+  const allQuestions = normalizeQuestions(tasklet_obj.questions);
   const questionsByOutputId = new Map<string, any[]>();
   for (const q of allQuestions) {
     if (!questionsByOutputId.has(q.outputId)) {
