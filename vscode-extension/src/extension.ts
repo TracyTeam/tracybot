@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import { buildHistory, describeBuildHistoryFailure, hydrateCache, getSerializedCache, clearCache } from './history/buildHistory';
 import { BuildHistoryFailureReason, History, TaskletUI, LineMap, Change } from './history/types';
 import { getBlameViewHtml } from './blameView';
+import { createAdrFromTasklet, refreshAdrStatuses } from './adrCommands';
 import { getRepoPath, mergeRemoteNotes } from './utils';
 import { checkOpencode } from './pluginCheck';
 import { checkHookBasedAgents } from './hookAgentPluginCheck';
@@ -415,6 +416,14 @@ export async function activate(context: vscode.ExtensionContext) {
 
       const initialLine = editor.selection.active.line;
       panel.webview.html = getBlameViewHtml(fileContent, fileName, fileMap, fileTasklets, panel.webview, context.extensionUri, initialLine);
+
+      // The "Create ADR" button on a tasklet card.
+      const messageListener = panel.webview.onDidReceiveMessage(message => {
+        if (message?.type === 'createAdr' && typeof message.id === 'string') {
+          void createAdrFromTasklet(history, message.id);
+        }
+      });
+      panel.onDidDispose(() => messageListener.dispose());
     })
   );
 
@@ -446,6 +455,17 @@ export async function activate(context: vscode.ExtensionContext) {
         await updateResearchStatusBar(context);
         refreshHistory();
       }
+    })
+  );
+
+  // Re-computes the status of the ADRs created from AI Blame tasklets.
+  context.subscriptions.push(
+    vscode.commands.registerCommand('tracybot-extension.refreshAdrStatus', async () => {
+      await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Window, title: 'Tracybot: reading AI history…', cancellable: false },
+        async () => { await buildHistoryAndSet(context); }
+      );
+      await refreshAdrStatuses(history);
     })
   );
 
