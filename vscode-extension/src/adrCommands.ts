@@ -2,14 +2,16 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { History } from './history/types';
-import { getRepoPath } from './utils';
 import { buildAdr, defaultTitle } from './adr/buildAdr';
-import { adrFileName, listAdrFiles, nextAdrNumber, resolveAdrDir } from './adr/files';
+import { listAdrFiles, resolveAdrDir } from './adr/files';
+import { writeAdrFile } from './adr/write';
 import { refreshAdrStatus } from './adr/refresh';
 import { taskletKey } from './adr/status';
 
-async function adrDirectory(): Promise<{ repoPath: string; dir: string } | undefined> {
-  const repoPath = await getRepoPath();
+// The repository is passed in, never looked up here: by the time a button is
+// clicked the active editor is a webview, and getRepoPath() would fall back to
+// the first repository of a multi-repo workspace.
+function adrDirectory(repoPath: string | undefined): { repoPath: string; dir: string } | undefined {
   if (!repoPath) {
     vscode.window.showInformationMessage('Tracybot: open a folder inside a git repository first.');
     return undefined;
@@ -18,22 +20,23 @@ async function adrDirectory(): Promise<{ repoPath: string; dir: string } | undef
   const setting = vscode.workspace.getConfiguration('tracybot').get<string>('adrDirectory');
   const dir = resolveAdrDir(repoPath, setting);
   if (!dir) {
-    vscode.window.showErrorMessage('Tracybot: the "tracybot.adrDirectory" setting must be a folder inside the repository.');
+    vscode.window.showErrorMessage('Tracybot: the "tracybot.adrDirectory" setting must be a folder inside the repository (not outside it, and not a link that leads outside).');
     return undefined;
   }
   return { repoPath, dir };
 }
 
-// Backs the "Create ADR" button on an AI Blame tasklet card. `snapshotId` is
+// Backs the "Create ADR" button on an AI Blame tasklet card. `history` and
+// `repoPath` are the ones the AI Blame panel was opened with; `snapshotId` is
 // the id the card is keyed by in the webview.
-export async function createAdrFromTasklet(history: History | undefined, snapshotId: string): Promise<void> {
+export async function createAdrFromTasklet(history: History | undefined, repoPath: string | undefined, snapshotId: string): Promise<void> {
   const card = history?.files.flatMap(f => f.tasklets).find(t => t.id === snapshotId);
   if (!history || !card) {
     vscode.window.showErrorMessage('Tracybot: could not find that tasklet any more. Reopen AI Blame and try again.');
     return;
   }
 
-  const target = await adrDirectory();
+  const target = adrDirectory(repoPath);
   if (!target) { return; }
 
   // The title is the one thing the tool can't guess well (it is the user's
@@ -54,24 +57,11 @@ export async function createAdrFromTasklet(history: History | undefined, snapsho
     return;
   }
 
-  fs.mkdirSync(target.dir, { recursive: true });
-
-  // 'wx' never overwrites; if another file took the number meanwhile, take the next.
-  let written: string | undefined;
-  for (let attempt = 0; attempt < 5 && !written; attempt++) {
-    const file = path.join(target.dir, adrFileName(nextAdrNumber(target.dir), draft.title, key));
-    try {
-      fs.writeFileSync(file, draft.markdown, { flag: 'wx' });
-      written = file;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
-        vscode.window.showErrorMessage(`Tracybot: could not write the ADR: ${err instanceof Error ? err.message : String(err)}`);
-        return;
-      }
-    }
-  }
-  if (!written) {
-    vscode.window.showErrorMessage('Tracybot: could not find a free ADR number.');
+  let written: string;
+  try {
+    written = writeAdrFile(target.dir, draft.title, key, draft.markdown);
+  } catch (err) {
+    vscode.window.showErrorMessage(`Tracybot: could not write the ADR: ${err instanceof Error ? err.message : String(err)}`);
     return;
   }
 
@@ -83,13 +73,13 @@ export async function createAdrFromTasklet(history: History | undefined, snapsho
 
 // Re-computes the status of every Tracybot ADR in the ADR folder. `history`
 // must be freshly built.
-export async function refreshAdrStatuses(history: History | undefined): Promise<void> {
+export async function refreshAdrStatuses(history: History | undefined, repoPath: string | undefined): Promise<void> {
   if (!history) {
     vscode.window.showErrorMessage('Tracybot: could not read the AI history for this repository.');
     return;
   }
 
-  const target = await adrDirectory();
+  const target = adrDirectory(repoPath);
   if (!target) { return; }
 
   const files = listAdrFiles(target.dir);

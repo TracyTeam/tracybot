@@ -343,6 +343,12 @@ export async function activate(context: vscode.ExtensionContext) {
       const document = editor.document;
       const fileName = document.fileName.split(/[\\/]/).pop() ?? document.fileName;
 
+      // Which repository this panel is about, captured now while the file is
+      // the active editor. Later (when a button in the panel is clicked) the
+      // active editor is the webview, and asking again would fall back to the
+      // first repository of a multi-repo workspace.
+      const panelRepoPath = await getRepoPath();
+
       // Snapshot file content immediately before the async work so the webview
       // reflects exactly what the user sees at the moment they clicked.
       const fileContent = document.getText();
@@ -414,13 +420,17 @@ export async function activate(context: vscode.ExtensionContext) {
 
       panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'icon.png');
 
+      // The history this panel was rendered from, kept per panel: the global
+      // `history` is replaced whenever AI Blame is opened for any repository.
+      const panelHistory = history;
+
       const initialLine = editor.selection.active.line;
       panel.webview.html = getBlameViewHtml(fileContent, fileName, fileMap, fileTasklets, panel.webview, context.extensionUri, initialLine);
 
       // The "Create ADR" button on a tasklet card.
       const messageListener = panel.webview.onDidReceiveMessage(message => {
         if (message?.type === 'createAdr' && typeof message.id === 'string') {
-          void createAdrFromTasklet(history, message.id);
+          void createAdrFromTasklet(panelHistory, panelRepoPath, message.id);
         }
       });
       panel.onDidDispose(() => messageListener.dispose());
@@ -461,11 +471,12 @@ export async function activate(context: vscode.ExtensionContext) {
   // Re-computes the status of the ADRs created from AI Blame tasklets.
   context.subscriptions.push(
     vscode.commands.registerCommand('tracybot-extension.refreshAdrStatus', async () => {
+      const repoPath = await getRepoPath();
       await vscode.window.withProgress(
         { location: vscode.ProgressLocation.Window, title: 'Tracybot: reading AI history…', cancellable: false },
         async () => { await buildHistoryAndSet(context); }
       );
-      await refreshAdrStatuses(history);
+      await refreshAdrStatuses(history, repoPath);
     })
   );
 

@@ -22,11 +22,32 @@ export function slugify(title: string): string {
 }
 
 // The directory comes from a user setting, so it must stay inside the repo.
+// A lexical check isn't enough: if `docs` or `docs/adr` is a symlink to
+// somewhere else, creating and refreshing ADRs would read and write outside the
+// repository. So the deepest part of the path that already exists is resolved
+// to its real location and has to be inside the repository's real location.
 export function resolveAdrDir(repoPath: string, setting: string | undefined): string | undefined {
   const relative = (setting ?? "").trim() || DEFAULT_ADR_DIR;
   const resolved = path.resolve(repoPath, relative);
   const fromRepo = path.relative(path.resolve(repoPath), resolved);
   if (fromRepo === "" || fromRepo.startsWith("..") || path.isAbsolute(fromRepo)) { return undefined; }
+
+  try {
+    // lstat (not exists): a dangling symlink must be found here, not skipped.
+    let existing = resolved;
+    for (;;) {
+      try { fs.lstatSync(existing); break; } catch {
+        const parent = path.dirname(existing);
+        if (parent === existing) { return undefined; }
+        existing = parent;
+      }
+    }
+
+    const realFromRepo = path.relative(fs.realpathSync(repoPath), fs.realpathSync(existing));
+    if (realFromRepo.startsWith("..") || path.isAbsolute(realFromRepo)) { return undefined; }
+  } catch {
+    return undefined; // e.g. a dangling symlink
+  }
   return resolved;
 }
 
@@ -52,9 +73,15 @@ export function adrFileName(number: number, title: string, taskletKey: string): 
   return `${String(number).padStart(4, "0")}-${slug || "decision"}.md`;
 }
 
+// Regular files only: a symlinked .md could point outside the repository, and
+// refreshing would rewrite whatever it points to.
 export function listAdrFiles(dir: string): string[] {
   try {
-    return fs.readdirSync(dir).filter(n => /\.md$/i.test(n)).sort().map(n => path.join(dir, n));
+    return fs.readdirSync(dir, { withFileTypes: true })
+      .filter(entry => entry.isFile() && /\.md$/i.test(entry.name))
+      .map(entry => entry.name)
+      .sort()
+      .map(name => path.join(dir, name));
   } catch {
     return [];
   }

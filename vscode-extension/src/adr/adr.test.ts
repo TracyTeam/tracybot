@@ -6,6 +6,7 @@ import * as path from "path";
 import { History } from "../history/types";
 import { buildAdr, defaultTitle } from "./buildAdr";
 import { adrFileName, nextAdrNumber, resolveAdrDir, slugify, listAdrFiles } from "./files";
+import { writeAdrFile } from "./write";
 import { readAdrTaskletKey, refreshAdrStatus } from "./refresh";
 import { computeTaskletStatus, taskletKey } from "./status";
 
@@ -279,7 +280,7 @@ describe("ADR files", () => {
   });
 
   test("the ADR directory must stay inside the repository", () => {
-    const repo = path.resolve("/repo");
+    const repo = fs.realpathSync(tmp());
     assert.equal(resolveAdrDir(repo, undefined), path.join(repo, "docs/adr"));
     assert.equal(resolveAdrDir(repo, "  "), path.join(repo, "docs/adr"));
     assert.equal(resolveAdrDir(repo, "doc/decisions"), path.join(repo, "doc/decisions"));
@@ -288,10 +289,107 @@ describe("ADR files", () => {
     assert.equal(resolveAdrDir(repo, "."), undefined);
   });
 
+  // Creating a symlink needs privileges on Windows; skip rather than fail there.
+  function symlinkOrSkip(t: { skip: (m: string) => void }, target: string, linkPath: string): boolean {
+    try {
+      fs.symlinkSync(target, linkPath);
+      return true;
+    } catch {
+      t.skip("cannot create symlinks here");
+      return false;
+    }
+  }
+
+  test("a symlinked ADR directory that leads outside the repository is refused", (t) => {
+    const repo = tmp();
+    const outside = tmp();
+    fs.mkdirSync(path.join(repo, "docs"));
+    if (!symlinkOrSkip(t, outside, path.join(repo, "docs", "adr"))) { return; }
+
+    assert.equal(resolveAdrDir(repo, "docs/adr"), undefined);
+  });
+
+  test("a symlinked parent of the ADR directory that leads outside the repository is refused, even if the directory doesn't exist yet", (t) => {
+    const repo = tmp();
+    const outside = tmp();
+    if (!symlinkOrSkip(t, outside, path.join(repo, "docs"))) { return; }
+
+    assert.equal(resolveAdrDir(repo, "docs/adr"), undefined, "docs/adr does not exist yet; docs does, and points outside");
+    assert.equal(resolveAdrDir(repo, "docs/deeper/adr"), undefined);
+  });
+
+  test("a dangling symlink in place of the ADR directory is refused", (t) => {
+    const repo = tmp();
+    fs.mkdirSync(path.join(repo, "docs"));
+    if (!symlinkOrSkip(t, path.join(os.tmpdir(), "tracybot-does-not-exist-" + Date.now()), path.join(repo, "docs", "adr"))) { return; }
+
+    assert.equal(resolveAdrDir(repo, "docs/adr"), undefined);
+  });
+
+  test("a symlink that stays inside the repository is fine, and so is a repository reached through a symlink", (t) => {
+    const repo = fs.realpathSync(tmp());
+    fs.mkdirSync(path.join(repo, "real-adr"));
+    if (!symlinkOrSkip(t, path.join(repo, "real-adr"), path.join(repo, "adr-link"))) { return; }
+    assert.equal(resolveAdrDir(repo, "adr-link"), path.join(repo, "adr-link"));
+
+    const viaLink = path.join(tmp(), "repo-link");
+    fs.symlinkSync(repo, viaLink);
+    assert.equal(resolveAdrDir(viaLink, "docs/adr"), path.join(viaLink, "docs/adr"));
+  });
+
+  test("a repository path that doesn't exist is refused", () => {
+    assert.equal(resolveAdrDir(path.join(os.tmpdir(), "tracybot-no-such-repo-" + Date.now()), "docs/adr"), undefined);
+  });
+
   test("only markdown files are listed", () => {
     const dir = tmp();
     for (const n of ["a.md", "b.txt", "c.MD"]) { fs.writeFileSync(path.join(dir, n), ""); }
     assert.deepEqual(listAdrFiles(dir).map(f => path.basename(f)), ["a.md", "c.MD"]);
+  });
+
+  test("a symlinked .md file (which could point outside the repository) and a directory named like one are not listed", (t) => {
+    const dir = tmp();
+    const outside = tmp();
+    fs.writeFileSync(path.join(dir, "real.md"), "");
+    fs.writeFileSync(path.join(outside, "secret.md"), "outside");
+    fs.mkdirSync(path.join(dir, "folder.md"));
+    if (!symlinkOrSkip(t, path.join(outside, "secret.md"), path.join(dir, "linked.md"))) { return; }
+
+    assert.deepEqual(listAdrFiles(dir).map(f => path.basename(f)), ["real.md"]);
+  });
+
+  test("an ADR is written into the directory it is given, numbered after what is there, and never overwrites", () => {
+    const repoA = tmp();
+    const repoB = tmp();
+    const dirB = path.join(repoB, "docs", "adr");
+    fs.mkdirSync(dirB, { recursive: true });
+    fs.writeFileSync(path.join(dirB, "0004-old.md"), "keep me");
+
+    const written = writeAdrFile(dirB, "Use cursor pagination", "t1", "# draft\n");
+
+    assert.equal(written, path.join(dirB, "0005-use-cursor-pagination.md"));
+    assert.equal(fs.readFileSync(written, "utf8"), "# draft\n");
+    assert.equal(fs.readFileSync(path.join(dirB, "0004-old.md"), "utf8"), "keep me");
+    assert.deepEqual(fs.readdirSync(repoA), [], "nothing is written to any other repository");
+  });
+
+  test("the first ADR creates the directory, and a second one gets the next number", () => {
+    const dir = path.join(tmp(), "docs", "adr");
+    assert.equal(path.basename(writeAdrFile(dir, "First", "t1", "a")), "0001-first.md");
+    assert.equal(path.basename(writeAdrFile(dir, "Second", "t2", "b")), "0002-second.md");
+  });
+
+  test("a symlink planted at the file name that would be used is not written through", (t) => {
+    const dir = tmp();
+    const outside = path.join(tmp(), "target.md");
+    fs.writeFileSync(outside, "untouched");
+    if (!symlinkOrSkip(t, outside, path.join(dir, "0001-title.md"))) { return; }
+
+    // The planted link takes number 1's name, so the next free number is used and
+    // the file behind the link is left alone.
+    const written = writeAdrFile(dir, "Title", "t1", "draft");
+    assert.equal(fs.readFileSync(outside, "utf8"), "untouched");
+    assert.notEqual(path.basename(written), "0001-title.md");
   });
 });
 
