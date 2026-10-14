@@ -60,7 +60,14 @@ function messagesOf(messages: TaskletMessage[], stage: "plan" | "build", type: "
   return messages.filter(m => m.stage === stage && m.type === type && m.message.trim() !== "").map(m => m.message);
 }
 
-function contextSection(messages: TaskletMessage[]): string {
+// buildHistory appends the questions and answers to the response they were
+// asked in ("<response>\n\n---\n\nQ: ...\n\nA: ..."). The ADR lists them
+// under Considered Options, so repeating them in the context is just noise.
+const APPENDED_QUESTIONS = /\n\n---\n\nQ: [\s\S]*$/;
+
+function contextSection(messages: TaskletMessage[], hasStructuredQuestions: boolean): string {
+  const text = (message: string) => (hasStructuredQuestions ? message.replace(APPENDED_QUESTIONS, "") : message);
+
   const parts: string[] = [
     "## Context and Problem Statement",
     "",
@@ -72,7 +79,7 @@ function contextSection(messages: TaskletMessage[]): string {
   if (planMessages.length > 0) {
     parts.push("**Earlier discussion**", "");
     const shown = planMessages.slice(0, MAX_PLAN_MESSAGES);
-    parts.push(shown.map(m => quote(m.type === "prompt" ? "You" : "AI", m.message)).join("\n>\n"));
+    parts.push(shown.map(m => quote(m.type === "prompt" ? "You" : "AI", text(m.message))).join("\n>\n"));
     if (planMessages.length > shown.length) {
       parts.push("", `_(${planMessages.length - shown.length} more discussion messages not shown)_`);
     }
@@ -81,12 +88,12 @@ function contextSection(messages: TaskletMessage[]): string {
 
   const buildPrompt = messagesOf(messages, "build", "prompt")[0];
   if (buildPrompt) {
-    parts.push("**Request**", "", quote("You", buildPrompt), "");
+    parts.push("**Request**", "", quote("You", text(buildPrompt)), "");
   }
 
   const buildResponse = messagesOf(messages, "build", "response")[0];
   if (buildResponse) {
-    parts.push("**What the AI did**", "", quote("AI", buildResponse), "");
+    parts.push("**What the AI did**", "", quote("AI", text(buildResponse)), "");
   }
 
   parts.push("_TODO: restate the problem in your own words._");
@@ -156,6 +163,9 @@ export function buildAdr(history: History, key: string, opts: BuildAdrOptions): 
     : first.originCommitAuthorDate !== undefined ? first.originCommitAuthorDate.slice(0, 10) : isoDay(now);
 
   const questions = entries.map(e => e.tasklet.questions ?? []).find(q => q.length > 0) ?? [];
+  // `tasklet.model` holds the agent's name ("opencode", "claude-code"), not a
+  // model; the model that actually answered is recorded on the messages.
+  const model = entries.flatMap(e => e.tasklet.messages).find(m => m.model)?.model;
   const { options, outcome } = optionsSections(questions, first.agentSource);
 
   const frontMatter = [
@@ -166,7 +176,7 @@ export function buildAdr(history: History, key: string, opts: BuildAdrOptions): 
     `tracybot-tasklet: ${yamlString(key)}`,
     `tracybot-status-basis: ${yamlString(describeStatusBasis(status, isoDay(now)))}`,
     ...(first.agentSource ? [`tracybot-agent: ${first.agentSource}`] : []),
-    ...(first.model ? [`tracybot-model: ${yamlString(first.model)}`] : []),
+    ...(model ? [`tracybot-model: ${yamlString(model)}`] : []),
     ...(first.sessionId ? [`tracybot-session: ${yamlString(first.sessionId)}`] : []),
     ...(first.originCommitHash ? [`tracybot-commit: ${first.originCommitHash}`] : []),
     "---",
@@ -189,7 +199,7 @@ export function buildAdr(history: History, key: string, opts: BuildAdrOptions): 
   const body = [
     `# ${title}`,
     "",
-    contextSection(first.messages),
+    contextSection(first.messages, questions.length > 0),
     "",
     "## Decision Drivers",
     "",
