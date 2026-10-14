@@ -133,6 +133,15 @@ npm run compile
 
 Open `vscode-extension` in VS Code and press `F5` to launch the extension host.
 
+Tests:
+
+```bash
+npm run test:unit   # fast unit tests, no VS Code needed
+npm test            # integration tests inside a real VS Code (downloads it on the first run)
+```
+
+`npm test` needs Node 22 or newer (what `@vscode/test-electron` 3.x requires). It uses a recent VS Code, whose macOS bundle ships `Code` rather than `Electron`, which `@vscode/test-electron` 2.x could not launch (`spawn .../Contents/MacOS/Electron ENOENT`).
+
 ### Work on the OpenCode Plugin
 
 ```bash
