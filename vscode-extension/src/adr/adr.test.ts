@@ -17,11 +17,12 @@ const NOW = new Date("2026-10-13T10:00:00.000Z");
 function entry(over: Partial<Entry> = {}): Entry {
   return {
     id: "snap-1",
-    model: "anthropic/claude-sonnet-5",
+    // As in real data: tasklet.model is the agent's name, the model is on the messages.
+    model: "opencode",
     name: "Add caching to the orders API",
     messages: [
-      { stage: "build", type: "prompt", message: "Add caching to the orders API" },
-      { stage: "build", type: "response", message: "Added an in-memory cache." },
+      { stage: "build", type: "prompt", model: "anthropic/claude-sonnet-5", message: "Add caching to the orders API" },
+      { stage: "build", type: "response", model: "anthropic/claude-sonnet-5", message: "Added an in-memory cache." },
     ],
     lines: [1, 2, 3],
     ghostLines: [],
@@ -122,6 +123,40 @@ describe("buildAdr", () => {
     assert.match(markdown, /tracybot-session: "s1"\n/);
     assert.match(markdown, /tracybot-commit: abc1234def\n/);
     assert.match(markdown, /\n# Cache the orders API\n/);
+  });
+
+  test("the model is the one recorded on the messages, never the agent name that tasklet.model holds", () => {
+    const withModel = build(one({
+      model: "opencode",
+      messages: [
+        { stage: "build", type: "prompt", model: "anthropic/claude-sonnet-4-6", message: "Add caching" },
+        { stage: "build", type: "response", model: "anthropic/claude-sonnet-4-6", message: "Done." },
+      ],
+    })).markdown;
+    assert.match(withModel, /tracybot-agent: opencode\n/);
+    assert.match(withModel, /tracybot-model: "anthropic\/claude-sonnet-4-6"\n/);
+    assert.ok(!withModel.includes('tracybot-model: "opencode"'));
+
+    const noModel = build(one({ model: "opencode", messages: [{ stage: "build", type: "prompt", message: "x" }] })).markdown;
+    assert.ok(!noModel.includes("tracybot-model:"), "no model recorded: say nothing rather than repeat the agent name");
+  });
+
+  test("questions and answers appended to a response are not repeated in the context when they are listed as options", () => {
+    const q = { question: "Which store?", header: "Store", options: [{ label: "Redis", description: "" }], answer: ["Redis"], outputId: "plan_0" };
+    const messages = [
+      { stage: "plan" as const, type: "prompt" as const, message: "Which cache should we use?" },
+      { stage: "plan" as const, type: "response" as const, message: "Redis or memcached.\n\n---\n\nQ: Which store?\n\nA: Redis" },
+      { stage: "build" as const, type: "prompt" as const, message: "go" },
+    ];
+    const { markdown } = build(one({ messages, questions: [q] }));
+
+    assert.ok(markdown.includes("Redis or memcached."), "the response itself is still quoted");
+    assert.equal((markdown.match(/Which store\?/g) ?? []).length, 1, "the question appears once, under Considered Options");
+    assert.ok(!markdown.includes("A: Redis"));
+
+    // Without structured questions the text is left exactly as it was recorded.
+    const kept = build(one({ messages, questions: [] })).markdown;
+    assert.ok(kept.includes("A: Redis"));
   });
 
   test("the human-only sections are left as TODOs", () => {
