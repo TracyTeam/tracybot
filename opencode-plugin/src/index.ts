@@ -1,6 +1,12 @@
-import type { Plugin, PluginInput } from "@opencode-ai/plugin"
-import type { Part, UserMessage } from "@opencode-ai/sdk"
-import type { Tasklet, PlanOutput, BuildOutput, Question, UserMessageWrapper } from "./Tasklet"
+// Tracybot plugin for OpenCode 2.x.
+//
+// OpenCode 2.x only loads plugins whose module default-exports
+// `{ id, setup(ctx) }` (or `{ id, effect }`). The 1.x shape, a named export of
+// an `async (input) => hooks` function, is rejected at load time with
+// "Plugin must export a default definition with an id and an effect or setup
+// function", which left every OpenCode edit unattributed.
+import type { Plugin } from "@opencode/plugin"
+import type { Tasklet, PlanOutput, BuildOutput, Question } from "./Tasklet"
 import path from "path"
 import fs from "fs"
 import { Logger } from "./Logger"
@@ -28,381 +34,273 @@ function resolveGitDir(repoRoot: string): string {
     }
 }
 
-const EDIT_TOOLS = new Set(["edit", "write", "patch", "multiedit", "apply_patch", "applypatch"])
+type Context = Plugin.Context
+type SessionMessages = Awaited<ReturnType<Context["session"]["context"]>>
+type SessionMessage = SessionMessages[number]
+type UserMessage = Extract<SessionMessage, { type: "user" }>
+type AssistantMessage = Extract<SessionMessage, { type: "assistant" }>
 
-type UserMessageModel = UserMessage["model"];
+// Tools that change files. A user snapshot is taken before the first of these
+// in a turn so pending human edits aren't attributed to the agent.
+const EDIT_TOOLS = new Set(["edit", "write", "patch", "multiedit", "apply_patch", "applypatch", "shell", "bash"])
+const BUILD_AGENT = "build"
 
-const getFormattedModel = (model: UserMessageModel): string => {
-    return `${model.providerID}/${model.modelID}`;
-};
+// One user prompt and the assistant messages that answered it. OpenCode 2.x
+// no longer stores the agent or model on user messages, so both are read
+// from the answering assistant messages.
+interface Turn {
+    user: UserMessage
+    assistants: AssistantMessage[]
+    agent: string | undefined
+}
 
-export const MyPlugin: Plugin = async (input: PluginInput) => {
-    const { client, $, directory } = input
-    const L = new Logger(client)
-
-    async function getRepoRoot(): Promise<string | null> {
-        try {
-            const result = await $`git rev-parse --show-toplevel`.cwd(directory).quiet()
-            return Buffer.from(result.stdout).toString('utf8').trim() as string
-        } catch {
-            return null
+function toTurns(messages: SessionMessages): Turn[] {
+    const turns: Turn[] = []
+    let currentAgent: string | undefined
+    for (const message of messages) {
+        if (message.type === "agent-switched") {
+            currentAgent = message.agent
+        } else if (message.type === "user") {
+            turns.push({ user: message, assistants: [], agent: currentAgent })
+        } else if (message.type === "assistant") {
+            const turn = turns[turns.length - 1]
+            if (!turn) continue
+            if (turn.assistants.length === 0) turn.agent = message.agent
+            turn.assistants.push(message)
+            currentAgent = message.agent
         }
     }
-    await L.info("DEBUG directory", { directory })
-    const repoRoot = await getRepoRoot()
-    if (!repoRoot) {
-        await L.error("Not a git repo")
-        return {} // No-op
-    }
+    return turns
+}
 
-    async function resolveTracyPath(repoRoot: string): Promise<string | undefined> {
-        if (process.env.TRACY_SNAPSHOT_SCRIPT) {
+const isBuild = (turn: Turn) => turn.agent === BUILD_AGENT
+
+const assistantText = (assistants: AssistantMessage[]): string =>
+    assistants
+        .map(message => message.content.flatMap(part => part.type === "text" && part.text ? [part.text] : []).join("\n\n---\n\n"))
+        .filter(text => text.trim().length > 0)
+        .join("\n\n---\n\n")
+
+const turnModel = (turn: Turn): string => {
+    const model = turn.assistants[turn.assistants.length - 1]?.model
+    return model ? `${model.providerID}/${model.id}` : "unknown"
+}
+
+const turnOutput = (turn: Turn, id: string): PlanOutput & BuildOutput => ({
+    id,
+    model: turnModel(turn),
+    prompt: turn.user.text,
+    response: assistantText(turn.assistants),
+    promptCreatedAt: turn.user.time.created,
+    responseCompletedAt: turn.assistants[turn.assistants.length - 1]?.time.completed ?? null,
+})
+
+// Plan turns since the build turn before `index`, which are the turns a
+// tasklet ending at `index` carries as its planOutputs.
+function planTurnsBefore(turns: Turn[], index: number): Turn[] {
+    let prevBuild = -1
+    for (let i = index - 1; i >= 0; i--) {
+        if (isBuild(turns[i]!)) {
+            prevBuild = i
+            break
+        }
+    }
+    return turns.slice(prevBuild + 1, index).filter(turn => !isBuild(turn))
+}
+
+const tracybot: Plugin.Plugin = {
+    id: "tracybot",
+    setup: async (ctx) => {
+        const L = new Logger()
+        const directory = ctx.location.directory
+
+        const repoRootResult = await Bun.$`git rev-parse --show-toplevel`.cwd(directory).quiet().nothrow()
+        if (repoRootResult.exitCode !== 0) {
+            await L.error("Not a git repo", { directory })
+            return
+        }
+        const repoRoot = repoRootResult.stdout.toString("utf8").trim()
+
+        async function resolveTracyPath(): Promise<string | undefined> {
+            if (process.env.TRACY_SNAPSHOT_SCRIPT) {
+                return path.resolve(repoRoot, process.env.TRACY_SNAPSHOT_SCRIPT)
+            }
+
+            const configFile = Bun.file(path.join(resolveGitDir(repoRoot), "tracybot", "config"))
+            if (!(await configFile.exists())) return
+
+            // Try UTF-8 first; fall back to windows-1252 for config files written
+            // before the utf-8 fix was applied to init.py (Windows default encoding).
+            const bytes = await configFile.bytes()
+            let text: string
+            try {
+                text = new TextDecoder("utf-8", { fatal: true }).decode(bytes)
+            } catch {
+                text = new TextDecoder("windows-1252").decode(bytes)
+            }
+
+            for (const line of text.replace(/^﻿/, "").split("\n")) {
+                const trimmedLine = line.trim()
+                // Skip empty lines and comments (matches Python hook parsing)
+                if (!trimmedLine || trimmedLine.startsWith("#")) continue
+                const eqIndex = trimmedLine.indexOf("=")
+                if (eqIndex === -1) continue
+                const key = trimmedLine.substring(0, eqIndex).trim()
+                const value = trimmedLine.substring(eqIndex + 1).trim()
+                if (key) process.env[key] = value.replace(/\r/g, "")
+            }
+
+            if (!process.env.TRACY_SNAPSHOT_SCRIPT) return
             return path.resolve(repoRoot, process.env.TRACY_SNAPSHOT_SCRIPT)
         }
 
-        const configPath = path.join(resolveGitDir(repoRoot), "tracybot", "config")
-        const configFile = Bun.file(configPath)
-
-        if (!(await configFile.exists())) return
-
-        // cannot use dotenv, so enjoy this handrolled env parsing
-        // Try UTF-8 first; fall back to windows-1252 for config files written
-        // before the utf-8 fix was applied to init.py (Windows default encoding).
-        const bytes = await configFile.bytes()
-        let text: string
-        try {
-            text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
-        } catch {
-            text = new TextDecoder('windows-1252').decode(bytes)
-        }
-        // Remove UTF-8 BOM (safeguard for cross-platform edge cases)
-        const cleanedText = text.replace(/^\uFEFF/, '');
-
-        for (const line of cleanedText.split("\n")) {
-            const trimmedLine = line.trim();
-            // Skip empty lines and comments (matches Python hook parsing)
-            if (!trimmedLine || trimmedLine.startsWith("#")) continue;
-
-            // Split on FIRST = only (avoids issues with edge cases)
-            const eqIndex = trimmedLine.indexOf("=");
-            if (eqIndex === -1) continue;
-
-            const key = trimmedLine.substring(0, eqIndex).trim();
-            const value = trimmedLine.substring(eqIndex + 1).trim();
-
-            if (key && value !== undefined) {
-                process.env[key] = value.replace(/\r/g, '');
-            }
+        const tracyPath = await resolveTracyPath()
+        if (!tracyPath || !(await Bun.file(tracyPath).exists())) {
+            await L.error("tracy.py not found", { repoRoot })
+            return
         }
 
-        if (!process.env.TRACY_SNAPSHOT_SCRIPT) return
-        return path.resolve(repoRoot, process.env.TRACY_SNAPSHOT_SCRIPT)
-    }
-
-    const tracyPath = await resolveTracyPath(repoRoot)
-    const isInstalled = tracyPath ? await Bun.file(tracyPath).exists() : false
-
-    if (!isInstalled || !tracyPath) {
-        await L.error("tracy.py not found")
-        return {} // No-op
-    }
-
-    await L.info("Plugin initialized", { repoRoot, tracyPath })
-
-    let pythonCmd;
-    if ((await $`python3 --version`.quiet().nothrow()).exitCode === 0) {
-        pythonCmd = 'python3'
-        await L.info("Detected python command: python3")
-    } else {
-        if ((await $`python --version`.quiet().nothrow()).exitCode === 0) {
-            pythonCmd = 'python'
-            await L.info("Detected python command: python")
+        let pythonCmd: string
+        if ((await Bun.$`python3 --version`.quiet().nothrow()).exitCode === 0) {
+            pythonCmd = "python3"
+        } else if ((await Bun.$`python --version`.quiet().nothrow()).exitCode === 0) {
+            pythonCmd = "python"
         } else {
             await L.error("Neither python nor python3 is available")
-            return {}
+            return
         }
-    }
 
-    let sessions = new Set<string>()
-    const snapshotLocks = new Map<string, Promise<void>>()
-    const taskletToolCounter = new Map<string, number>()
-    const lastBuildId = new Map<string, string>()
+        await L.info("Plugin initialized", { repoRoot, tracyPath, pythonCmd, opencode: ctx.app.version })
 
-    const sessionQuestions = new Map<string, Question[]>()
-    const pendingQuestionsIndices = new Map<string, string[]>()
+        const snapshotLocks = new Map<string, Promise<void>>()
+        const toolCounter = new Map<string, number>()
+        const lastBuildId = new Map<string, string>()
+        const sessionQuestions = new Map<string, Question[]>()
+        const idleLocks = new Map<string, Promise<void>>()
 
-    async function createTasklet(sessionId: string): Promise<Tasklet | undefined> {
-        const response = await client.session.messages({
-            path: { id: sessionId }
+        async function createTasklet(sessionId: string): Promise<Tasklet | undefined> {
+            const turns = toTurns(await ctx.session.context({ sessionID: sessionId }))
+
+            let buildIndex = -1
+            for (let i = turns.length - 1; i >= 0; i--) {
+                if (isBuild(turns[i]!)) {
+                    buildIndex = i
+                    break
+                }
+            }
+            const buildTurn = turns[buildIndex]
+            if (!buildTurn) {
+                await L.debug("No build turn found, skipping tasklet creation", { sessionId })
+                return
+            }
+            if (buildTurn.user.id === lastBuildId.get(sessionId)) {
+                await L.debug(`Build ${buildTurn.user.id} already processed, skipping`)
+                return
+            }
+
+            const planOutputs = planTurnsBefore(turns, buildIndex).map((turn, idx) => turnOutput(turn, `plan_${idx}`))
+            const session = await ctx.session.get({ sessionID: sessionId }).catch(() => undefined)
+
+            const tasklet: Tasklet = {
+                id: `tasklet_${sessionId}_${Date.now()}`,
+                sessionId,
+                title: session?.title?.trim(),
+                planOutputs,
+                buildOutput: turnOutput(buildTurn, `build_${planOutputs.length}`),
+                questions: sessionQuestions.get(sessionId) ?? [],
+            }
+
+            lastBuildId.set(sessionId, buildTurn.user.id)
+            sessionQuestions.delete(sessionId)
+            return tasklet
+        }
+
+        async function onIdle(sessionId: string) {
+            snapshotLocks.delete(sessionId)
+
+            const toolCount = toolCounter.get(sessionId) ?? 0
+            if (toolCount === 0) return
+
+            const tasklet = await createTasklet(sessionId)
+            if (!tasklet) return
+
+            const result = await Bun.$`${pythonCmd} ${tracyPath} --user-name opencode --user-email opencode --description ${JSON.stringify(tasklet)} --session-id ${tasklet.sessionId}`
+                .cwd(repoRoot)
+                .quiet()
+                .nothrow()
+            if (result.exitCode !== 0) {
+                await L.error("tracy.py failed to record the AI snapshot", {
+                    exitCode: result.exitCode,
+                    stderr: result.stderr.toString("utf8"),
+                })
+                return
+            }
+            toolCounter.set(sessionId, 0)
+            await L.info("Recorded OpenCode snapshot", { taskletId: tasklet.id, toolCount })
+        }
+
+        // Runs when a session finishes its model work, just before it goes idle.
+        // (`ctx.event.subscribe` never delivers session.status/session.idle to
+        // plugins in 2.3.2.) The work is queued rather than awaited: a hook that
+        // throws fails the session's execution, and the session shouldn't wait
+        // on tracy.py. The per-session chain keeps snapshots in order.
+        await ctx.session.hook("experimental.idle", (event) => {
+            const sessionId = event.sessionID
+            const next = (idleLocks.get(sessionId) ?? Promise.resolve())
+                .then(() => onIdle(sessionId))
+                .catch(error => L.error("Failed to record snapshot on idle", { sessionId, error: String(error) }))
+            idleLocks.set(sessionId, next)
         })
 
-        const title = (await client.session.get({ path: { id: sessionId } }))
-            .data?.title.trim()
+        await ctx.tool.hook("execute.before", async (event) => {
+            const sessionId = event.sessionID
+            toolCounter.set(sessionId, (toolCounter.get(sessionId) ?? 0) + 1)
 
-        const allMessages = response.data ?? []
+            if (!EDIT_TOOLS.has(event.tool)) return
 
-        const getTextFromParts = (parts: Part[] | undefined): string => {
-            if (!parts) return ""
-            return parts
-                .flatMap(part => part.type === "text" && part.text ? [part.text] : [])
-                .join("\n\n---\n\n")
-        }
-
-        const buildUserMsg = [...allMessages].reverse().find(
-            (message): message is UserMessageWrapper =>
-                message.info.role === "user" && message.info.agent === "build"
-        )
-
-        if (!buildUserMsg) {
-            await L.debug("No build user message found, skipping tasklet creation")
-            return
-        }
-
-        const lastBuild = lastBuildId.get(sessionId)
-        if (buildUserMsg.info.id === lastBuild) {
-            await L.debug(`Build ${buildUserMsg.info.id} already processed, skipping`)
-            return
-        }
-        const currentBuildIndex = allMessages.indexOf(buildUserMsg)
-        if (currentBuildIndex === -1) {
-            await L.error("Current build message not found in allMessages")
-            return
-        }
-
-        let prevBuildIndex = -1
-        for (let i = currentBuildIndex - 1; i >= 0; i--) {
-            const msg = allMessages[i]
-            if (msg && msg.info.role === "user" && msg.info.agent === "build") {
-                prevBuildIndex = i
-                break
-            }
-        }
-
-        const planOutputs: PlanOutput[] = allMessages
-            .slice(prevBuildIndex + 1, currentBuildIndex)
-            .filter((msg): msg is UserMessageWrapper =>
-                msg.info.role === "user" && msg.info.agent !== "build"
-            )
-            .map((userMsg, idx) => {
-                const assistantMsgs = allMessages.filter((message) =>
-                    message.info.role === "assistant" && message.info.parentID === userMsg.info.id
-                )
-                const lastAssistantMsg = assistantMsgs[assistantMsgs.length - 1]
-                return {
-                    id: `plan_${idx}`,
-                    model: getFormattedModel(userMsg.info.model),
-                    prompt: getTextFromParts(userMsg.parts),
-                    response: assistantMsgs
-                        .map(message => getTextFromParts(message.parts))
-                        .filter(text => text.trim().length > 0)
-                        .join("\n\n---\n\n"),
-                    promptCreatedAt: userMsg.info.time.created,
-                    responseCompletedAt: lastAssistantMsg?.info.role === "assistant"
-                        ? lastAssistantMsg.info.time.completed ?? null
-                        : null,
-                }
-            })
-
-        const storedQuestions = sessionQuestions.get(sessionId) ?? []
-        const finalPlanCount = planOutputs.length
-        await L.info(`Processing ${storedQuestions.length} stored questions, finalPlanCount: ${finalPlanCount}`, { storedQuestions })
-
-        const buildAssistantMsgs = allMessages.filter(
-            (message) => message.info.role === "assistant" &&
-                message.info.parentID === buildUserMsg.info.id
-        )
-
-
-        const lastBuildAssistantMsg = buildAssistantMsgs[buildAssistantMsgs.length - 1]
-        const buildOutput: BuildOutput = {
-            id: `build_${planOutputs.length}`,
-            model: getFormattedModel(buildUserMsg.info.model),
-            prompt: getTextFromParts(buildUserMsg.parts),
-            response: buildAssistantMsgs
-                .map(message => getTextFromParts(message.parts))
-                .filter(text => text.trim().length > 0)
-                .join("\n\n---\n\n"),
-            promptCreatedAt: buildUserMsg.info.time.created,
-            responseCompletedAt: lastBuildAssistantMsg?.info.role === "assistant"
-                ? lastBuildAssistantMsg.info.time.completed ?? null
-                : null,
-        }
-
-        const tasklet: Tasklet = {
-            id: `tasklet_${sessionId}_${Date.now()}`,
-            sessionId,
-            title,
-            planOutputs,
-            buildOutput,
-            questions: storedQuestions
-        }
-
-        await L.debug(`Created tasklet: ${tasklet.id}`, { tasklet })
-
-        lastBuildId.set(sessionId, buildUserMsg.info.id)
-        sessionQuestions.delete(sessionId)
-        return tasklet
-    }
-
-    return {
-        event: async ({ event }) => {
-            if (event.type === "session.created") {
-                const sessionId = event.properties.info.id
-                if (sessionId) {
-                    sessions.add(sessionId)
-                    taskletToolCounter.set(sessionId, 0)
-                }
-                return
-            }
-
-            if (event.type === "session.deleted") {
-                const sessionId = event.properties.info.id
-                if (sessionId) {
-                    sessions.delete(sessionId)
-                    lastBuildId.delete(sessionId)
-                }
-                return
-            }
-
-            if (event.type === "session.idle") {
-                const idleSessionId = event.properties.sessionID
-
-                snapshotLocks.delete(idleSessionId)
-
-                if (sessions.has(idleSessionId)) {
-
-                    const toolCount = taskletToolCounter.get(idleSessionId) ?? 0
-                    await L.info(`Tool count for session ${idleSessionId}: ${toolCount}`)
-
-                    if (toolCount === 0) {
-                        await L.info("No tool activity → skipping tracy.py")
+            // Snapshot the human's pending changes once per turn, before the agent's first edit.
+            if (!snapshotLocks.has(sessionId)) {
+                snapshotLocks.set(sessionId, (async () => {
+                    const result = await Bun.$`${pythonCmd} ${tracyPath}`.cwd(repoRoot).quiet().nothrow()
+                    if (result.exitCode !== 0) {
+                        await L.error("tracy.py failed to record the user snapshot", {
+                            exitCode: result.exitCode,
+                            stderr: result.stderr.toString("utf8"),
+                        })
                         return
                     }
-
-                    const tasklet = await createTasklet(idleSessionId) // TODO: CACHE THIS PLEASE FOR THE LOVE OF GOD // No :)
-
-                    if (!tasklet) {
-                        await L.debug("Skipping tasklet creation: no build user message found")
-                        return
-                    }
-
-                    const output = await $`${pythonCmd} ${tracyPath} --user-name "opencode" --user-email "opencode" --description ${JSON.stringify(tasklet)} --session-id "${tasklet.sessionId}" `.cwd(repoRoot).text()
-                    await L.info(`committed OC changes. tracy.py: ${output.trim()}`, { tasklet })
-
-                    taskletToolCounter.set(idleSessionId, 0)
-                }
-                return
+                    await L.info("Created user snapshot", { tool: event.tool })
+                })())
             }
-        },
+            await snapshotLocks.get(sessionId)
+        })
 
-        "tool.execute.before": async (input, output) => {
+        await ctx.tool.hook("execute.after", async (event) => {
+            if (event.tool !== "question" || event.status !== "completed") return
 
-            const sessionId = input.sessionID
-            if (sessionId) {
-                const current = taskletToolCounter.get(sessionId) ?? 0
-                taskletToolCounter.set(sessionId, current + 1)
-            }
+            const input = event.input as { questions?: Array<{ question: string; header: string; options: Array<{ label: string; description: string }> }> }
+            const questions = input.questions ?? []
+            const metadata = event.result.metadata as { answers?: string[][] } | undefined
+            const output = event.result.output as { answers?: string[][] } | undefined
+            const answers = metadata?.answers ?? output?.answers ?? []
 
-            // Edit tool -> create user snapshot before the file is edited
-            if (EDIT_TOOLS.has(input.tool)) {
-                const sessionId = input.sessionID
-                if (!sessionId) return
+            // The question belongs to the session's latest turn. Its output id
+            // matches the one createTasklet will give that turn.
+            const turns = toTurns(await ctx.session.context({ sessionID: event.sessionID }))
+            const index = turns.length - 1
+            const planCount = index >= 0 ? planTurnsBefore(turns, index).length : 0
+            const outputId = event.agent === BUILD_AGENT ? `build_${planCount}` : `plan_${planCount}`
 
-                const path = output.args.filePath as string | undefined
-                if (!path) {
-                    await L.warn(`skill issue: missing path in tool.execute.before hook`, { input, output })
-                }
-
-                if (!snapshotLocks.has(sessionId)) {
-                    const lockPromise = (async () => {
-                        const result = await $`${pythonCmd} "${tracyPath}"`
-                            .cwd(repoRoot)
-                            .quiet()
-
-                        if (result.exitCode !== 0) {
-                            await L.error("Python failed", {
-                                stdout: Buffer.from(result.stdout).toString('utf8'),
-                                stderr: Buffer.from(result.stderr).toString('utf8'),
-                                exitCode: result.exitCode
-                            })
-                            return
-                        }
-
-                        await L.info(
-                            `created user snapshot for ${path}. tracy.py: ${Buffer.from(result.stdout).toString('utf8').trim()}`
-                        )
-                    })()
-
-                    snapshotLocks.set(sessionId, lockPromise)
-                }
-
-                await snapshotLocks.get(sessionId)
-            }
-            // Question tool -> save the question
-            else if (input.tool == "question") {
-                const sessionId = input.sessionID
-
-                const callID = input.callID
-                if (!sessionId || !callID) return
-
-                const messages = await client.session.messages({ path: { id: sessionId } })
-                const planCount = messages.data?.filter(m => m.info.role === "user" && m.info.agent !== "build").length ?? 0
-                const hasBuild = messages.data?.some(m => m.info.role === "user" && m.info.agent === "build")
-
-                const outputId = hasBuild ? `build_${planCount}` : `plan_${planCount === 0 ? 0 : planCount - 1}`
-
-                const existing = pendingQuestionsIndices.get(`${sessionId}:${callID}`) ?? []
-                pendingQuestionsIndices.set(`${sessionId}:${callID}`, [...existing, outputId])
-                await L.debug(`Pending questions stored: ${sessionId}:${callID} -> ${outputId}`)
-            }
-        },
-
-
-        "tool.execute.after": async (input, output) => {
-            if (input.tool === "question") {
-                const questionsArg = input.args.questions as Array<{
-                    question: string
-                    header: string
-                    options: Array<{ label: string; description: string }>
-                }>
-
-                const outputIds = pendingQuestionsIndices.get(`${input.sessionID}:${input.callID}`) ?? []
-                let outputId = outputIds.shift()
-
-                if (outputId === undefined) {
-                    const messages = await client.session.messages({ path: { id: input.sessionID } })
-                    const planCount = messages.data?.filter(m => m.info.role === "user" && m.info.agent !== "build").length ?? 0
-                    const hasBuild = messages.data?.some(m => m.info.role === "user" && m.info.agent === "build")
-
-                    outputId = hasBuild ? `build_${planCount}` : `plan_${planCount === 0 ? 0 : planCount - 1}`
-
-                    await L.warn(`Question planOutputIndex is not found in the pending map, using fallback: ${outputId}`)
-                } else {
-                    pendingQuestionsIndices.delete(`${input.sessionID}:${input.callID}`)
-                    await L.info(`Retrieved question planOutputIndex: ${outputId} for ${input.sessionID}:${input.callID}`)
-                }
-
-                for (let i = 0; i < questionsArg.length; i++) {
-                    const q = questionsArg[i]
-                    if (q) {
-                        const question: Question = {
-                            question: q.question,
-                            header: q.header,
-                            options: q.options,
-                            answer: output.metadata.answers[i] ?? [],
-                            outputId
-                        }
-
-                        const existing = sessionQuestions.get(input.sessionID) ?? []
-                        sessionQuestions.set(input.sessionID, [...existing, question])
-                    } else {
-                        await L.error("Question not found when tool was called")
-                    }
-                }
-
-            } else {
-                return
-            }
-        }
-    }
+            const stored = questions.map((q, i): Question => ({
+                question: q.question,
+                header: q.header,
+                options: q.options.map(option => ({ label: option.label, description: option.description })),
+                answer: answers[i] ?? [],
+                outputId,
+            }))
+            sessionQuestions.set(event.sessionID, [...(sessionQuestions.get(event.sessionID) ?? []), ...stored])
+        })
+    },
 }
+
+export default tracybot

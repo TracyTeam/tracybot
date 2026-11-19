@@ -1,25 +1,25 @@
-import type { createOpencodeClient } from "@opencode-ai/sdk/client";
+import { appendFile, mkdir } from "node:fs/promises"
+import { homedir } from "node:os"
+import path from "node:path"
 
 type Extras = { [key: string]: unknown }
-type Client = ReturnType<typeof createOpencodeClient>
+type Level = "debug" | "info" | "error" | "warn"
+
+// OpenCode 2.x plugins have no logging API (1.x had client.app.log), so the
+// plugin writes JSON lines next to OpenCode's own logs. `bun run logs` reads them.
+export const LOG_PATH = path.join(homedir(), ".local", "share", "opencode", "log", "tracybot-plugin.jsonl")
 
 export class Logger {
-    private PLUGIN_NAME = "tracybot-plugin"
-    private client: Client
+    private ready: Promise<unknown> = mkdir(path.dirname(LOG_PATH), { recursive: true }).catch(() => {})
 
-    constructor(client: Client) {
-        this.client = client
-    }
-
-    private async _log(level: "debug" | "info" | "error" | "warn", msg: string, extra?: Extras) {
-        await this.client.app.log({
-            body: {
-                service: this.PLUGIN_NAME,
-                level: level,
-                message: msg,
-                extra: extra,
-            },
-        })
+    private async _log(level: Level, msg: string, extra?: Extras) {
+        const line = JSON.stringify({ timestamp: new Date().toISOString(), service: "tracybot-plugin", level, message: msg, extra })
+        try {
+            await this.ready
+            await appendFile(LOG_PATH, line + "\n")
+        } catch {
+            // Logging must never break the agent.
+        }
     }
 
     public async debug(msg: string, extra?: Extras) {
