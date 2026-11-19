@@ -1,4 +1,6 @@
-import type { Part, UserMessage } from "@opencode-ai/sdk"
+// Shape of the description JSON tracy.py stores on each AI snapshot commit.
+// The VS Code extension parses this (see parseOpenCodeTasklet in
+// vscode-extension/src/history/buildHistory.ts), so keep it stable.
 
 export interface Tasklet {
     id: string
@@ -7,11 +9,6 @@ export interface Tasklet {
     planOutputs: PlanOutput[]
     buildOutput: BuildOutput
     questions: Question[]
-}
-
-export interface UserMessageWrapper {
-    info: UserMessage
-    parts: Part[]
 }
 
 export interface PlanOutput {
