@@ -19,6 +19,7 @@ Tracybot is a tool that traces AI-generated code back to the prompts that create
 - **Seamless Integration** - Works with OpenCode CLI, Claude Code, Codex CLI, and Visual Studio Code
 - **Audit Trail** - Review AI interactions to verify, debug, or understand code origins
 - **Team Sync** - Push traces to remote for team collaboration
+- **ADR drafts** - Turn a tasklet into an Architecture Decision Record draft (no LLM), whose status follows what happens to the code — see [docs/adr.md](./docs/adr.md)
 - **Research Mode** - Optional, opt-in sharing of your Tasklet history for a research study on AI-assisted coding behavior — see [docs/research-mode.md](./docs/research-mode.md)
 
 ## Supported Agents and Editors
@@ -40,7 +41,7 @@ Available on the [VS Code Marketplace](https://marketplace.visualstudio.com/item
 
 ### 1. Install the VS Code Extension
 
-This is the entry point to Tracybot. The extension can open AI Blame, automatically initializes Tracybot in the current repository, and automatically installs plugins for any supported agent it detects on your machine.
+This is the entry point to Tracybot. The extension can open AI Blame, offers to initialize Tracybot in the repositories you open, and automatically installs plugins for any supported agent it detects on your machine.
 
 You can install the extension directly within VS Code:
 1. Open VS Code and go to the **Extensions** view (`Ctrl+Shift+X` or `Cmd+Shift+X`).
@@ -53,7 +54,7 @@ Alternatively, visit the [Tracybot VS Code Marketplace page](https://marketplace
 
 When the extension activates, it adds an `AI Blame` status bar item on the right side of VS Code.
 
-If Tracybot has not been initialized in the open repository yet, the extension initializes it automatically.
+If Tracybot has not been initialized in the open repository yet, the extension asks whether to initialize it: **Initialize**, **Not now** (asked again next time), or **Never for this project**. You can initialize later with the **Tracybot: Initialize in This Repository** command. Once a repository is initialized, the extension asks whether to enable [Research Mode](./docs/research-mode.md) for it.
 
 If you prefer to initialize from the terminal instead, run:
 
@@ -131,6 +132,15 @@ npm run compile
 ```
 
 Open `vscode-extension` in VS Code and press `F5` to launch the extension host.
+
+Tests:
+
+```bash
+npm run test:unit   # fast unit tests, no VS Code needed
+npm test            # integration tests inside a real VS Code (downloads it on the first run)
+```
+
+`npm test` needs Node 22 or newer (what `@vscode/test-electron` 3.x requires). It uses a recent VS Code, whose macOS bundle ships `Code` rather than `Electron`, which `@vscode/test-electron` 2.x could not launch (`spawn .../Contents/MacOS/Electron ENOENT`).
 
 ### Work on the OpenCode Plugin
 

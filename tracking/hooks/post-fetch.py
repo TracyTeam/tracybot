@@ -2,7 +2,6 @@ import subprocess
 import os
 from pathlib import Path
 
-LOCK_FILE = ".git/tracybot/fetch-repair.lock"
 
 TRACY_FETCH_RULES = [
     "+refs/heads/*:refs/remotes/origin/*",
@@ -26,21 +25,28 @@ def run_git(args, capture=False, check=False):
         return None if capture else False
 
 
+# `.git` is a file (not a directory) in a linked worktree or submodule, so the
+# lock can't be built as ".git/tracybot/..." — ask git for the real location.
+def lock_path():
+    common = run_git(["rev-parse", "--git-common-dir"], capture=True)
+    git_dir = (Path(os.getcwd()) / common) if common else (Path(os.getcwd()) / ".git")
+    return git_dir / "tracybot" / "fetch-repair.lock"
+
+
 def is_locked():
-    lock_path = Path(os.getcwd()) / LOCK_FILE
-    return lock_path.exists()
+    return lock_path().exists()
 
 
 def create_lock():
-    lock_path = Path(os.getcwd()) / LOCK_FILE
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path.touch()
+    path = lock_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.touch()
 
 
 def remove_lock():
-    lock_path = Path(os.getcwd()) / LOCK_FILE
-    if lock_path.exists():
-        lock_path.unlink()
+    path = lock_path()
+    if path.exists():
+        path.unlink()
 
 
 def origin_exists():

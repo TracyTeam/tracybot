@@ -8,7 +8,31 @@
 import type { Plugin } from "@opencode/plugin"
 import type { Tasklet, PlanOutput, BuildOutput, Question } from "./Tasklet"
 import path from "path"
+import fs from "fs"
 import { Logger } from "./Logger"
+
+// `.git` is a file ("gitdir: ..."), not a directory, in a linked worktree or a
+// submodule, so `<repo>/.git/tracybot/...` can't exist there. Tracybot keeps
+// its config in the *common* git dir (where init.py writes it and where the
+// git hooks live), which for a linked worktree is found through the
+// `commondir` pointer inside the worktree's own git dir.
+function resolveGitDir(repoRoot: string): string {
+    const dotGit = path.join(repoRoot, ".git")
+    try {
+        if (!fs.statSync(dotGit).isFile()) return dotGit
+        const target = fs.readFileSync(dotGit, "utf8").match(/^gitdir:\s*(.+)$/m)?.[1]
+        if (!target) return dotGit
+
+        const gitDir = path.resolve(repoRoot, target.trim())
+        const commonDirFile = path.join(gitDir, "commondir")
+        if (fs.existsSync(commonDirFile)) {
+            return path.resolve(gitDir, fs.readFileSync(commonDirFile, "utf8").trim())
+        }
+        return gitDir
+    } catch {
+        return dotGit
+    }
+}
 
 type Context = Plugin.Context
 type SessionMessages = Awaited<ReturnType<Context["session"]["context"]>>
@@ -102,7 +126,7 @@ const tracybot: Plugin.Plugin = {
                 return path.resolve(repoRoot, process.env.TRACY_SNAPSHOT_SCRIPT)
             }
 
-            const configFile = Bun.file(path.join(repoRoot, ".git", "tracybot", "config"))
+            const configFile = Bun.file(path.join(resolveGitDir(repoRoot), "tracybot", "config"))
             if (!(await configFile.exists())) return
 
             // Try UTF-8 first; fall back to windows-1252 for config files written

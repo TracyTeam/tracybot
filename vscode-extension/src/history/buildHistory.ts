@@ -1,3 +1,4 @@
+import { normalizeQuestions } from "./normalizeQuestions";
 import { BuildHistoryFailureReason, BuildHistoryResult, Change, CommitInfo, DiffHunk, History, TaskletMessage, TaskletQuestion } from "./types";
 import {
   bleuSimilarity,
@@ -259,15 +260,23 @@ function buildTaskletMessages(tasklet_str: string): TaskletMessagesResult {
 // recorded under the "build" stage so downstream consumers (Research Mode's
 // has_build/build_prompt fields in particular) keep working without needing
 // to know which non-OpenCode agent shape they're looking at.
+//
+// Earlier non-editing turns carried in `context` (Claude Code only) become
+// the Plan stage, the same way OpenCode's planOutputs do.
 function parseFlatTurn(turn: any, agentSource: "claude-code" | "codex"): TaskletMessagesResult {
+  const context: any[] = Array.isArray(turn.context) ? turn.context : [];
   const messages: TaskletMessage[] = [
+    ...context.flatMap((c): TaskletMessage[] => [
+      { stage: "plan", type: "prompt", model: turn.model, message: c.prompt ?? "" },
+      { stage: "plan", type: "response", model: turn.model, message: c.response ?? "" },
+    ]),
     { stage: "build", type: "prompt", model: turn.model, message: turn.prompt ?? "" },
     { stage: "build", type: "response", model: turn.model, message: turn.response ?? "" },
   ];
 
   return {
     messages,
-    title: turn.prompt ?? `${agentSource} edit`,
+    title: context[0]?.prompt ?? turn.prompt ?? `${agentSource} edit`,
     taskletId: turn.id,
     sessionId: turn.sessionId,
     questions: [],
@@ -284,7 +293,7 @@ function parseOpenCodeTasklet(tasklet_obj: any, tasklet_str: string): TaskletMes
   title = tasklet_obj.title ?? "skill issue";
 
   // Handle questions and answers
-  const allQuestions: any[] = Array.isArray(tasklet_obj.questions) ? tasklet_obj.questions : [];
+  const allQuestions = normalizeQuestions(tasklet_obj.questions);
   const questionsByOutputId = new Map<string, any[]>();
   for (const q of allQuestions) {
     if (!questionsByOutputId.has(q.outputId)) {

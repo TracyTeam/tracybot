@@ -3,10 +3,12 @@ import * as vscode from 'vscode';
 import { buildHistory, describeBuildHistoryFailure, hydrateCache, getSerializedCache, clearCache } from './history/buildHistory';
 import { BuildHistoryFailureReason, History, TaskletUI, LineMap, Change } from './history/types';
 import { getBlameViewHtml } from './blameView';
+import { createAdrFromTasklet, refreshAdrStatuses } from './adrCommands';
 import { getRepoPath, mergeRemoteNotes } from './utils';
 import { checkOpencode } from './pluginCheck';
 import { checkHookBasedAgents } from './hookAgentPluginCheck';
-import { checkTracyInit } from './tracyInitCheck';
+import { checkTracyInit, initializeRepo } from './tracyInitCheck';
+import { isTracyInitialized } from './initState';
 import { checkResearchModeConsent, enableResearchModeForRepo, pickResearchModeTier } from './research/researchModeCheck';
 import { getConsentTier, getOrCreateParticipantId, getParticipantContext, isResearchModeEnabled } from './research/consent';
 import { readRepoConsent, writeRepoConsent } from './research/repoConsent';
@@ -209,11 +211,14 @@ export async function activate(context: vscode.ExtensionContext) {
     return undefined;
   }
 
-  const runInitialChecks = () => {
-    checkTracyInit(context);
+  // Research Mode is only asked about once the repo is initialized, since
+  // there is no Tasklet history to share otherwise.
+  const runInitialChecks = async () => {
     checkOpencode(context);
     checkHookBasedAgents(context);
-    checkResearchModeConsent(context);
+    if (await checkTracyInit(context)) {
+      await checkResearchModeConsent(context);
+    }
   };
 
   runInitialChecks();
@@ -253,6 +258,13 @@ export async function activate(context: vscode.ExtensionContext) {
       const consent = readRepoConsent(repoPath);
 
       if (!consent) {
+        if (!isTracyInitialized(repoPath)) {
+          const action = await vscode.window.showInformationMessage(
+            'Research Mode needs Tracybot to be initialized in this repository first.',
+            'Initialize'
+          );
+          if (action !== 'Initialize' || !(await initializeRepo(context))) { return; }
+        }
         await checkResearchModeConsent(context);
         await updateResearchStatusBar(context);
         return;
@@ -331,6 +343,12 @@ export async function activate(context: vscode.ExtensionContext) {
       const document = editor.document;
       const fileName = document.fileName.split(/[\\/]/).pop() ?? document.fileName;
 
+      // Which repository this panel is about, captured now while the file is
+      // the active editor. Later (when a button in the panel is clicked) the
+      // active editor is the webview, and asking again would fall back to the
+      // first repository of a multi-repo workspace.
+      const panelRepoPath = await getRepoPath();
+
       // Snapshot file content immediately before the async work so the webview
       // reflects exactly what the user sees at the moment they clicked.
       const fileContent = document.getText();
@@ -369,6 +387,17 @@ export async function activate(context: vscode.ExtensionContext) {
       const fileTasklets = relativePath ? (fileTaskletsMap.get(relativePath) ?? []) : [];
 
       if (!fileMap || fileMap.size === 0) {
+        const repoPath = await getRepoPath();
+        if (repoPath && !isTracyInitialized(repoPath)) {
+          const action = await vscode.window.showInformationMessage(
+            'AI Blame: Tracybot isn\'t initialized in this repository, so no AI changes are being recorded.',
+            'Initialize'
+          );
+          if (action === 'Initialize') {
+            await vscode.commands.executeCommand('tracybot-extension.initRepo');
+          }
+          return;
+        }
         vscode.window.showInformationMessage(
           `AI Blame: No AI-generated lines found in "${fileName}".`
         );
@@ -391,8 +420,20 @@ export async function activate(context: vscode.ExtensionContext) {
 
       panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'icon.png');
 
+      // The history this panel was rendered from, kept per panel: the global
+      // `history` is replaced whenever AI Blame is opened for any repository.
+      const panelHistory = history;
+
       const initialLine = editor.selection.active.line;
       panel.webview.html = getBlameViewHtml(fileContent, fileName, fileMap, fileTasklets, panel.webview, context.extensionUri, initialLine);
+
+      // The "Create ADR" button on a tasklet card.
+      const messageListener = panel.webview.onDidReceiveMessage(message => {
+        if (message?.type === 'createAdr' && typeof message.id === 'string') {
+          void createAdrFromTasklet(panelHistory, panelRepoPath, message.id);
+        }
+      });
+      panel.onDidDispose(() => messageListener.dispose());
     })
   );
 
@@ -414,6 +455,30 @@ export async function activate(context: vscode.ExtensionContext) {
     }
     refreshHistory();
   };
+
+  // Initialize — the way back for a repo that was declined (or dismissed)
+  // at the prompt checkTracyInit shows on open.
+  context.subscriptions.push(
+    vscode.commands.registerCommand('tracybot-extension.initRepo', async () => {
+      if (await initializeRepo(context)) {
+        await checkResearchModeConsent(context);
+        await updateResearchStatusBar(context);
+        refreshHistory();
+      }
+    })
+  );
+
+  // Re-computes the status of the ADRs created from AI Blame tasklets.
+  context.subscriptions.push(
+    vscode.commands.registerCommand('tracybot-extension.refreshAdrStatus', async () => {
+      const repoPath = await getRepoPath();
+      await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Window, title: 'Tracybot: reading AI history…', cancellable: false },
+        async () => { await buildHistoryAndSet(context); }
+      );
+      await refreshAdrStatuses(history, repoPath);
+    })
+  );
 
   // clearCache — clears the history cache
   context.subscriptions.push(

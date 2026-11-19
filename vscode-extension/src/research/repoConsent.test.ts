@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { execSync } from "child_process";
 import {
   readRepoConsent,
   writeRepoConsent,
@@ -58,5 +59,26 @@ describe("repoConsent", () => {
 
     assert.equal(readRepoConsent(repo), undefined);
     assert.equal(isResearchModeEnabledForRepo(repo), false);
+  });
+
+  test("consent can be written and read back from a linked worktree, where .git is a file", () => {
+    const main = makeRepo();
+    execSync("git init -q -b main && git config user.email t@e.com && git config user.name T", { cwd: main });
+    fs.writeFileSync(path.join(main, "a.txt"), "x\n");
+    execSync("git add -A && git commit -q -m init", { cwd: main });
+    const linked = path.join(main, "..", `linked-${path.basename(main)}`);
+    execSync(`git worktree add -q ${linked} -b feat`, { cwd: main });
+
+    try {
+      assert.ok(fs.statSync(path.join(linked, ".git")).isFile(), "test setup: .git should be a file here");
+
+      writeRepoConsent(linked, { decision: "declined" });
+      assert.equal(readRepoConsent(linked)?.decision, "declined");
+
+      // One decision per repository: the main checkout sees the same answer.
+      assert.equal(readRepoConsent(main)?.decision, "declined");
+    } finally {
+      fs.rmSync(linked, { recursive: true, force: true });
+    }
   });
 });

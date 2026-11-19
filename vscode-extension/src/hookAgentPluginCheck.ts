@@ -5,6 +5,7 @@ import { homedir } from 'os';
 import { spawn, execSync } from 'child_process';
 import { clearFailureCooldown, notifyFailureOnce } from './failureCooldown';
 import { getBunInstallCommand } from './bunInstall';
+import { applyHooks, isHooksConfigCurrent } from './hooksConfig';
 
 // Claude Code and Codex both install via merging a hooks config JSON (unlike
 // OpenCode's single-file-drop plugin — see pluginCheck.ts), so this is one
@@ -18,6 +19,8 @@ interface HookAgentConfig {
   hookScriptFilename: string;
   installDir: string;
   postToolUseMatcher: string;
+  // Only agents whose plugin handles a PreToolUse event (Claude Code's Bash baseline).
+  preToolUseMatcher?: string;
   failureCooldownKey: string;
 }
 
@@ -29,7 +32,8 @@ const AGENTS: HookAgentConfig[] = [
     hooksConfigPath: path.join(homedir(), '.claude', 'settings.json'),
     hookScriptFilename: 'tracybot-cc-hook.js',
     installDir: path.join(homedir(), '.claude', 'tracybot'),
-    postToolUseMatcher: 'Edit|Write|MultiEdit',
+    postToolUseMatcher: 'Edit|Write|MultiEdit|Bash',
+    preToolUseMatcher: 'Bash',
     failureCooldownKey: 'tracybot.claudeCodeInstallFailureAt',
   },
   {
@@ -89,18 +93,8 @@ function loadHooksConfig(configPath: string): any {
   }
 }
 
-function hasHookCommand(hookList: any[] | undefined, command: string): boolean {
-  return (hookList ?? []).some((entry: any) => (entry.hooks ?? []).some((h: any) => h.command === command));
-}
-
-// Checks both hooks installHooks() manages — checking only PostToolUse would
-// report "already configured" (and skip forever) even if Stop were somehow
-// missing, e.g. a user manually edited the config and removed just that one.
 function isAlreadyConfigured(agent: HookAgentConfig, scriptPath: string, bunPath: string): boolean {
-  const config = loadHooksConfig(agent.hooksConfigPath);
-  if (!config?.hooks) { return false; }
-  return hasHookCommand(config.hooks.PostToolUse, `${bunPath} ${scriptPath} post-tool-use`)
-    && hasHookCommand(config.hooks.Stop, `${bunPath} ${scriptPath} stop`);
+  return isHooksConfigCurrent(loadHooksConfig(agent.hooksConfigPath), { bunPath, scriptPath, ...agent });
 }
 
 async function downloadHookScript(agent: HookAgentConfig): Promise<string> {
@@ -124,22 +118,7 @@ function installHooks(agent: HookAgentConfig, scriptPath: string, bunPath: strin
     throw new Error(`${agent.hooksConfigPath} exists but isn't valid JSON — fix or remove it, then try again.`);
   }
 
-  config.hooks ??= {};
-
-  config.hooks.PostToolUse ??= [];
-  const postToolUseCommand = `${bunPath} ${scriptPath} post-tool-use`;
-  if (!hasHookCommand(config.hooks.PostToolUse, postToolUseCommand)) {
-    config.hooks.PostToolUse.push({
-      matcher: agent.postToolUseMatcher,
-      hooks: [{ type: 'command', command: postToolUseCommand }],
-    });
-  }
-
-  config.hooks.Stop ??= [];
-  const stopCommand = `${bunPath} ${scriptPath} stop`;
-  if (!hasHookCommand(config.hooks.Stop, stopCommand)) {
-    config.hooks.Stop.push({ hooks: [{ type: 'command', command: stopCommand }] });
-  }
+  applyHooks(config, { bunPath, scriptPath, ...agent });
 
   fs.mkdirSync(path.dirname(agent.hooksConfigPath), { recursive: true });
   fs.writeFileSync(agent.hooksConfigPath, JSON.stringify(config, null, 2) + '\n');

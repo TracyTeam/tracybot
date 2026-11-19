@@ -18,6 +18,58 @@ function initRepoWithCommit(dir: string): void {
   execSync('git add a.txt && git commit -q -m init', { cwd: dir });
 }
 
+
+// An OpenCode-shaped snapshot (plan outputs + build output + questions), as
+// the opencode plugin writes it.
+function commitOpenCodeEdit(dir: string, parentHash: string, description: object): string {
+  const tree = execSync('git write-tree', { cwd: dir, encoding: 'utf8' }).trim();
+  return execSync(`git commit-tree ${tree} -p ${parentHash}`, {
+    cwd: dir,
+    input: `session\n\n${JSON.stringify(description)}`,
+    encoding: 'utf8',
+    env: { ...process.env, GIT_AUTHOR_NAME: 'opencode', GIT_AUTHOR_EMAIL: 'opencode', GIT_COMMITTER_NAME: 'opencode', GIT_COMMITTER_EMAIL: 'opencode' },
+  }).trim();
+}
+
+suite('buildHistory with legacy question data', () => {
+  test('a question whose answer is a plain string (old plugin versions) no longer breaks the whole history', async () => {
+    // Real snapshots written by an early OpenCode plugin version stored the
+    // answer as a string; `answer.join` then threw, and AI Blame failed for
+    // the entire repository ("Failed to build history").
+    const dir = makeTempDir();
+    execSync('git init -q', { cwd: dir });
+    execSync('git config user.email test@example.com', { cwd: dir });
+    execSync('git config user.name Test', { cwd: dir });
+
+    const filePath = path.join(dir, 'app.py');
+    fs.writeFileSync(filePath, 'x = 1\n');
+    execSync('git add app.py && git commit -q -m init', { cwd: dir });
+    const base = execSync('git rev-parse HEAD', { cwd: dir, encoding: 'utf8' }).trim();
+
+    fs.writeFileSync(filePath, 'x = 1\ny = 2\n');
+    execSync('git add app.py', { cwd: dir });
+    const snapshot = commitOpenCodeEdit(dir, base, {
+      id: 'tasklet-legacy',
+      sessionId: 'ses1',
+      title: 'Add y',
+      planOutputs: [{ id: 'plan_0', prompt: 'what should we do?', response: 'Options below.' }],
+      buildOutput: { id: 'build_1', prompt: 'add y', response: 'Done.' },
+      questions: [{ question: 'What would you like to work on?', header: 'Work', options: [{ label: 'Bug fix', description: 'fix' }], answer: 'Bug fix', outputId: 'plan_0' }],
+    });
+    execSync(`git update-ref refs/tracy-local/bbbb2222 ${snapshot}`, { cwd: dir });
+    execSync('git config tracy.current-id bbbb2222', { cwd: dir });
+
+    const result = await buildHistory(dir);
+    assert.strictEqual(result.ok, true, 'a legacy string answer must not fail the build');
+    if (!result.ok) { return; }
+
+    const tasklet = result.history.files.find(f => f.path === 'app.py')?.tasklets.find(t => t.taskletId === 'tasklet-legacy');
+    assert.ok(tasklet, 'the tasklet is still attributed');
+    assert.deepStrictEqual(tasklet!.questions?.[0].answer, ['Bug fix']);
+    assert.ok(tasklet!.messages.some(m => m.message.includes('A: Bug fix')), 'the answer still shows up in the conversation');
+  });
+});
+
 suite('buildHistory failure reasons', () => {
   test('a non-git folder is reported as not-a-git-repo', async () => {
     const dir = makeTempDir();
@@ -58,7 +110,7 @@ suite('buildHistory failure reasons', () => {
 // Builds a real hidden tracy-local commit on top of `parent`, matching the
 // exact shape claude-code-plugin/tracy.py produces: subject line is a bare
 // tasklet id, body is the JSON turn record, author/committer is the agent.
-function commitAiEdit(dir: string, parentHash: string, taskletId: string, sessionId: string, prompt: string, timestamp: number): string {
+function commitAiEdit(dir: string, parentHash: string, taskletId: string, sessionId: string, prompt: string, timestamp: number, extra: Record<string, unknown> = {}): string {
   const tree = execSync('git write-tree', { cwd: dir, encoding: 'utf8' }).trim();
   const body = JSON.stringify({
     id: taskletId,
@@ -69,6 +121,7 @@ function commitAiEdit(dir: string, parentHash: string, taskletId: string, sessio
     response: `Did: ${prompt}`,
     promptCreatedAt: timestamp,
     responseCompletedAt: timestamp,
+    ...extra,
   });
   const message = `${taskletId}\n\n${body}`;
   const commit = execSync(`git commit-tree ${tree} -p ${parentHash}`, {
@@ -207,6 +260,38 @@ suite('buildHistory significance filtering across a tracy-local chain', () => {
       !tasklet || tasklet.lines.length === 0,
       'a tiny User->AI edit must not be credited to AI as a live line'
     );
+  });
+});
+
+suite('buildHistory shows earlier non-editing Claude Code turns as the Plan stage', () => {
+  test('context turns become plan messages and the first one becomes the title', async () => {
+    const dir = makeTempDir();
+    initRepoWithCommit(dir);
+    const baseCommit = execSync('git rev-parse HEAD', { cwd: dir, encoding: 'utf8' }).trim();
+
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'hello\nrequest id\n');
+    execSync('git add a.txt', { cwd: dir });
+    const commit = commitAiEdit(dir, baseCommit, 'tasklet-1', 'sess1', 'yes', 1000, {
+      context: [{ prompt: 'I want to add a small feature, what can it be', response: '1. Request IDs' }],
+    });
+
+    execSync(`git update-ref refs/tracy-local/chain-1 ${commit}`, { cwd: dir });
+    execSync('git config tracy.current-id chain-1', { cwd: dir });
+    execSync(`git reset -q --mixed ${baseCommit}`, { cwd: dir });
+
+    const result = await buildHistory(dir);
+    assert.strictEqual(result.ok, true);
+    if (!result.ok) { return; }
+
+    const tasklet = result.history.files.find(f => f.path === 'a.txt')?.tasklets.find(t => t.taskletId === 'tasklet-1');
+    assert.ok(tasklet, 'the AI edit should be attributed');
+    assert.strictEqual(tasklet!.name, 'I want to add a small feature, what can it be');
+    assert.deepStrictEqual(tasklet!.messages.map(m => `${m.stage}/${m.type}: ${m.message}`), [
+      'plan/prompt: I want to add a small feature, what can it be',
+      'plan/response: 1. Request IDs',
+      'build/prompt: yes',
+      'build/response: Did: yes',
+    ]);
   });
 });
 
