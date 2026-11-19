@@ -21,6 +21,10 @@ If you are using Tracybot normally, install the [VS Code extension](../vscode-ex
 2. `tracy.py` creates a hidden commit using Git's ref namespace (`refs/tracy-local/*`)
 3. These commits are never visible in normal Git history but can be queried by the VS Code extension
 
+## Requirements
+
+OpenCode 2.x. The plugin uses the 2.x plugin API (`export default { id, setup }`), and OpenCode 1.x can't load it.
+
 ## Installation
 
 ### Recommended: install from VS Code
